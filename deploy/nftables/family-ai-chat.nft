@@ -1,0 +1,42 @@
+#!/usr/sbin/nft -f
+# Host firewall example for Family AI Chat.
+# Generated live rules should come from `npm run sync:firewall -- --apply`;
+# this file is the reviewed baseline for a bare-metal install.
+#
+# This table ONLY filters inbound HTTP/HTTPS and blocks direct access to the
+# application port. SSH and other services are not touched. The cloud security
+# group remains the outer layer and must also allow 80/443 only for family IPs.
+#
+# Check:  nft -c -f deploy/nftables/family-ai-chat.nft
+# Apply:  sudo nft -f deploy/nftables/family-ai-chat.nft
+# Remove: sudo nft delete table inet family_ai_chat   (from server console)
+
+table inet family_ai_chat {
+  set web_allow_v4 {
+    type ipv4_addr
+    flags interval
+    # Replace with your family addresses / CIDRs.
+    elements = { 127.0.0.1/32 }
+  }
+
+  set web_allow_v6 {
+    type ipv6_addr
+    flags interval
+    elements = { ::1/128 }
+  }
+
+  chain input {
+    type filter hook input priority -10; policy accept;
+
+    # Loopback: Nginx -> app and local health checks.
+    iif lo accept
+
+    # Never expose the Node app directly; only Nginx talks to it.
+    tcp dport 3000 drop
+
+    # Default-deny web traffic unless the source is in the allowlist.
+    ip saddr @web_allow_v4 tcp dport { 80, 443 } accept
+    ip6 saddr @web_allow_v6 tcp dport { 80, 443 } accept
+    tcp dport { 80, 443 } drop
+  }
+}

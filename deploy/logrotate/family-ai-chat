@@ -1,0 +1,14 @@
+# Nginx logs for the Family AI Chat vhost. The app itself logs JSON to journald.
+/var/log/nginx/family-ai-chat.access.log
+/var/log/nginx/family-ai-chat.error.log {
+    daily
+    rotate 14
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        if [ -f /run/nginx.pid ]; then kill -USR1 "$(cat /run/nginx.pid)"; fi
+    endscript
+}
