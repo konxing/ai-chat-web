@@ -1,0 +1,278 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  USER
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum ProviderOwner {
+  GLOBAL
+  USER
+}
+
+enum MessageRole {
+  SYSTEM
+  USER
+  ASSISTANT
+}
+
+enum MessageStatus {
+  COMPLETE
+  PARTIAL
+  ERROR
+}
+
+enum AttachmentKind {
+  IMAGE
+  FILE
+  AUDIO
+}
+
+enum EmailTokenPurpose {
+  REGISTER
+  RESET
+  EMAIL_CHANGE
+}
+
+enum AuditStatus {
+  SUCCESS
+  FAILURE
+}
+
+model User {
+  id             String     @id @default(uuid())
+  username       String     @unique @db.VarChar(32)
+  email          String     @unique @db.VarChar(254)
+  emailVerified  DateTime?
+  passwordHash   String
+  role           Role       @default(USER)
+  status         UserStatus @default(ACTIVE)
+  displayName    String?    @db.VarChar(64)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  lastLoginAt    DateTime?
+
+  sessions       Session[]
+  chats          Chat[]
+  aiProviders    AiProvider[]
+  attachments    Attachment[]
+  loginLogs      LoginLog[]
+  auditLogs      AuditLog[]      @relation("AuditActor")
+  ipRulesCreated IpRule[]        @relation("IpRuleCreator")
+  configsUpdated SystemConfig[]  @relation("ConfigUpdater")
+
+  @@index([role])
+  @@index([status])
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  tokenHash  String    @unique @db.VarChar(64)
+  csrfHash   String    @db.VarChar(64)
+  userId     String
+  ip         String?   @db.VarChar(64)
+  userAgent  String?   @db.VarChar(512)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Chat {
+  id               String   @id @default(uuid())
+  userId           String
+  titleCiphertext  String   @db.Text
+  modelProviderId  String?
+  modelId          String?  @db.VarChar(128)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   AiProvider?  @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
+  messages   Message[]
+  attachments Attachment[]
+
+  @@index([userId, updatedAt])
+  @@index([modelProviderId])
+}
+
+model Message {
+  id                  String        @id @default(uuid())
+  chatId              String
+  role                MessageRole
+  contentCiphertext   String        @db.Text
+  modelId             String?       @db.VarChar(128)
+  providerId          String?
+  status              MessageStatus @default(COMPLETE)
+  errorCode           String?       @db.VarChar(64)
+  inputTokens         Int?
+  outputTokens        Int?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  chat        Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+
+  @@index([chatId, createdAt])
+}
+
+model Attachment {
+  id                      String         @id @default(uuid())
+  userId                  String
+  chatId                  String?
+  messageId               String?
+  kind                    AttachmentKind
+  originalNameCiphertext  String         @db.Text
+  mime                    String         @db.VarChar(128)
+  size                    Int
+  sha256                  String         @db.VarChar(64)
+  storageKey              String         @unique @db.VarChar(128)
+  extractedTextCiphertext String?        @db.Text
+  chunksCiphertext        String?        @db.Text
+  createdAt               DateTime       @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat    Chat?    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  message Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, chatId])
+  @@index([userId, createdAt])
+  @@index([messageId])
+}
+
+model AiProvider {
+  id                String        @id @default(uuid())
+  ownerType         ProviderOwner
+  userId            String?
+  name              String        @db.VarChar(64)
+  baseUrl           String        @db.VarChar(512)
+  apiKeyCiphertext  String        @db.Text
+  modelId           String        @db.VarChar(128)
+  capabilities      Json
+  params            Json?
+  enabled           Boolean       @default(true)
+  isDefault         Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user   User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chats  Chat[]
+
+  @@index([ownerType, enabled])
+  @@index([userId])
+}
+
+model IpRule {
+  id            String    @id @default(uuid())
+  cidr          String    @unique @db.VarChar(64)
+  label         String?   @db.VarChar(128)
+  enabled       Boolean   @default(true)
+  expiresAt     DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastMatchedAt DateTime?
+
+  createdBy User? @relation("IpRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([enabled])
+  @@index([expiresAt])
+}
+
+model IpAccessLog {
+  id        String   @id @default(uuid())
+  ip        String   @db.VarChar(64)
+  path      String   @db.VarChar(512)
+  method    String   @db.VarChar(16)
+  allowed   Boolean
+  reason    String?  @db.VarChar(128)
+  userAgent String?  @db.VarChar(512)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([ip, createdAt])
+  @@index([allowed, createdAt])
+}
+
+model LoginLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  identifier String?  @db.VarChar(254)
+  ip         String   @db.VarChar(64)
+  userAgent  String?  @db.VarChar(512)
+  success    Boolean
+  reason     String?  @db.VarChar(128)
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([ip, createdAt])
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  actorId    String?
+  actorLabel String      @db.VarChar(128)
+  action     String      @db.VarChar(128)
+  targetType String?     @db.VarChar(64)
+  targetId   String?     @db.VarChar(64)
+  before     Json?
+  after      Json?
+  ip         String?     @db.VarChar(64)
+  userAgent  String?     @db.VarChar(512)
+  status     AuditStatus @default(SUCCESS)
+  error      String?     @db.VarChar(512)
+  createdAt  DateTime    @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+model SystemConfig {
+  key         String   @id @db.VarChar(64)
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  updatedBy User? @relation("ConfigUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model EmailToken {
+  id         String            @id @default(uuid())
+  email      String            @db.VarChar(254)
+  purpose    EmailTokenPurpose
+  codeHash   String            @db.VarChar(64)
+  username   String?           @db.VarChar(32)
+  userId     String?
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int               @default(0)
+  ip         String?           @db.VarChar(64)
+  createdAt  DateTime          @default(now())
+
+  @@index([email, purpose, createdAt])
+  @@index([userId])
+  @@index([expiresAt])
+}
