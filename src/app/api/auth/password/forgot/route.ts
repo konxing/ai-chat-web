@@ -3,15 +3,22 @@ import { api, assertSameOrigin, getRequestIp, jsonError, readJson } from '@/lib/
 import { forgotPasswordSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/rate-limit';
 import { hourlyTokenCount, issueEmailToken, secondsUntilResendAllowed } from '@/lib/email-token';
-import { sendVerificationEmail } from '@/lib/email';
+import { emailChannel, sendVerificationEmail } from '@/lib/email';
 import { log } from '@/lib/logger';
 
 export const runtime = 'nodejs';
 
-const GENERIC = {
-  sent: true,
-  message: '如果该邮箱已注册，我们已发送重置验证码，请检查收件箱（含垃圾邮件目录）'
-};
+/** 不泄露邮箱是否注册，同时如实说明验证码被投递到了哪里。 */
+function genericResponse() {
+  const channel = emailChannel();
+  const where =
+    channel === 'console'
+      ? '验证码会输出到服务器控制台（当前为开发模式，不会真实发送邮件）'
+      : channel === 'file'
+        ? '验证码会写入服务器本地邮件目录（当前为测试模式，不会真实发送邮件）'
+        : '我们已发送重置验证码，请检查收件箱（含垃圾邮件目录）';
+  return { sent: true, channel, message: `如果该邮箱已注册，${where}` };
+}
 
 export async function POST(req: Request) {
   return api(async () => {
@@ -47,6 +54,6 @@ export async function POST(req: Request) {
         log.warn('auth.forgot_email_failed', { userId: user.id });
       }
     }
-    return GENERIC;
+    return genericResponse();
   });
 }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Eye, EyeOff, Mail, ShieldCheck } from 'lucide-react';
-import { apiFetch, errorMessage } from '@/lib/client-api';
+import { apiFetch, codeSentMessage, errorMessage } from '@/lib/client-api';
 import { Alert, Spinner } from '@/components/ui';
 
 function PasswordInput({
@@ -168,11 +168,11 @@ export function RegisterForm({ registrationOpen }: { registrationOpen: boolean }
     }
     setBusy(true);
     try {
-      await apiFetch('/api/auth/register/request', {
+      const data = await apiFetch<{ channel?: string }>('/api/auth/register/request', {
         json: { username: username.trim(), email: email.trim() }
       });
       setStep(2);
-      setInfo(`验证码已发送至 ${email.trim()}，10 分钟内有效。`);
+      setInfo(codeSentMessage(data.channel, email.trim()));
       startCountdown();
     } catch (err) {
       setError(errorMessage(err));
@@ -186,10 +186,10 @@ export function RegisterForm({ registrationOpen }: { registrationOpen: boolean }
     setError('');
     setBusy(true);
     try {
-      await apiFetch('/api/auth/register/request', {
+      const data = await apiFetch<{ channel?: string }>('/api/auth/register/request', {
         json: { username: username.trim(), email: email.trim() }
       });
-      setInfo('新的验证码已发送，请查收。');
+      setInfo(codeSentMessage(data.channel, email.trim()));
       startCountdown();
     } catch (err) {
       setError(errorMessage(err));

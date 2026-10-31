@@ -36,6 +36,12 @@ function getTransporter(): Transporter {
   return transporter;
 }
 
+/** 当前生效的投递通道，供接口如实告知前端「验证码到底发去了哪里」。 */
+export function emailChannel(): 'smtp' | 'console' | 'file' {
+  const transport = loadEnv().EMAIL_TRANSPORT;
+  return transport === 'smtp' ? 'smtp' : transport;
+}
+
 function subjectFor(purpose: EmailTokenPurpose): string {
   if (purpose === 'REGISTER') return '澄境 · 注册验证码';
   if (purpose === 'EMAIL_CHANGE') return '澄境 · 更换邮箱验证码';

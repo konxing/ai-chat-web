@@ -4,7 +4,7 @@ import { registerRequestSchema } from '@/lib/validation';
 import { getSystemSettings } from '@/lib/config';
 import { rateLimit } from '@/lib/rate-limit';
 import { hourlyTokenCount, issueEmailToken, secondsUntilResendAllowed } from '@/lib/email-token';
-import { sendVerificationEmail } from '@/lib/email';
+import { emailChannel, sendVerificationEmail } from '@/lib/email';
 
 export const runtime = 'nodejs';
 
@@ -50,6 +50,6 @@ export async function POST(req: Request) {
       });
       throw new ApiError(503, 'EMAIL_UNAVAILABLE', '邮件服务暂时不可用，请联系管理员');
     }
-    return { sent: true, expiresIn: 600 };
+    return { sent: true, expiresIn: 600, channel: emailChannel() };
   });
 }

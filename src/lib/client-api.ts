@@ -132,6 +132,13 @@ export function formatDuration(seconds: number): string {
 
 export { cn } from './cn';
 
+/** 按服务端真实投递通道描述「验证码去哪了」，开发模式下不谎称已发到邮箱。 */
+export function codeSentMessage(channel: string | undefined, target: string): string {
+  if (channel === 'console') return `开发模式：验证码已输出到服务器控制台，${target} 不会收到邮件。`;
+  if (channel === 'file') return '开发模式：验证码已写入服务器本地邮件目录，未真实发送邮件。';
+  return `验证码已发送至 ${target}，10 分钟内有效。`;
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
