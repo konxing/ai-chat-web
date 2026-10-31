@@ -27,6 +27,14 @@ export interface AdminIpRule {
   updatedAt: string;
 }
 
+export interface AdminLoginLock {
+  ip: string;
+  fails: number;
+  firstFailAt: string;
+  lockedUntil: string | null;
+  updatedAt: string;
+}
+
 export interface ServiceStatus {
   uptimeSeconds: number;
   nodeVersion: string;

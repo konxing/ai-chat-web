@@ -228,6 +228,16 @@ model LoginLog {
   @@index([ip, createdAt])
 }
 
+model LoginLock {
+  ip          String   @id @db.VarChar(64)
+  fails       Int      @default(0)
+  firstFailAt DateTime @default(now())
+  lockedUntil DateTime?
+  updatedAt   DateTime @updatedAt
+
+  @@index([lockedUntil])
+}
+
 model AuditLog {
   id         String      @id @default(uuid())
   actorId    String?

@@ -5,12 +5,14 @@ import {
   Clock,
   Copy,
   Globe2,
+  Lock,
   Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
   ShieldOff,
   Trash2,
+  Unlock,
   Wifi
 } from 'lucide-react';
 import { apiFetch, errorMessage, formatDateTime, timeAgo } from '@/lib/client-api';
@@ -25,7 +27,7 @@ import {
   useReauth,
   useToast
 } from '@/components/ui';
-import type { AdminIpRule } from '@/lib/admin-types';
+import type { AdminIpRule, AdminLoginLock } from '@/lib/admin-types';
 
 function toLocalInput(iso: string | null): string {
   if (!iso) return '';
@@ -275,6 +277,8 @@ export function IpRulesTab() {
         }}
       />
 
+      <LoginLocksPanel />
+
       <div className="panel p-5">
         <h2 className="text-[14px] font-semibold text-white">三层防护说明</h2>
         <div className="mt-3 grid gap-3 text-[12px] leading-relaxed text-white/45 md:grid-cols-3">
@@ -292,6 +296,119 @@ export function IpRulesTab() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LoginLocksPanel() {
+  const { requestPassword } = useReauth();
+  const { push } = useToast();
+  const [locks, setLocks] = useState<AdminLoginLock[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await apiFetch<{ locks: AdminLoginLock[] }>('/api/admin/login-locks');
+      setLocks(data.locks);
+      setNow(Date.now());
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (locks.length === 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [locks.length]);
+
+  async function release(ip?: string) {
+    const password = await requestPassword(
+      ip ? `解除 IP ${ip} 的登录锁定需要验证管理员身份。` : '解除全部登录锁定需要验证管理员身份。'
+    );
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ released: number }>('/api/admin/login-locks', {
+        method: 'DELETE',
+        json: ip ? { ip, confirmPassword: password } : { confirmPassword: password }
+      });
+      if (data.released > 0) push(`已解除 ${data.released} 个锁定`);
+      else push('该 IP 已无生效中的锁定', 'error');
+      void load();
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel p-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-white">登录失败锁定</h2>
+          <p className="mt-1 text-[12px] leading-relaxed text-white/40">
+            同一 IP 连续输错密码 3 次即被锁定 5 分钟。锁定记录存在数据库中，刷新页面或重启服务都不会失效。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" className="btn-ghost" onClick={() => void load()}>
+            <RefreshCw className="h-4 w-4" /> 刷新
+          </button>
+          {locks.length > 0 ? (
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => release()}>
+              <Unlock className="h-4 w-4" /> 全部解除
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mt-3">
+          <Alert tone="error">{error}</Alert>
+        </div>
+      ) : null}
+
+      {loading && locks.length === 0 ? (
+        <LoadingBlock label="加载锁定记录" />
+      ) : locks.length === 0 ? (
+        <p className="mt-3 text-[12.5px] text-white/35">当前没有被锁定的 IP。</p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {locks.map((lock) => {
+            const remainSec = Math.max(0, Math.ceil((new Date(lock.lockedUntil ?? 0).getTime() - now) / 1000));
+            return (
+              <div key={lock.ip} className="flex flex-wrap items-center gap-3 rounded-xl bg-white/[0.03] px-3.5 py-2.5">
+                <Lock className="h-4 w-4 shrink-0 text-amber-300/70" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-[13.5px] text-white/85">{lock.ip}</span>
+                    <span className="badge badge-amber">剩余 {remainSec} 秒</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-white/30">
+                    累计失败 {lock.fails} 次 · 锁定至 {formatDateTime(lock.lockedUntil)}
+                  </div>
+                </div>
+                <button type="button" className="btn-ghost" disabled={busy} onClick={() => release(lock.ip)}>
+                  <Unlock className="h-4 w-4" /> 解除
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

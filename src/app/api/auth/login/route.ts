@@ -3,6 +3,7 @@ import { api, ApiError, assertSameOrigin, getRequestIp, getUserAgent, jsonError,
 import { loginSchema } from '@/lib/validation';
 import { verifyPassword } from '@/lib/password';
 import { rateLimit } from '@/lib/rate-limit';
+import { checkLoginLock, clearLoginLock, registerLoginFailure } from '@/lib/login-lock-store';
 import { createSession, setSessionCookies } from '@/lib/session';
 import { publicSettings, publicUser } from '@/lib/serializers';
 import { writeAudit } from '@/lib/audit';
@@ -20,6 +21,20 @@ export async function POST(req: Request) {
     }
     const body = loginSchema.parse(await readJson(req));
     const identifier = body.identifier.toLowerCase();
+
+    // 锁定检查放在 argon2 之前：被锁的 IP 不再消耗密码哈希的 CPU。
+    const lock = await checkLoginLock(ip);
+    if (lock.locked) {
+      await prisma.loginLog.create({
+        data: { identifier: body.identifier.slice(0, 254), ip, userAgent, success: false, reason: 'locked' }
+      });
+      return jsonError(
+        429,
+        'LOGIN_LOCKED',
+        `该网络连续输错密码次数过多，请在 ${lock.retryAfterSec} 秒后重试，或联系管理员解除锁定`
+      );
+    }
+
     const idLimit = rateLimit(`login:id:${identifier}`, 8, 15 * 60 * 1000);
     if (!idLimit.ok) {
       return jsonError(429, 'RATE_LIMITED', `该账号尝试次数过多，请在 ${idLimit.retryAfterSec} 秒后重试`);
@@ -43,7 +58,19 @@ export async function POST(req: Request) {
           reason: user ? 'bad_password' : 'unknown_user'
         }
       });
-      throw new ApiError(401, 'INVALID_CREDENTIALS', '用户名/邮箱或密码错误');
+      const verdict = await registerLoginFailure(ip);
+      if (verdict.locked) {
+        return jsonError(
+          429,
+          'LOGIN_LOCKED',
+          `密码错误次数过多，该网络已被锁定，请在 ${verdict.retryAfterSec} 秒后重试或联系管理员解除`
+        );
+      }
+      return jsonError(
+        401,
+        'INVALID_CREDENTIALS',
+        `用户名/邮箱或密码错误，本网络还可尝试 ${verdict.attemptsLeft} 次`
+      );
     }
     if (user.status !== 'ACTIVE') {
       await prisma.loginLog.create({
@@ -52,6 +79,7 @@ export async function POST(req: Request) {
       throw new ApiError(403, 'ACCOUNT_DISABLED', '账号已被禁用，请联系管理员');
     }
 
+    await clearLoginLock(ip);
     const created = await createSession({ userId: user.id, ip, userAgent });
     await setSessionCookies(created);
     const updated = await prisma.user.update({
