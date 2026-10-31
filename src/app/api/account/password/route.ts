@@ -1,8 +1,9 @@
 import { prisma } from '@/lib/prisma';
-import { api, ApiError, getRequestIp, getUserAgent, readJson } from '@/lib/http';
+import { api, ApiError, getRequestIp, getUserAgent, jsonError, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { changePasswordSchema } from '@/lib/validation';
 import { hashPassword, passwordPolicyError, verifyPassword } from '@/lib/password';
+import { rateLimit } from '@/lib/rate-limit';
 import { revokeAllSessions } from '@/lib/session';
 import { writeAudit } from '@/lib/audit';
 
@@ -12,6 +13,8 @@ export async function POST(req: Request) {
   return api(async () => {
     const { user, session } = await requireUser(req);
     const body = changePasswordSchema.parse(await readJson(req));
+    const limit = rateLimit(`password-change:${user.id}`, 8, 15 * 60 * 1000);
+    if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `尝试过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
     const ok = await verifyPassword(user.passwordHash, body.currentPassword);
     if (!ok) throw new ApiError(403, 'WRONG_PASSWORD', '当前密码不正确');
     const policy = passwordPolicyError(body.newPassword, { username: user.username, email: user.email });
