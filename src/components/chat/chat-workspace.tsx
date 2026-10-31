@@ -24,6 +24,8 @@ import {
   MessageSquarePlus,
   Mic,
   Paperclip,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Search,
   Settings,
@@ -89,6 +91,8 @@ const SUGGESTIONS = [
   '把这份 PDF 的要点总结成清单'
 ];
 
+const SIDEBAR_COLLAPSED_KEY = 'family-ai.sidebar-collapsed';
+
 export function ChatWorkspace({
   user,
   settings,
@@ -115,6 +119,7 @@ export function ChatWorkspace({
     initialChat?.providerId ?? providers.find((p) => p.isDefault)?.id ?? providers[0]?.id ?? ''
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [renameTarget, setRenameTarget] = useState<ChatSummaryDto | null>(null);
@@ -171,6 +176,27 @@ export function ChatWorkspace({
     const timer = setTimeout(() => setNotice(''), 5000);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [toggleSidebar]);
 
   const filteredChats = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -637,8 +663,10 @@ export function ChatWorkspace({
       ) : null}
 
       <aside
+        id="chat-sidebar"
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col border-r border-white/[0.07] bg-[#080b12]/95 backdrop-blur-2xl transition-transform duration-300 lg:static lg:z-auto lg:w-[300px] lg:translate-x-0 xl:w-[320px]',
+          'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.07] bg-[#080b12]/95 backdrop-blur-2xl transition-[transform,width,visibility] duration-300 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
+          sidebarCollapsed ? 'lg:invisible lg:w-0 lg:max-w-0' : 'lg:w-[300px] xl:w-[320px]',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -647,9 +675,19 @@ export function ChatWorkspace({
             <BrandMark size={30} />
             <span className="truncate text-[15px] font-semibold text-white/90">{settings.siteName}</span>
           </Link>
-          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center">
+            <button
+              type="button"
+              className="btn-icon hidden lg:inline-flex"
+              onClick={toggleSidebar}
+              aria-label="收起侧栏"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+            <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="px-3 pt-2">
@@ -782,6 +820,16 @@ export function ChatWorkspace({
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-[#080b12]/55 px-3 backdrop-blur-xl sm:px-4">
           <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开侧栏">
             <Menu className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="btn-icon hidden lg:inline-flex"
+            onClick={toggleSidebar}
+            aria-controls="chat-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[13.5px] font-medium text-white/85">{chat?.title || '新对话'}</h1>
