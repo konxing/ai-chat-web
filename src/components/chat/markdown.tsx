@@ -7,6 +7,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import rehypeHighlight from 'rehype-highlight';
 import { Check, Copy } from 'lucide-react';
+import { linkKind } from '@/lib/link-safety';
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
@@ -43,9 +44,9 @@ export function Markdown({ children }: { children: string }) {
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
           a: ({ href, children: linkChildren }) => {
-            const safe = typeof href === 'string' && /^(https?:|mailto:|\/)/i.test(href);
-            if (!safe) return <span>{linkChildren}</span>;
-            const external = /^https?:/i.test(href);
+            const kind = linkKind(href);
+            if (!kind) return <span>{linkChildren}</span>;
+            const external = kind === 'http';
             return (
               <a
                 href={href}

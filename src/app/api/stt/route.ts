@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma';
-import { api, ApiError, getRequestIp, readJson } from '@/lib/http';
+import { api, ApiError, getRequestIp, readMultipartLimited, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { inspectUpload } from '@/lib/files';
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     if (!contentType.includes('multipart/form-data')) {
       throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', '必须使用 multipart/form-data');
     }
-    const form = await req.formData();
+    const form = await readMultipartLimited(req, 16 * 1024 * 1024);
     const file = form.get('audio');
     if (!(file instanceof File)) throw new ApiError(400, 'MISSING_AUDIO', '没有收到音频');
     if (file.size > 15 * 1024 * 1024) throw new ApiError(413, 'AUDIO_TOO_LARGE', '音频文件过大');

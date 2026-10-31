@@ -1,4 +1,4 @@
-import { api, ApiError, getRequestIp, readJson } from '@/lib/http';
+import { api, ApiError, getRequestIp, readMultipartLimited, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { getChatOwned } from '@/lib/chats';
 import { maxUploadBytes, publicAttachment, storeUpload } from '@/lib/files';
@@ -24,12 +24,7 @@ export async function POST(req: Request) {
       throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', '必须使用 multipart/form-data');
     }
 
-    let form: FormData;
-    try {
-      form = await req.formData();
-    } catch {
-      throw new ApiError(400, 'INVALID_FORM', '上传表单无效');
-    }
+    const form = await readMultipartLimited(req, maxBytes + 1_000_000);
     const file = form.get('file');
     const chatId = String(form.get('chatId') || '');
     if (!(file instanceof File)) throw new ApiError(400, 'MISSING_FILE', '没有选择文件');
