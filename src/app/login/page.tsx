@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getPageUser } from '@/lib/auth';
 import { getSystemSettings } from '@/lib/config';
+import { prisma } from '@/lib/prisma';
+import { AdminContact } from '@/components/auth/admin-contact';
 import { AuthShell } from '@/components/auth/auth-shell';
 import { LoginForm } from '@/components/auth/forms';
 
@@ -13,6 +15,13 @@ export default async function LoginPage() {
   const user = await getPageUser();
   if (user) redirect('/chat');
   const settings = await getSystemSettings();
+  const adminEmail = settings.registrationOpen
+    ? null
+    : ((await prisma.user.findFirst({
+        where: { role: 'OWNER', status: 'ACTIVE' },
+        select: { email: true },
+        orderBy: { createdAt: 'asc' }
+      }))?.email ?? null);
   return (
     <AuthShell
       siteName={settings.siteName}
@@ -21,9 +30,13 @@ export default async function LoginPage() {
       footer={
         <>
           还没有账号？
-          <Link href={settings.registrationOpen ? '/register' : '/login'} className="ml-1 text-white/60 hover:text-aurora-300">
-            {settings.registrationOpen ? '邮箱注册' : '联系管理员'}
-          </Link>
+          {settings.registrationOpen ? (
+            <Link href="/register" className="ml-1 text-white/60 hover:text-aurora-300">
+              邮箱注册
+            </Link>
+          ) : (
+            <AdminContact email={adminEmail} />
+          )}
         </>
       }
     >
