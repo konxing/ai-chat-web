@@ -554,24 +554,31 @@ export async function getServiceStatus(): Promise<ServiceStatus> {
   };
 }
 
+/** 每批并发的 stat 数量：串行往返太慢，一次性全开又会把事件循环压满。 */
+const STAT_BATCH_SIZE = 32;
+
 async function directorySize(dir: string): Promise<number> {
-  let total = 0;
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
     return 0;
   }
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) total += await directorySize(full);
-    else if (entry.isFile()) {
-      try {
-        total += (await fs.stat(full)).size;
-      } catch {
-        /* ignore */
-      }
-    }
+  let total = 0;
+  for (let i = 0; i < entries.length; i += STAT_BATCH_SIZE) {
+    const sizes = await Promise.all(
+      entries.slice(i, i + STAT_BATCH_SIZE).map(async (entry) => {
+        if (!entry.isFile() && !entry.isDirectory()) return 0;
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) return directorySize(full);
+        try {
+          return (await fs.stat(full)).size;
+        } catch {
+          return 0;
+        }
+      })
+    );
+    for (const size of sizes) total += size;
   }
   return total;
 }
@@ -819,18 +826,17 @@ export async function storageBreakdown() {
 
 export async function cleanupOrphanAttachments(actorId: string): Promise<{ removed: number; bytes: number }> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // 只取清理需要的三列，并且一次查完：原来的第二条 findMany 不带 select，
+  // 会把每个孤儿附件的分块密文整段读进内存，仅为拿一个 storageKey。
   const orphans = await prisma.attachment.findMany({
     where: { messageId: null, createdAt: { lt: cutoff } },
-    select: { id: true, size: true }
+    select: { id: true, size: true, storageKey: true }
   });
   if (!orphans.length) return { removed: 0, bytes: 0 };
   const env = loadEnv();
   const root = path.resolve(env.UPLOAD_DIR);
-  const rows = await prisma.attachment.findMany({
-    where: { id: { in: orphans.map((o) => o.id) } }
-  });
-  for (const row of rows) {
-    const resolved = path.resolve(root, row.storageKey);
+  for (const orphan of orphans) {
+    const resolved = path.resolve(root, orphan.storageKey);
     if (resolved.startsWith(`${root}${path.sep}`)) await fs.unlink(resolved).catch(() => undefined);
   }
   await prisma.attachment.deleteMany({ where: { id: { in: orphans.map((o) => o.id) } } });

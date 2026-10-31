@@ -1,4 +1,3 @@
-import { prisma } from '@/lib/prisma';
 import {
   api,
   ApiError,
@@ -14,7 +13,6 @@ import {
   buildConversation,
   getChatOwned,
   getOlderMessages,
-  maybeSetGeneratedTitle,
   publicMessage,
   saveAssistantMessage,
   saveUserMessage
@@ -73,11 +71,12 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     throw new ApiError(400, 'MODEL_NO_FILES', '当前模型未启用文件理解能力，请切换模型或移除文件');
   }
 
-  const userMessage = await saveUserMessage({ chatId, content: body.content, attachments });
-  await maybeSetGeneratedTitle(chat, body.content);
-  await prisma.chat.update({
-    where: { id: chatId },
-    data: { modelProviderId: provider.id, modelId: provider.modelId }
+  const userMessage = await saveUserMessage({
+    chat,
+    content: body.content,
+    attachments,
+    providerId: provider.id,
+    modelId: provider.modelId
   });
   const messages = await buildConversation({
     chatId,

@@ -9,6 +9,8 @@ import {
   imageDataUrls,
   publicAttachment,
   readAttachmentBuffer,
+  ATTACHMENT_PUBLIC_SELECT,
+  type AttachmentSummary,
   type PublicAttachment
 } from './files';
 import { capabilitiesOf } from './providers';
@@ -70,7 +72,7 @@ export function decryptMessage(message: Pick<Message, 'id' | 'contentCiphertext'
 }
 
 export function publicMessage(
-  message: Message & { attachments?: Attachment[] }
+  message: Message & { attachments?: AttachmentSummary[] }
 ): ChatMessageDto {
   return {
     id: message.id,
@@ -152,7 +154,7 @@ export async function getChatDetail(chatId: string, userId: string): Promise<Cha
       messages: {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: MESSAGE_PAGE_SIZE + 1,
-        include: { attachments: true }
+        include: { attachments: { select: ATTACHMENT_PUBLIC_SELECT } }
       }
     }
   });
@@ -185,7 +187,7 @@ export async function getOlderMessages(
     where: { chatId, createdAt: { lt: cursor.createdAt } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
-    include: { attachments: true }
+    include: { attachments: { select: ATTACHMENT_PUBLIC_SELECT } }
   });
   const hasOlder = rows.length > limit;
   return { messages: rows.slice(0, limit).reverse().map((message) => publicMessage(message)), hasOlder };
@@ -216,7 +218,11 @@ export async function setChatModel(
 
 export async function deleteChat(chatId: string, userId: string): Promise<void> {
   await getChatOwned(chatId, userId);
-  const attachments = await prisma.attachment.findMany({ where: { chatId, userId } });
+  // 只需要 id 与落盘位置：这两列之外（尤其两个 TEXT 大列）对删文件没用。
+  const attachments = await prisma.attachment.findMany({
+    where: { chatId, userId },
+    select: { id: true, storageKey: true }
+  });
   if (attachments.length) {
     await prisma.attachment.deleteMany({ where: { id: { in: attachments.map((a) => a.id) } } });
   }
@@ -228,7 +234,10 @@ export async function deleteChat(chatId: string, userId: string): Promise<void> 
 }
 
 export async function deleteAllAttachmentsForUser(userId: string): Promise<number> {
-  const attachments = await prisma.attachment.findMany({ where: { userId } });
+  const attachments = await prisma.attachment.findMany({
+    where: { userId },
+    select: { id: true, storageKey: true }
+  });
   for (const attachment of attachments) {
     const { deleteAttachmentAndFile } = await import('./files');
     await deleteAttachmentAndFile(attachment).catch(() => undefined);
@@ -236,17 +245,36 @@ export async function deleteAllAttachmentsForUser(userId: string): Promise<numbe
   return attachments.length;
 }
 
+/** 首条用户消息决定会话标题：纯计算，写库交给 saveUserMessage 的那一次 UPDATE。 */
+export function deriveGeneratedTitle(chat: Chat, firstUserText: string): string | null {
+  if (decryptChatTitle(chat) !== '新对话') return null;
+  const title = firstUserText
+    .replace(/```[\s\S]*?```/g, ' 代码 ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
+  return title || null;
+}
+
 export async function saveUserMessage(input: {
-  chatId: string;
+  chat: Chat;
   content: string;
   attachments: Attachment[];
+  providerId: string;
+  modelId: string;
 }): Promise<Message> {
   const id = randomUUID();
+  const chatData: Prisma.ChatUncheckedUpdateInput = {
+    modelProviderId: input.providerId,
+    modelId: input.modelId
+  };
+  const title = deriveGeneratedTitle(input.chat, input.content);
+  if (title) chatData.titleCiphertext = encryptString(title, `chat-title:${input.chat.id}`);
   return prisma.$transaction(async (tx) => {
     const message = await tx.message.create({
       data: {
         id,
-        chatId: input.chatId,
+        chatId: input.chat.id,
         role: 'USER',
         contentCiphertext: encryptMessage(input.content, id),
         status: 'COMPLETE'
@@ -256,7 +284,7 @@ export async function saveUserMessage(input: {
       const result = await tx.attachment.updateMany({
         where: {
           id: { in: input.attachments.map((a) => a.id) },
-          chatId: input.chatId,
+          chatId: input.chat.id,
           messageId: null
         },
         data: { messageId: id }
@@ -265,7 +293,9 @@ export async function saveUserMessage(input: {
         throw new ApiError(400, 'ATTACHMENT_STATE_CHANGED', '附件状态已变化，请重新上传');
       }
     }
-    await tx.chat.update({ where: { id: input.chatId }, data: { updatedAt: new Date() } });
+    // 一次 UPDATE 写回「活跃时间 + 本轮模型 + 自动标题」：updatedAt 是 @updatedAt，
+    // Prisma 会自己带上，不必再单发一条只改时间戳的语句。
+    await tx.chat.update({ where: { id: input.chat.id }, data: chatData });
     return message;
   });
 }
@@ -294,21 +324,6 @@ export async function saveAssistantMessage(input: {
       inputTokens: input.inputTokens ?? null,
       outputTokens: input.outputTokens ?? null
     }
-  });
-}
-
-export async function maybeSetGeneratedTitle(chat: Chat, firstUserText: string): Promise<void> {
-  const current = decryptChatTitle(chat);
-  if (current !== '新对话') return;
-  const title = firstUserText
-    .replace(/```[\s\S]*?```/g, ' 代码 ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 40);
-  if (!title) return;
-  await prisma.chat.update({
-    where: { id: chat.id },
-    data: { titleCiphertext: encryptString(title, `chat-title:${chat.id}`) }
   });
 }
 
@@ -392,7 +407,8 @@ export async function listAttachmentLibrary(userId: string): Promise<PublicAttac
   const rows = await prisma.attachment.findMany({
     where: { userId },
     orderBy: { createdAt: 'desc' },
-    take: 500
+    take: 500,
+    select: ATTACHMENT_PUBLIC_SELECT
   });
   return rows.map(publicAttachment);
 }

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, rename, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { Attachment, AttachmentKind } from '@prisma/client';
+import type { Attachment, AttachmentKind, Prisma } from '@prisma/client';
 import { fileTypeFromBuffer } from 'file-type';
 import mammoth from 'mammoth';
 import { extractText } from 'unpdf';
@@ -58,6 +58,11 @@ function extensionOf(name: string): string {
   return idx === -1 ? '' : name.slice(idx + 1).toLowerCase();
 }
 
+/**
+ * 分块是有损索引：最多 200 块，超出上限之后的正文不进 chunks。
+ * 所以 extractedTextCiphertext 不能被 chunks 取代——它是长文档唯一完整的原文副本，
+ * 也是没有分块时的兜底检索源。两列都留着不是冗余。
+ */
 function chunkText(text: string, size = 3000, overlap = 200): string[] {
   const chunks: string[] = [];
   const maxChunks = 200;
@@ -218,7 +223,7 @@ export async function storeUpload(input: {
   }
 }
 
-export function attachmentName(attachment: Attachment): string {
+export function attachmentName(attachment: Pick<Attachment, 'id' | 'originalNameCiphertext'>): string {
   try {
     return decryptString(attachment.originalNameCiphertext, `attachment-name:${attachment.id}`);
   } catch {
@@ -257,7 +262,26 @@ export interface PublicAttachment {
   createdAt: string;
 }
 
-export function publicAttachment(attachment: Attachment): PublicAttachment {
+/**
+ * 展示附件列表所需的列。刻意不取 chunksCiphertext：一页 60 条消息可能带几十个附件，
+ * 文档分块密文是最大的两列之一，列表页取它纯属浪费 IO 与解密时间。
+ */
+export const ATTACHMENT_PUBLIC_SELECT = {
+  id: true,
+  kind: true,
+  mime: true,
+  size: true,
+  createdAt: true,
+  originalNameCiphertext: true,
+  extractedTextCiphertext: true
+} as const satisfies Prisma.AttachmentSelect;
+
+export type AttachmentSummary = Pick<
+  Attachment,
+  'id' | 'kind' | 'mime' | 'size' | 'createdAt' | 'originalNameCiphertext' | 'extractedTextCiphertext'
+>;
+
+export function publicAttachment(attachment: AttachmentSummary): PublicAttachment {
   return {
     id: attachment.id,
     name: attachmentName(attachment),
@@ -315,7 +339,9 @@ export async function unlinkAttachmentFile(attachment: Pick<Attachment, 'storage
   }
 }
 
-export async function deleteAttachmentAndFile(attachment: Attachment): Promise<void> {
+export async function deleteAttachmentAndFile(
+  attachment: Pick<Attachment, 'id' | 'storageKey'>
+): Promise<void> {
   await prisma.attachment.delete({ where: { id: attachment.id } }).catch(() => undefined);
   await unlinkAttachmentFile(attachment);
 }

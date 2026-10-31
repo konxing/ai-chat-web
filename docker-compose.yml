@@ -31,7 +31,7 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "3000"
-      DATABASE_URL: postgresql://family_chat:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/family_chat?schema=public
+      DATABASE_URL: "postgresql://family_chat:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/family_chat?schema=public&connection_limit=8&pool_timeout=10"
       COOKIE_SECURE: "true"
       TRUST_PROXY: "true"
       # Only the Nginx container may assert X-Real-IP. Keep in sync with the network below.
