@@ -13,6 +13,7 @@ import { rateLimit } from '@/lib/rate-limit';
 import {
   buildConversation,
   getChatOwned,
+  getOlderMessages,
   maybeSetGeneratedTitle,
   publicMessage,
   saveAssistantMessage,
@@ -29,6 +30,17 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return api(() => handleChatPost(req, ctx));
+}
+
+/** 向更早翻页：GET /api/chats/:id/messages?before=<最早一条消息 id> */
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  return api(async () => {
+    const { user } = await requireUser(req);
+    const { id } = await ctx.params;
+    const before = new URL(req.url).searchParams.get('before');
+    if (!before) throw new ApiError(400, 'MISSING_CURSOR', '缺少分页游标');
+    return getOlderMessages(id, user.id, before);
+  });
 }
 
 async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string }> }) {

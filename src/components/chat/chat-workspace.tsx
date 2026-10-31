@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  ArrowDown,
   ArrowUp,
   Bot,
   Check,
@@ -19,6 +20,7 @@ import {
   Copy,
   Download,
   FileText,
+  History,
   LogOut,
   Menu,
   MessageSquarePlus,
@@ -130,6 +132,8 @@ export function ChatWorkspace({
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [notice, setNotice] = useState('');
+  const [showJump, setShowJump] = useState(false);
+  const [olderBusy, setOlderBusy] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -142,6 +146,7 @@ export function ChatWorkspace({
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stickRef = useRef(true);
 
   const selectedProviderId = chat?.providerId ?? localProviderId;
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
@@ -154,7 +159,30 @@ export function ChatWorkspace({
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   }, []);
 
+  /** 用户手动上滑后停止自动跟随，避免流式输出把视图拽走。 */
+  function onMessagesScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = gap < 120;
+    stickRef.current = near;
+    setShowJump(!near);
+  }
+
+  function jumpToBottom() {
+    stickRef.current = true;
+    setShowJump(false);
+    scrollToBottom(true);
+  }
+
   useEffect(() => {
+    // 切换会话时回到底部并重新开始跟随。
+    stickRef.current = true;
+    setShowJump(false);
+  }, [chat?.id]);
+
+  useEffect(() => {
+    if (!stickRef.current) return;
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
     scrollTimerRef.current = setTimeout(() => scrollToBottom(false), 30);
     return () => {
@@ -186,17 +214,6 @@ export function ChatWorkspace({
     setSidebarCollapsed(next);
     localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
   }, [sidebarCollapsed]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
-        event.preventDefault();
-        toggleSidebar();
-      }
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toggleSidebar]);
 
   const filteredChats = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -265,6 +282,23 @@ export function ChatWorkspace({
     setTimeout(() => textareaRef.current?.focus(), 50);
   }, []);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
+        event.preventDefault();
+        toggleSidebar();
+      } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        // 与「开启新对话」按钮上的 ⌘K 标记保持一致。
+        event.preventDefault();
+        startNewChat();
+      } else if (event.key === 'Escape' && accountOpen) {
+        setAccountOpen(false);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [toggleSidebar, startNewChat, accountOpen]);
+
   const ensureChat = useCallback(async (): Promise<string | null> => {
     if (chatIdRef.current) return chatIdRef.current;
     try {
@@ -282,7 +316,8 @@ export function ChatWorkspace({
         providerName: created.providerName,
         createdAt: created.createdAt,
         updatedAt: created.updatedAt,
-        messages: []
+        messages: [],
+        hasOlder: false
       });
       setChats((prev) => [created, ...prev]);
       window.history.replaceState(null, '', `/chat/${created.id}`);
@@ -378,6 +413,9 @@ export function ChatWorkspace({
         }
         setStreamError(message);
         setOptimisticUser(null);
+        // 请求在进入模型前就被拒绝：服务端没有留下这条消息，把输入原样还给用户以便重试。
+        setDraft(content);
+        setPending(attachments);
         await refreshChat(chatId);
         return;
       }
@@ -448,6 +486,32 @@ export function ChatWorkspace({
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  const loadOlder = useCallback(async () => {
+    const current = chat;
+    if (!current || current.messages.length === 0) return;
+    setOlderBusy(true);
+    try {
+      const el = scrollRef.current;
+      const prevHeight = el?.scrollHeight ?? 0;
+      const prevTop = el?.scrollTop ?? 0;
+      const data = await apiFetch<{ messages: ChatMessageDto[]; hasOlder: boolean }>(
+        `/api/chats/${current.id}/messages?before=${encodeURIComponent(current.messages[0].id)}`
+      );
+      // 往上翻页时不该被拽回底部：先关掉自动跟随，再按新增高度还原视觉位置。
+      stickRef.current = false;
+      setShowJump(true);
+      setChat({ ...current, messages: [...data.messages, ...current.messages], hasOlder: data.hasOlder });
+      requestAnimationFrame(() => {
+        const node = scrollRef.current;
+        if (node) node.scrollTop = node.scrollHeight - prevHeight + prevTop;
+      });
+    } catch (err) {
+      setNotice(errorMessage(err));
+    } finally {
+      setOlderBusy(false);
+    }
+  }, [chat]);
 
   const changeModel = useCallback(
     async (providerId: string) => {
@@ -860,7 +924,7 @@ export function ChatWorkspace({
           </div>
         ) : null}
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-smooth">
+        <div ref={scrollRef} className="relative flex-1 overflow-y-auto scroll-smooth" onScroll={onMessagesScroll}>
           <div className="mx-auto w-full max-w-3xl px-4 pb-8 pt-6 sm:px-6">
             {!hasMessages ? (
               <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center">
@@ -901,6 +965,13 @@ export function ChatWorkspace({
               </div>
             ) : (
               <div className="space-y-7">
+                {chat?.hasOlder ? (
+                  <div className="flex justify-center">
+                    <button type="button" className="btn-ghost text-[12px]" onClick={() => void loadOlder()} disabled={olderBusy}>
+                      {olderBusy ? <Spinner /> : <History className="h-3.5 w-3.5" />} 加载更早的消息
+                    </button>
+                  </div>
+                ) : null}
                 {messages.map((message) =>
                   message.role === 'SYSTEM' ? null : (
                     <MessageBubble key={message.id} message={message} />
@@ -938,6 +1009,19 @@ export function ChatWorkspace({
             {streamError ? (
               <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-4 py-3 text-[12.5px] text-red-200/80">
                 {streamError}
+              </div>
+            ) : null}
+
+            {showJump ? (
+              <div className="pointer-events-none sticky bottom-1 z-10 flex justify-end">
+                <button
+                  type="button"
+                  onClick={jumpToBottom}
+                  className="btn-icon pointer-events-auto h-9 w-9 border-white/10 bg-[#0c111b]/90 shadow-lg backdrop-blur"
+                  aria-label="回到底部"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </button>
               </div>
             ) : null}
           </div>

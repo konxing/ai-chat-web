@@ -40,6 +40,7 @@ export interface ChatDetailDto {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessageDto[];
+  hasOlder: boolean;
 }
 
 export interface ProviderDto {

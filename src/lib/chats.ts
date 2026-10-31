@@ -46,6 +46,7 @@ export interface ChatDetailDto {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessageDto[];
+  hasOlder: boolean;
 }
 
 export function decryptChatTitle(chat: Pick<Chat, 'id' | 'titleCiphertext'>): string {
@@ -140,18 +141,23 @@ export async function getChatOwned(chatId: string, userId: string): Promise<Chat
   return chat;
 }
 
+/** 打开会话时加载的最近消息条数；更早的消息按需翻页，避免长会话一次性解密整段历史。 */
+const MESSAGE_PAGE_SIZE = 60;
+
 export async function getChatDetail(chatId: string, userId: string): Promise<ChatDetailDto> {
   const chat = await prisma.chat.findFirst({
     where: { id: chatId, userId },
     include: {
       provider: { select: { name: true } },
       messages: {
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: MESSAGE_PAGE_SIZE + 1,
         include: { attachments: true }
       }
     }
   });
   if (!chat) throw new ApiError(404, 'CHAT_NOT_FOUND', '会话不存在');
+  const hasOlder = chat.messages.length > MESSAGE_PAGE_SIZE;
   return {
     id: chat.id,
     title: decryptChatTitle(chat),
@@ -160,8 +166,29 @@ export async function getChatDetail(chatId: string, userId: string): Promise<Cha
     providerName: chat.provider?.name ?? null,
     createdAt: chat.createdAt.toISOString(),
     updatedAt: chat.updatedAt.toISOString(),
-    messages: chat.messages.map((message) => publicMessage(message))
+    messages: chat.messages.slice(0, MESSAGE_PAGE_SIZE).reverse().map((message) => publicMessage(message)),
+    hasOlder
   };
+}
+
+/** 向更早翻页：`beforeId` 是当前已加载的最早一条消息。 */
+export async function getOlderMessages(
+  chatId: string,
+  userId: string,
+  beforeId: string,
+  limit = MESSAGE_PAGE_SIZE
+): Promise<{ messages: ChatMessageDto[]; hasOlder: boolean }> {
+  await getChatOwned(chatId, userId);
+  const cursor = await prisma.message.findFirst({ where: { id: beforeId, chatId }, select: { createdAt: true } });
+  if (!cursor) return { messages: [], hasOlder: false };
+  const rows = await prisma.message.findMany({
+    where: { chatId, createdAt: { lt: cursor.createdAt } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    include: { attachments: true }
+  });
+  const hasOlder = rows.length > limit;
+  return { messages: rows.slice(0, limit).reverse().map((message) => publicMessage(message)), hasOlder };
 }
 
 export async function renameChat(chatId: string, userId: string, title: string): Promise<ChatSummary[]> {
