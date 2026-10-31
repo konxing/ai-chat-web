@@ -19,10 +19,20 @@ import {
   UserRound,
   X
 } from 'lucide-react';
-import { apiFetch, errorMessage, formatDateTime, timeAgo } from '@/lib/client-api';
+import { apiFetch, codeSentMessage, errorMessage, formatDateTime, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { BrandMark } from '@/components/brand';
-import { Alert, EmptyState, LoadingBlock, Modal, Spinner, ToastProvider, useToast } from '@/components/ui';
+import {
+  Alert,
+  ConfirmProvider,
+  EmptyState,
+  LoadingBlock,
+  Modal,
+  Spinner,
+  ToastProvider,
+  useConfirm,
+  useToast
+} from '@/components/ui';
 import type { ProviderDto } from '@/lib/chat-types';
 
 interface AccountUser {
@@ -59,13 +69,16 @@ type Tab = 'profile' | 'security' | 'models' | 'about';
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
   return (
     <ToastProvider>
-      <SettingsInner initialUser={initialUser} />
+      <ConfirmProvider>
+        <SettingsInner initialUser={initialUser} />
+      </ConfirmProvider>
     </ToastProvider>
   );
 }
 
 function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
   const { push } = useToast();
+  const { confirm } = useConfirm();
   const [tab, setTab] = useState<Tab>('profile');
   const [user, setUser] = useState<AccountUser>(initialUser);
   const [displayName, setDisplayName] = useState(initialUser.displayName ?? '');
@@ -170,12 +183,12 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
     setEmailNotice('');
     setEmailBusy(true);
     try {
-      await apiFetch('/api/account/email/request', {
+      const data = await apiFetch<{ channel?: string }>('/api/account/email/request', {
         method: 'POST',
         json: { newEmail: newEmail.trim(), password: emailPassword }
       });
       setEmailStage('code');
-      setEmailNotice(`验证码已发送至 ${newEmail.trim()}，10 分钟内有效。`);
+      setEmailNotice(codeSentMessage(data.channel, newEmail.trim()));
     } catch (err) {
       setEmailError(errorMessage(err));
     } finally {
@@ -240,7 +253,13 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
   }
 
   async function deleteProvider(provider: ProviderDto) {
-    if (!window.confirm(`删除模型「${provider.name}」？此操作不可撤销。`)) return;
+    const ok = await confirm({
+      title: `删除模型「${provider.name}」？`,
+      description: `该配置使用 ${provider.modelId}。删除后不可恢复，历史消息仍保留所用模型的记录。`,
+      confirmText: '删除模型',
+      tone: 'danger'
+    });
+    if (!ok) return;
     try {
       await apiFetch(`/api/account/providers?id=${encodeURIComponent(provider.id)}`, { method: 'DELETE' });
       setProviders((prev) => prev.filter((item) => item.id !== provider.id));

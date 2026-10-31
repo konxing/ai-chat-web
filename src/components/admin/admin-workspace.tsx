@@ -113,7 +113,8 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
               返回对话
             </Link>
           </div>
-          <button type="button" className="btn-icon sm:hidden" onClick={() => setNavOpen((v) => !v)} aria-label="切换菜单">
+          {/* 侧栏在 lg 以下折叠，因此平板宽度也要保留这个开关 */}
+          <button type="button" className="btn-icon lg:hidden" onClick={() => setNavOpen((v) => !v)} aria-label="切换菜单">
             <Layers className="h-4 w-4" />
           </button>
         </div>
