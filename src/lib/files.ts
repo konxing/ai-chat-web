@@ -164,6 +164,12 @@ export async function inspectUpload(input: {
   };
 }
 
+// 摘要把记录 id 折进去：同一份文件在不同用户名下不再产生可比对的相同指纹，
+// 同时因为 id 永不变化，主密钥轮换也不会让历史摘要失效。
+function attachmentDigest(attachmentId: string, plain: Buffer): string {
+  return createHash('sha256').update(`${attachmentId}\n`, 'utf8').update(plain).digest('hex');
+}
+
 export async function storeUpload(input: {
   userId: string;
   chatId: string | null;
@@ -195,7 +201,7 @@ export async function storeUpload(input: {
         originalNameCiphertext: encryptString(info.name, `attachment-name:${id}`),
         mime: info.mime,
         size: input.buffer.length,
-        sha256: sha256Hex(input.buffer),
+        sha256: attachmentDigest(id, input.buffer),
         storageKey,
         extractedTextCiphertext: info.text
           ? encryptString(info.text, `attachment-text:${id}`)
@@ -288,8 +294,13 @@ export async function readAttachmentBuffer(attachment: Attachment): Promise<Buff
   } catch {
     throw new ApiError(500, 'FILE_DECRYPT_FAILED', '文件解密失败，可能已损坏');
   }
-  const digest = createHash('sha256').update(plain).digest('hex');
+  const digest = attachmentDigest(attachment.id, plain);
   if (digest !== attachment.sha256) {
+    // 早期入库的记录存的是裸内容摘要：确认确实匹配旧算法就地改写这一条，不做批量迁移。
+    if (attachment.sha256 === sha256Hex(plain)) {
+      await prisma.attachment.update({ where: { id: attachment.id }, data: { sha256: digest } });
+      return plain;
+    }
     throw new ApiError(500, 'FILE_INTEGRITY_FAILED', '文件完整性校验失败');
   }
   return plain;

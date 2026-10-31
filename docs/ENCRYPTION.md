@@ -69,7 +69,7 @@ npm run backup
 # 2. 生成新 key 并重加密所有数据（不修改 .env）
 npm run rotate-keys -- --new-key-id k2
 
-# 3. 按输出把 MASTER_KEY_ID / MASTER_KEY / MASTER_KEYRING 写入 .env 或密钥管理服务
+# 3. 从 BACKUP_DIR/key-rotation/<新 key id>.env 取值写入 .env 或密钥管理服务
 #    然后重启应用
 #    4. 登录，打开历史聊天、下载附件、调用一次模型，确认正常
 #    5. 观察一个备份周期后，才可从 keyring 移除 k1
@@ -79,9 +79,13 @@ npm run rotate-keys -- --new-key-id k2
 
 - 逐条重加密 Chat 标题、Message 正文、AiProvider Key、Attachment 名称/提取文本/分块；
 - 解密每个 `FAC1` 文件并用新 key 原子重写（同一目录临时文件 + rename）；
-- 跳过已在新 key 上的记录/文件；
-- 输出新的环境变量，但**不会**自动改 `.env`，避免误覆盖；
+- 跳过已在新 key 上的记录/文件；无法识别的文件格式会告警并跳过，不再中断整轮轮换；
+- **在改动任何数据之前**把新密钥写入 `ROTATE_KEY_DIR`（默认 `BACKUP_DIR/key-rotation`，文件已存在则拒绝覆盖）：轮换中途失败时，已改成新密钥的那部分数据仍然解得开；
+- 只打印文件路径，不把密钥打印到 stdout（stdout 会进 journald 与 SSH 会话记录），也**不会**自动改 `.env`，避免误覆盖；
 - 支持 `--dry-run` 预估数量；`--new-key` 可指定已有 key。
+
+Windows 上文件权限从目录继承，`0o600` 不起作用：把 `key-rotation` 目录单独收紧到当前用户，例如
+`icacls "D:\\FamilyAIChat\\backups\\key-rotation" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"`。
 
 测试证据：集成测试在隔离数据库中执行了真实轮换（k1 → it2），确认所有 Chat 标题前缀为 `enc:v1:it2:`，重启后聊天、消息、附件仍可解密；单元测试覆盖篡改密文/tag/AAD、旧 key 解密、未知 key id 失败。
 
@@ -91,6 +95,8 @@ npm run rotate-keys -- --new-key-id k2
 
 - 备份文件即使泄露，没有口令无法解密；
 - 恢复前会校验 magic、GCM tag、manifest 中的 SHA-256；
+- `npm run backup` 默认只保留最新 30 份 `.facbackup`（`BACKUP_KEEP`，`--keep 0` 关闭），只删除自己命名的备份文件，其它文件不碰；
+- `pg_dump` / `pg_restore` 的数据库口令通过 `PGPASSWORD` 环境变量传给子进程，不出现在命令行上（本机上任何进程都能读到 argv）；
 - 恢复旧备份时，应用必须拥有该备份中密文对应的 key id（通常需要保留历史 `MASTER_KEYRING`）。如果已经删除旧 key，旧备份中的聊天字段将无法解密。
 
 ## 密钥存放建议

@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
@@ -28,17 +29,29 @@ function loadDotEnv() {
 }
 
 
-function pgConnectionUrl(raw) {
+function pgConnection(raw) {
   // DATABASE_URL may contain Prisma-only query parameters that libpq rejects.
+  // 密码一律不进 argv：本机任何用户都能从进程列表里读到命令行。
   try {
     const url = new URL(raw);
     for (const key of ['schema', 'connection_limit', 'pool_timeout', 'pgbouncer', 'statement_cache_size']) {
       url.searchParams.delete(key);
     }
-    return url.toString();
+    let password = '';
+    try {
+      password = url.password ? decodeURIComponent(url.password) : '';
+    } catch {
+      password = url.password;
+    }
+    url.password = '';
+    return { conninfo: url.toString(), password };
   } catch {
-    return raw;
+    return { conninfo: raw, password: process.env.PGPASSWORD || '' };
   }
+}
+
+function pgEnv(password) {
+  return password ? { ...process.env, PGPASSWORD: password } : process.env;
 }
 
 function run(cmd, args, opts = {}) {
@@ -112,7 +125,7 @@ async function main() {
     process.exit(2);
   }
 
-  const work = await fsp.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'fac-restore-'));
+  const work = await fsp.mkdtemp(path.join(process.env.TMPDIR || os.tmpdir(), 'fac-restore-'));
   const payload = path.join(work, 'payload.tar.gz');
   try {
     console.error('restore: verifying and decrypting');
@@ -166,16 +179,21 @@ async function main() {
 
     if (!uploadsOnly) {
       console.error('restore: restoring database (this replaces all current tables)');
-      await run('pg_restore', [
-        '--clean',
-        '--if-exists',
-        '--no-owner',
-        '--no-privileges',
-        '--single-transaction',
-        '--dbname',
-        pgConnectionUrl(databaseUrl),
-        path.join(work, 'db.dump')
-      ]);
+      const pg = pgConnection(databaseUrl);
+      await run(
+        'pg_restore',
+        [
+          '--clean',
+          '--if-exists',
+          '--no-owner',
+          '--no-privileges',
+          '--single-transaction',
+          '--dbname',
+          pg.conninfo,
+          path.join(work, 'db.dump')
+        ],
+        { env: pgEnv(pg.password) }
+      );
     }
     console.error('restore: done. Restart the application and sign in again.');
   } finally {

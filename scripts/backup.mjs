@@ -6,12 +6,14 @@
  *   header: magic "FACBACKUP1" | salt(16) | iv(12) | authTag(16) | ciphertext
  *   ciphertext: gzip tar of manifest.json + db.dump + uploads.tar.gz
  *
- * Usage: node scripts/backup.mjs [--out DIR] [--json]
+ * Usage: node scripts/backup.mjs [--out DIR] [--keep N] [--json]
  * Requires: pg_dump, tar, BACKUP_PASSPHRASE, DATABASE_URL, UPLOAD_DIR.
+ * Keeps the newest N backups in the output directory (default 30, 0 disables).
  */
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
@@ -28,17 +30,29 @@ function loadDotEnv() {
 }
 
 
-function pgConnectionUrl(raw) {
+function pgConnection(raw) {
   // DATABASE_URL may contain Prisma-only query parameters that libpq rejects.
+  // 密码一律不进 argv：本机任何用户都能从进程列表里读到命令行。
   try {
     const url = new URL(raw);
     for (const key of ['schema', 'connection_limit', 'pool_timeout', 'pgbouncer', 'statement_cache_size']) {
       url.searchParams.delete(key);
     }
-    return url.toString();
+    let password = '';
+    try {
+      password = url.password ? decodeURIComponent(url.password) : '';
+    } catch {
+      password = url.password;
+    }
+    url.password = '';
+    return { conninfo: url.toString(), password };
   } catch {
-    return raw;
+    return { conninfo: raw, password: process.env.PGPASSWORD || '' };
   }
+}
+
+function pgEnv(password) {
+  return password ? { ...process.env, PGPASSWORD: password } : process.env;
 }
 
 function log(message, extra) {
@@ -101,6 +115,31 @@ function timestamp() {
   return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
 }
 
+const BACKUP_NAME = /^family-chat-\d{8}-\d{6}\.facbackup$/;
+
+function parseKeep(args) {
+  const idx = args.indexOf('--keep');
+  const raw = idx !== -1 ? args[idx + 1] : process.env.BACKUP_KEEP;
+  if (raw === undefined || raw === '') return 30;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) throw new Error('--keep must be a non-negative integer (0 disables pruning)');
+  return n;
+}
+
+// 只删本脚本命名的备份，且必须留满 keep 份；其它文件（迁移前的裸 dump 等）一律不碰。
+async function pruneOldBackups(dir, keep) {
+  if (keep <= 0) return 0;
+  const names = (await fsp.readdir(dir)).filter((name) => BACKUP_NAME.test(name));
+  if (names.length <= keep) return 0;
+  names.sort();
+  for (const name of names.slice(0, names.length - keep)) {
+    await fsp.rm(path.join(dir, name), { force: true });
+    await fsp.rm(path.join(dir, `${name}.json`), { force: true });
+    log(`backup: pruned ${name}`);
+  }
+  return names.length - keep;
+}
+
 async function main() {
   loadDotEnv();
   const args = process.argv.slice(2);
@@ -116,13 +155,18 @@ async function main() {
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
 
   const stamp = timestamp();
-  const work = await fsp.mkdtemp(path.join(process.env.TMPDIR || '/tmp', 'fac-backup-'));
+  const work = await fsp.mkdtemp(path.join(process.env.TMPDIR || os.tmpdir(), 'fac-backup-'));
   const payload = path.join(work, 'payload.tar.gz');
   const outFile = path.join(dir, `family-chat-${stamp}.facbackup`);
+  const pg = pgConnection(databaseUrl);
   try {
     log('backup: dumping database');
     const dbFile = path.join(work, 'db.dump');
-    await run('pg_dump', ['--format=custom', '--no-owner', '--no-privileges', `--file=${dbFile}`, '--dbname', pgConnectionUrl(databaseUrl)]);
+    await run(
+      'pg_dump',
+      ['--format=custom', '--no-owner', '--no-privileges', `--file=${dbFile}`, '--dbname', pg.conninfo],
+      { env: pgEnv(pg.password) }
+    );
 
     log('backup: archiving uploads');
     const uploadsFile = path.join(work, 'uploads.tar.gz');
@@ -183,6 +227,8 @@ async function main() {
       uploadsSourceBytes: manifest.uploads.sourceBytes
     };
     await fsp.writeFile(`${outFile}.json`, JSON.stringify(meta, null, 2), { mode: 0o600 });
+    const pruned = await pruneOldBackups(dir, parseKeep(args));
+    if (pruned) meta.pruned = pruned;
     if (json) process.stdout.write(`${JSON.stringify(meta)}\n`);
     else log(`backup: written ${outFile} (${size} bytes)`);
   } finally {

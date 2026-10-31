@@ -28,6 +28,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   return api(async () => {
     const { user } = await requireUser(req);
+    // 创建会落库一行加密密钥并写审计，测试/上传都有配额，这里补齐同一档防护：
+    // 家庭成员账号被盗后可以无限造行。
+    const limit = rateLimit(`provider-create:${user.id}`, 10, 60 * 60 * 1000);
+    if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `创建过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
     const body = providerInputSchema.parse(await readJson(req));
     const provider = await createProvider({ type: 'USER', userId: user.id }, body);
     await writeAudit({

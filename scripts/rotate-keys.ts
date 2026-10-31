@@ -3,12 +3,13 @@
  * Usage:
  *   npm run rotate-keys -- --new-key-id k2027 [--new-key <base64>] [--dry-run]
  *
- * Generates a fresh 32-byte key unless --new-key is supplied, then re-encrypts
- * every encrypted database field and attachment file under the new key. The old
- * key stays readable through MASTER_KEYRING for rollback.
+ * Generates a fresh 32-byte key unless --new-key is supplied, writes it to a
+ * private file under ROTATE_KEY_DIR (default: BACKUP_DIR/key-rotation) BEFORE
+ * re-encrypting anything, then re-encrypts every encrypted database field and
+ * attachment file under the new key. The old key stays readable through
+ * MASTER_KEYRING for rollback.
  *
- * The script never edits .env. It prints the exact values to place in your secret
- * manager (or .env on the server) after the rotation succeeds, then you restart.
+ * The script never edits .env and never prints key material to stdout.
  */
 import 'dotenv/config';
 import fs from 'node:fs/promises';
@@ -48,6 +49,36 @@ function decodeKey(value: string, label: string): Buffer {
   return buf;
 }
 
+function keyFileTarget(newKeyId: string): string {
+  const dir = process.env.ROTATE_KEY_DIR ||
+    path.join(process.env.BACKUP_DIR || './backups', 'key-rotation');
+  return path.join(path.resolve(dir), `${newKeyId}.env`);
+}
+
+async function writeKeyFile(target: string, newKeyId: string, newKey: string, keyring: string) {
+  const body = [
+    `# Master key created by rotate-keys at ${new Date().toISOString()}`,
+    '# 这是新主密钥的唯一副本：请离线保存，确认无误后删除本文件。',
+    `MASTER_KEY_ID=${newKeyId}`,
+    `MASTER_KEY=${newKey}`,
+    `MASTER_KEYRING=${keyring}`,
+    ''
+  ].join('\n');
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  try {
+    // wx：已存在就报错，绝不覆盖可能还在保护着历史数据的旧密钥文件。
+    await fs.writeFile(target, body, { mode: 0o600, flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(
+        `密钥文件已存在：${target}。若这是上次中断留下的密钥，请用 --new-key-id ${newKeyId} --new-key <文件里的 MASTER_KEY> 续跑；` +
+          '确认它已作废请先把该文件移走。'
+      );
+    }
+    throw err;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const oldId = process.env.MASTER_KEY_ID || '';
@@ -71,6 +102,7 @@ async function main() {
   process.env.MASTER_KEY_ID = args.newKeyId;
   process.env.MASTER_KEY = newKey;
   process.env.MASTER_KEYRING = JSON.stringify(ring);
+  const nextKeyring = JSON.stringify({ ...ring });
 
   const { decryptString, encryptString, cipherKeyId, decryptBuffer, encryptBuffer } = await import('../src/lib/crypto');
   const prisma = new PrismaClient();
@@ -80,10 +112,19 @@ async function main() {
     return encryptString(decryptString(payload, aad), aad);
   };
 
-  const stats = { chats: 0, messages: 0, providers: 0, attachments: 0, files: 0, skippedFiles: 0, missingFiles: 0 };
+  const stats = { chats: 0, messages: 0, providers: 0, attachments: 0, files: 0, skippedFiles: 0, missingFiles: 0, badFiles: 0 };
+  let keyFile: string | null = null;
 
   try {
     console.log(`rotate: ${oldId} -> ${args.newKeyId}${args.dryRun ? ' (dry run)' : ''}`);
+
+    // 先把新密钥落盘，再动任何数据。中途崩溃时，已经改成新密钥的内容必须还有
+    // 一处可信副本能解开，否则就是不可恢复的批量数据损失。
+    if (!args.dryRun) {
+      keyFile = keyFileTarget(args.newKeyId);
+      await writeKeyFile(keyFile, args.newKeyId, newKey, nextKeyring);
+      console.log(`rotate: 新密钥已写入 ${keyFile}`);
+    }
 
     const chats = await prisma.chat.findMany({ select: { id: true, titleCiphertext: true } });
     for (const chat of chats) {
@@ -156,7 +197,10 @@ async function main() {
         continue;
       }
       if (encrypted.length < 5 || encrypted.subarray(0, 4).toString('ascii') !== 'FAC1') {
-        throw new Error(`Attachment is not in FAC1 format: ${attachment.storageKey}`);
+        // 单个坏文件不该让整轮轮换在半途停下：它继续用旧密钥可读，旧密钥此刻还在环里。
+        stats.badFiles += 1;
+        console.warn(`rotate: 跳过无法识别的文件格式 ${attachment.storageKey}`);
+        continue;
       }
       const keyIdLen = encrypted[4];
       const keyId = encrypted.subarray(5, 5 + keyIdLen).toString('utf8');
@@ -180,7 +224,8 @@ async function main() {
         `${stats.chats} chats, ${stats.messages} messages, ${stats.providers} provider keys, ` +
         `${stats.attachments} attachment records, ${stats.files} files` +
         `${stats.skippedFiles ? `, ${stats.skippedFiles} files already on new key` : ''}` +
-        `${stats.missingFiles ? `, ${stats.missingFiles} missing files` : ''}`
+        `${stats.missingFiles ? `, ${stats.missingFiles} missing files` : ''}` +
+        `${stats.badFiles ? `, ${stats.badFiles} files skipped (bad format)` : ''}`
     );
 
     if (args.dryRun) {
@@ -188,15 +233,13 @@ async function main() {
       return;
     }
 
-    const nextKeyring = { ...ring };
     console.log('');
-    console.log('✓ 轮换完成。请把以下值写入密钥管理服务或 .env，然后重启应用：');
-    console.log('');
-    console.log(`MASTER_KEY_ID=${args.newKeyId}`);
-    console.log(`MASTER_KEY=${newKey}`);
-    console.log(`MASTER_KEYRING=${JSON.stringify(nextKeyring)}`);
+    console.log(`✓ 轮换完成。新密钥只写进了 ${keyFile}，不打印到终端：stdout 会进 journald 和 SSH 会话记录。`);
+    console.log('  请把这个文件里的三个变量写入密钥管理服务或服务器 .env，然后重启应用。');
+    console.log('  Windows 上文件权限是从目录继承的，请另用 icacls 把该目录收紧到当前用户。');
     console.log('');
     console.log('确认服务正常后，可从 MASTER_KEYRING 移除最旧的密钥；在此之前请保留全部旧密钥。');
+    console.log(`备份该文件并离线保存后，可以删除 ${keyFile}。`);
   } finally {
     await prisma.$disconnect();
   }
