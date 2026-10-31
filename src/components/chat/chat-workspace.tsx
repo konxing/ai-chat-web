@@ -675,19 +675,9 @@ export function ChatWorkspace({
             <BrandMark size={30} />
             <span className="truncate text-[15px] font-semibold text-white/90">{settings.siteName}</span>
           </Link>
-          <div className="flex shrink-0 items-center">
-            <button
-              type="button"
-              className="btn-icon hidden lg:inline-flex"
-              onClick={toggleSidebar}
-              aria-label="收起侧栏"
-            >
-              <PanelLeftClose className="h-4 w-4" />
-            </button>
-            <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭">
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭">
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         <div className="px-3 pt-2">
