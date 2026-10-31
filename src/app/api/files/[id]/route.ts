@@ -21,6 +21,14 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     const { user } = await requireUser(req);
     const { id } = await ctx.params;
     const attachment = await getAttachmentForUser(id, user.id);
+    // storageKey 是 UUID、行只删不改，内容事实上不可变：命中 ETag 就不必再读盘解密。
+    const etag = `"${attachment.sha256}"`;
+    if (req.headers.get('if-none-match') === etag) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'private, max-age=31536000, immutable' }
+      });
+    }
     const buffer = await readAttachmentBuffer(attachment);
     const url = new URL(req.url);
     const inline = url.searchParams.get('inline') === '1' && ['IMAGE', 'AUDIO'].includes(attachment.kind);
@@ -32,7 +40,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         'Content-Type': attachment.mime,
         'Content-Length': String(buffer.length),
         'Content-Disposition': contentDisposition(inline ? 'inline' : 'attachment', name),
-        'Cache-Control': 'private, max-age=300',
+        'Cache-Control': 'private, max-age=31536000, immutable',
+        ETag: etag,
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'; sandbox",
         'Referrer-Policy': 'no-referrer'

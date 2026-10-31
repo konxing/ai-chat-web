@@ -25,21 +25,18 @@ export async function loadChatPage(chatId?: string): Promise<ChatPageData> {
   if (!user) redirect('/login');
   if (user.status !== 'ACTIVE') redirect('/login?disabled=1');
 
-  const [settings, chats, providers] = await Promise.all([
+  // 会话详情只依赖 user.id，和设置/列表并行取，省掉一次串行的数据库往返。
+  const [settings, chats, providers, chat] = await Promise.all([
     getSystemSettings(),
     listChats(user.id),
-    listProvidersForUser(user.id)
+    listProvidersForUser(user.id),
+    chatId
+      ? getChatDetail(chatId, user.id).catch((error: unknown) => {
+          if (error instanceof ApiError && error.status === 404) notFound();
+          throw error;
+        })
+      : Promise.resolve(null)
   ]);
-
-  let chat: ChatDetailDto | null = null;
-  if (chatId) {
-    try {
-      chat = await getChatDetail(chatId, user.id);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) notFound();
-      throw error;
-    }
-  }
 
   return {
     user: {

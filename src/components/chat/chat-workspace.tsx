@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -391,6 +392,8 @@ export function ChatWorkspace({
     setStreamText('');
     const controller = new AbortController();
     abortRef.current = controller;
+    let applied = false;
+    let lastPaint = 0;
     try {
       const response = await fetch(`/api/chats/${chatId}/messages`, {
         method: 'POST',
@@ -444,6 +447,11 @@ export function ChatWorkspace({
               type?: string;
               text?: string;
               error?: { message?: string };
+              message?: ChatMessageDto;
+              userMessage?: ChatMessageDto;
+              providerId?: string;
+              providerName?: string;
+              modelId?: string;
             };
             try {
               event = JSON.parse(data);
@@ -452,7 +460,12 @@ export function ChatWorkspace({
             }
             if (event.type === 'delta' && event.text) {
               accumulated += event.text;
-              setStreamText(accumulated);
+              // 每个 token 都 setState 会重渲染整棵消息树；80ms 合并一次，肉眼仍是连续出字。
+              const now = Date.now();
+              if (now - lastPaint >= 80) {
+                lastPaint = now;
+                setStreamText(accumulated);
+              }
             } else if (event.type === 'error') {
               setStreamError(event.error?.message || '模型调用失败，请稍后重试');
             } else if (event.type === 'partial') {
@@ -460,10 +473,33 @@ export function ChatWorkspace({
               finished = true;
             } else if (event.type === 'done') {
               finished = true;
+              const savedAssistant = event.message;
+              const savedUser = event.userMessage;
+              if (savedAssistant && savedUser) {
+                // 服务端已经把落库后的两条消息发过来，直接接上，省掉结尾那两次刷新。
+                applied = true;
+                const providerId = event.providerId;
+                const providerName = event.providerName;
+                const modelId = event.modelId;
+                setChat((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        providerId: providerId ?? prev.providerId,
+                        providerName: providerName ?? prev.providerName,
+                        modelId: modelId ?? prev.modelId,
+                        messages: [...prev.messages, { ...savedUser, attachments }, savedAssistant]
+                      }
+                    : prev
+                );
+                setOptimisticUser(null);
+                setStreamText('');
+              }
             }
           }
         }
       }
+      if (accumulated && !applied) setStreamText(accumulated);
       if (!finished && accumulated && !controller.signal.aborted) {
         setStreamError('连接意外结束，已保存已生成的内容');
       }
@@ -477,8 +513,8 @@ export function ChatWorkspace({
       if (controller.signal.aborted) {
         await new Promise((resolve) => setTimeout(resolve, 350));
       }
-      await refreshChat(chatId);
-      await refreshChats();
+      if (!applied) await refreshChat(chatId);
+      void refreshChats();
       setStreamText('');
     }
   }, [draft, pending, sending, ensureChat, refreshChat, refreshChats]);
@@ -1195,7 +1231,13 @@ export function ChatWorkspace({
   );
 }
 
-function MessageBubble({ message, optimistic }: { message: ChatMessageDto; optimistic?: boolean }) {
+const MessageBubble = memo(function MessageBubble({
+  message,
+  optimistic
+}: {
+  message: ChatMessageDto;
+  optimistic?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'USER';
   const copy = async () => {
@@ -1277,4 +1319,4 @@ function MessageBubble({ message, optimistic }: { message: ChatMessageDto; optim
       </div>
     </div>
   );
-}
+});

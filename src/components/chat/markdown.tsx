@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
+import { memo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -32,43 +32,49 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
-export function Markdown({ children }: { children: string }) {
+type MarkdownOptions = ComponentProps<typeof ReactMarkdown>;
+
+/**
+ * react-markdown 每次渲染都会按传入的插件数组重建 unified 管线并同步解析全文，
+ * 所以这些配置必须是模块级常量，否则流式输出时每个 token 都要重解析一遍。
+ */
+const REMARK_PLUGINS: MarkdownOptions['remarkPlugins'] = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS: MarkdownOptions['rehypePlugins'] = [
+  rehypeKatex,
+  [rehypeHighlight, { detect: true, ignoreMissing: true }]
+];
+const COMPONENTS: MarkdownOptions['components'] = {
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  a: ({ href, children: linkChildren }) => {
+    const kind = linkKind(href);
+    if (!kind) return <span>{linkChildren}</span>;
+    const external = kind === 'http';
+    return (
+      <a
+        href={href}
+        target={external ? '_blank' : undefined}
+        rel={external ? 'noopener noreferrer nofollow' : undefined}
+      >
+        {linkChildren}
+      </a>
+    );
+  },
+  img: ({ src, alt }) => {
+    const value = typeof src === 'string' ? src : '';
+    if (!value.startsWith('/api/files/') && !value.startsWith('data:image/')) {
+      return <span className="text-white/40">[图片]</span>;
+    }
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={value} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" />;
+  }
+};
+
+export const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
     <div className="md">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[
-          rehypeKatex,
-          [rehypeHighlight, { detect: true, ignoreMissing: true }]
-        ]}
-        components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          a: ({ href, children: linkChildren }) => {
-            const kind = linkKind(href);
-            if (!kind) return <span>{linkChildren}</span>;
-            const external = kind === 'http';
-            return (
-              <a
-                href={href}
-                target={external ? '_blank' : undefined}
-                rel={external ? 'noopener noreferrer nofollow' : undefined}
-              >
-                {linkChildren}
-              </a>
-            );
-          },
-          img: ({ src, alt }) => {
-            const value = typeof src === 'string' ? src : '';
-            if (!value.startsWith('/api/files/') && !value.startsWith('data:image/')) {
-              return <span className="text-white/40">[图片]</span>;
-            }
-            // eslint-disable-next-line @next/next/no-img-element
-            return <img src={value} alt={alt || ''} loading="lazy" referrerPolicy="no-referrer" />;
-          }
-        }}
-      >
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS} components={COMPONENTS}>
         {children}
       </ReactMarkdown>
     </div>
   );
-}
+});

@@ -373,12 +373,12 @@ export function buildAttachmentContext(
 }
 
 export async function imageDataUrls(attachments: Attachment[]): Promise<string[]> {
-  const urls: string[] = [];
-  for (const attachment of attachments) {
-    if (attachment.kind !== 'IMAGE') continue;
-    if (attachment.size > 8 * 1024 * 1024) continue;
-    const buffer = await readAttachmentBuffer(attachment);
-    urls.push(`data:${attachment.mime};base64,${buffer.toString('base64')}`);
-  }
-  return urls;
+  const images = attachments.filter((a) => a.kind === 'IMAGE' && a.size <= 8 * 1024 * 1024);
+  // 多图消息原本串行读盘+解密，第一张照片发出去之前要多等前面每一张的时间。
+  return Promise.all(
+    images.map(async (attachment) => {
+      const buffer = await readAttachmentBuffer(attachment);
+      return `data:${attachment.mime};base64,${buffer.toString('base64')}`;
+    })
+  );
 }
