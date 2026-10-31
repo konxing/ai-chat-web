@@ -32,13 +32,13 @@ export function AuthShell({
             <ShieldCheck className="h-7 w-7 text-aurora-300" />
           </div>
           <h2 className="text-[34px] font-light leading-[1.25] tracking-wide text-white">
-            一间安静的房间，
+            星海无声，
             <br />
-            只留给家人。
+            此间自成边界。
           </h2>
           <p className="mt-5 text-sm leading-7 text-white/40">
-            网络层白名单先于页面生效，未授权地址无法抵达登录页。
-            对话内容与密钥在服务端加密保存，每位成员的数据彼此隔离。
+            网络层零信任过滤，未经显式授权的请求无法触及边界。
+            存储加密与多维隔离机制，确保每一行对话与凭证，皆锁于无形。
           </p>
           <div className="mt-9 space-y-3 text-[12.5px] text-white/40">
             <div className="flex items-center gap-3">

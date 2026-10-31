@@ -834,7 +834,7 @@ export function ChatWorkspace({
                   {greeting()}，{user.displayName || user.username}
                 </h2>
                 <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/35">
-                  这是一个只属于家人的 AI 空间。可以聊天、读文档、看图片，也可以切换不同的模型。
+                  输入问题开始对话，支持文档、图片和模型切换。
                 </p>
                 {providers.length === 0 ? (
                   <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-[12.5px] text-amber-200/80">

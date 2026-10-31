@@ -17,7 +17,7 @@ export default async function LoginPage() {
     <AuthShell
       siteName={settings.siteName}
       title="欢迎回来"
-      subtitle="使用家庭账号登录。连续登录失败会触发临时限制。"
+      subtitle="使用已授权账号登录。连续登录失败会触发临时限制。"
       footer={
         <>
           还没有账号？

@@ -78,19 +78,19 @@ export function IntroLanding({
 
         <h1 className="intro-title text-[30px] font-light tracking-[0.18em] text-white sm:text-[42px]">{siteName}</h1>
         <p className="intro-sub mt-4 max-w-md text-[13px] leading-relaxed tracking-wide text-white/40 sm:text-sm">
-          属于家人的私有 AI 空间。对话经加密保存，
+          私有部署的 AI 空间。对话加密保存，
           <br className="hidden sm:block" />
-          只有被授权的网络与账号可以抵达。
+          仅授权网络与账号，方可进入。
         </p>
         <div className="intro-cta mt-9 flex flex-wrap items-center justify-center gap-2 text-[11px] text-white/35">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            <ShieldCheck className="h-3.5 w-3.5 text-aurora-400" /> 授权 IP 访问
+            <ShieldCheck className="h-3.5 w-3.5 text-aurora-400" /> 零信任接入
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            <Wifi className="h-3.5 w-3.5 text-aurora-400" /> 传输加密
+            <Wifi className="h-3.5 w-3.5 text-aurora-400" /> 加密存储
           </span>
           <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            {registrationOpen ? '注册开放中' : '邀请制家庭空间'}
+            {registrationOpen ? '注册开放中' : '仅限授权加入'}
           </span>
         </div>
       </div>
