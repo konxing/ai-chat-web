@@ -8,8 +8,8 @@
 | --- | --- | --- | --- |
 | 1 | 云安全组 / 防火墙 | 只放行家庭 IP 到 80/443；SSH 仅管理 IP | 云控制台变更 |
 | 2 | nftables | 主机层默认丢弃 80/443，直连 3000 丢弃 | `sync:firewall` 生成，`--apply` 生效 |
-| 3 | Nginx | TLS、限速、`auth_request /_ip_gate` 动态询问应用 | 立即（应用缓存 ≤ `IP_CACHE_MS`） |
-| 4 | Node `server.js` | 所有请求（含 `_next/static`、API、健康检查）先过白名单 | 立即（缓存 ≤ 1s） |
+| 3 | Nginx | TLS、限速、`auth_request /_ip_gate` 动态询问应用 | ≤ 2×`IP_CACHE_MS` |
+| 4 | Node `server.js` | 所有请求（含 `_next/static`、API、健康检查）先过白名单 | ≤ 2×`IP_CACHE_MS`（默认约 2 秒） |
 
 应用层是最终底线；即使 Nginx 配置错误、静态资源被单独暴露，未授权 IP 仍会得到 403。
 
@@ -19,7 +19,7 @@
 - 多条规则取并集；`enabled=false` 或 `expiresAt <= now` 不参与匹配。
 - 临时访问：设置到期时间，到期后自动失效（无需重启/清理任务）。
 - 默认拒绝：没有匹配规则即 403；数据库不可用超过 5 秒返回 503（不会放行）。
-- 白名单缓存默认 1000ms（`IP_CACHE_MS`，最小 200ms）；删除/停用规则最迟约 1 秒生效。
+- 白名单缓存默认 1000ms（`IP_CACHE_MS`，最小 200ms），由后台定时器刷新，请求路径不等待数据库查询；删除/停用规则最迟约 2×`IP_CACHE_MS` 生效。
 
 ## 真实客户端 IP 与可信代理
 

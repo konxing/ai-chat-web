@@ -32,8 +32,8 @@
 ### 首次访问
 
 1. `server.js` 在 Next 之前运行 `guard(req,res)`。它从 TCP 连接取 peer IP；只有当 peer 属于 `TRUSTED_PROXY_CIDRS` 时才读取 `X-Real-IP`，随后删除 `Forwarded`、`X-Forwarded-For`、`X-Real-IP`，写入可信的 `x-real-ip` / `x-client-ip` 和随机 CSP nonce。
-2. 白名单规则从数据库加载，缓存 `IP_CACHE_MS`（默认 1000ms），数据库故障超过 5 秒时返回 503（fail closed，而不是放行）。
-3. 未命中规则：403 品牌页，并写 `IpAccessLog`（同一 IP+路径 5 秒节流），不含密码/密钥。
+2. 白名单规则从数据库加载，由后台定时器按 `IP_CACHE_MS`（默认 1000ms）刷新，请求路径不等待 SQL（仅冷启动首次加载会等）；数据库故障超过 5 秒时返回 503（fail closed，而不是放行）。
+3. 未命中规则：403 品牌页，并写 `IpAccessLog`（同一 IP 5 秒节流），不含密码/密钥。
 4. 命中：进入 Next。根页面展示 3.9 秒入场动画（可跳过；`prefers-reduced-motion` 时 0.7 秒；同会话 0.9 秒），随后去 `/login`。
 5. 登录成功后写入 `fac_session`（HttpOnly、SameSite=Lax、生产 Secure）与 `fac_csrf`（非 HttpOnly，供前端读取）。数据库只保存两者的 SHA-256。
 

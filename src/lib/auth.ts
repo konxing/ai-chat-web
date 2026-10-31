@@ -1,8 +1,9 @@
 import type { User } from '@prisma/client';
-import { ApiError, assertSameOrigin } from './http';
+import { ApiError, assertSameOrigin, getUserAgent, getRequestIp } from './http';
 import { getSession, verifyCsrfToken, type SessionWithUser } from './session';
 import { verifyPassword } from './password';
 import { rateLimit } from './rate-limit';
+import { writeAudit } from './audit';
 
 export interface AuthContext {
   user: User;
@@ -10,6 +11,21 @@ export interface AuthContext {
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** 已登录但被拒绝的请求此前不留痕，管理员看不到越权试探和会话被跨站重放。 */
+function auditDenied(user: User, req: Request, reason: string): void {
+  void writeAudit({
+    actorId: user.id,
+    actorLabel: user.username,
+    action: 'auth.denied',
+    targetType: 'endpoint',
+    targetId: (req.url || '').split('?')[0],
+    ip: getRequestIp(req),
+    userAgent: getUserAgent(req),
+    status: 'FAILURE',
+    error: `${reason} ${req.method}`
+  });
+}
 
 export async function requireUser(req: Request, opts: { csrf?: boolean } = {}): Promise<AuthContext> {
   const session = await getSession();
@@ -19,6 +35,7 @@ export async function requireUser(req: Request, opts: { csrf?: boolean } = {}): 
     if (opts.csrf !== false) {
       const token = req.headers.get('x-csrf-token');
       if (!verifyCsrfToken(session, token)) {
+        auditDenied(session.user, req, 'csrf_failed');
         throw new ApiError(403, 'CSRF_FAILED', '安全令牌校验失败，请刷新页面后重试');
       }
     }
@@ -29,6 +46,7 @@ export async function requireUser(req: Request, opts: { csrf?: boolean } = {}): 
 export async function requireOwner(req: Request, opts: { csrf?: boolean } = {}): Promise<AuthContext> {
   const ctx = await requireUser(req, opts);
   if (ctx.user.role !== 'OWNER') {
+    auditDenied(ctx.user, req, 'not_owner');
     throw new ApiError(403, 'FORBIDDEN', '仅超级管理员可执行此操作');
   }
   return ctx;

@@ -81,6 +81,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   });
   const messages = await buildConversation({
     chatId,
+    userId: user.id,
     currentContent: body.content,
     attachments,
     provider

@@ -17,7 +17,7 @@ const ipaddr = require('ipaddr.js');
 
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV !== 'production';
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '127.0.0.1';
 const CACHE_MS = Math.max(200, Number(process.env.IP_CACHE_MS || 1000));
 const TRUST_PROXY = String(process.env.TRUST_PROXY || 'true') === 'true';
 const APP_IS_HTTPS = String(process.env.APP_URL || '').startsWith('https://');
@@ -97,6 +97,7 @@ let cache = {
   lastGoodAt: 0
 };
 let refreshPromise = null;
+let ruleTimer = null;
 
 async function loadRules() {
   const now = new Date();
@@ -148,6 +149,9 @@ function shouldLog(key, windowMs) {
     for (const [k, v] of logThrottle) {
       if (now - v > 10 * 60 * 1000) logThrottle.delete(k);
     }
+    // 扫描器能在几分钟里造出上万个不同的 IP，按时间清理可能跟不上，
+    // 这里直接重建，保证限流表本身不会变成无上限的内存占用。
+    if (logThrottle.size > 5000) logThrottle.clear();
   }
   return true;
 }
@@ -179,7 +183,9 @@ function deny(res, ip, reason) {
     'Referrer-Policy': 'no-referrer'
   });
   res.end(body);
-  log('ipguard.denied', { ip, reason });
+  if (shouldLog(`denylog:${ip || 'unknown'}`, 5000)) {
+    log('ipguard.denied', { ip, reason });
+  }
 }
 
 function unavailable(res, reason) {
@@ -207,7 +213,12 @@ async function guard(req, res) {
     return false;
   }
 
-  await refreshRules();
+  // 只有「从没成功加载过白名单」时才把请求压在数据库查询上：冷启动宁可多等
+  // 也要保持 fail closed。之后由定时器按 CACHE_MS 预热，请求路径不再等 SQL，
+  // 被扫描时数据库的查询频率恒定为 1/CACHE_MS，而不是 1/请求。
+  if (cache.lastGoodAt === 0) {
+    await refreshRules(true);
+  }
   if (cache.error && Date.now() - cache.lastGoodAt > 5000) {
     unavailable(res, 'whitelist-db-unavailable');
     return false;
@@ -215,7 +226,9 @@ async function guard(req, res) {
 
   const matched = cache.rules.find((rule) => matchesCidr(ip, rule.parsed));
   if (!matched) {
-    if (shouldLog(`deny:${ip.ip}:${pathOnly}`, 5000)) {
+    // 按 IP 限流而不是 IP+路径：扫描器能用几千个路径把访问日志表写爆。
+    // 记录的是抢到窗口的这一次请求，足够定位来源和意图。
+    if (shouldLog(`deny:${ip.ip}`, 5000)) {
       accessLog({ ip: ip.ip, path: pathOnly, method: req.method || '-', allowed: false, reason: reason === 'trusted-proxy' ? 'not-allowlisted' : reason, userAgent: ua });
     }
     deny(res, ip.ip, 'not-allowlisted');
@@ -304,6 +317,8 @@ async function main() {
   server.listen(PORT, HOST, () => {
     log('server.listening', { host: HOST, port: PORT, dev: isDev, trustProxy: TRUST_PROXY });
     refreshRules(true).catch(() => undefined);
+    ruleTimer = setInterval(() => void refreshRules(), CACHE_MS);
+    ruleTimer.unref();
   });
 
   let shuttingDown = false;
@@ -311,6 +326,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     log('server.shutting_down', { signal });
+    if (ruleTimer) clearInterval(ruleTimer);
     server.close(() => log('server.http_closed'));
     try {
       await prisma.$disconnect();

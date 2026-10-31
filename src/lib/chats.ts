@@ -314,17 +314,20 @@ export async function maybeSetGeneratedTitle(chat: Chat, firstUserText: string):
 
 export async function buildConversation(input: {
   chatId: string;
+  userId: string;
   currentContent: string;
   attachments: Attachment[];
   provider: AiProvider;
 }): Promise<AiMessage[]> {
-  const chat = await prisma.chat.findUnique({
-    where: { id: input.chatId },
+  // 按 userId 一起过滤：这里拿到的是要发给外部模型的内容，
+  // 不能只依赖调用方先做过归属校验，否则越权会话会被整段发出去。
+  const chat = await prisma.chat.findFirst({
+    where: { id: input.chatId, userId: input.userId },
     select: { id: true }
   });
   if (!chat) throw new ApiError(404, 'CHAT_NOT_FOUND', '会话不存在');
   const historical = await prisma.message.findMany({
-    where: { chatId: input.chatId },
+    where: { chatId: chat.id },
     orderBy: { createdAt: 'asc' },
     take: 60
   });

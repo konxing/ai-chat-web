@@ -202,7 +202,7 @@ journalctl -u family-ai-chat -f
 | 所有 IP 403 | 数据库无启用规则；`TRUSTED_PROXY_CIDRS` 未包含 Nginx 地址；规则 CIDR 不覆盖当前 IP；等待 `IP_CACHE_MS` |
 | 502/500，健康检查失败 | app 未启动/迁移失败；`docker compose logs app`；`curl 127.0.0.1:3000/api/health`；数据库连接 |
 | Nginx 启动失败 | 证书路径/权限；`docker compose logs nginx`；`docker compose exec nginx nginx -t` |
-| 登录后立刻退出 | `APP_URL` 与访问域名不一致导致 Secure Cookie/Origin；检查 HTTPS 与反向代理头 |
+| 登录后立刻退出 | `APP_URL` 与访问域名不一致导致 Secure Cookie/Origin；多入口访问要给 `ALLOWED_ORIGINS`；检查 HTTPS 与反向代理头 |
 | 收不到验证码 | `EMAIL_TRANSPORT=console` 时看日志；SMTP 配置/端口/垃圾邮件；生产禁止 `file` |
 | 模型连接失败 | Base URL 必须 HTTPS 且公网；SSRF 阻断私网；`/models` 是否可用；Key 是否有效 |
 | 上传 413 | Nginx `client_max_body_size`(25m)、应用 `MAX_UPLOAD_MB`、反向代理限制 |
@@ -213,6 +213,6 @@ journalctl -u family-ai-chat -f
 
 - 升级前：`npm run backup`，下载并校验 SHA-256，确认 `.env`/主密钥已离线保存。
 - Prisma 迁移在启动时自动执行；大版本升级前先在 staging 用同版本 PostgreSQL 演练。
-- 更换域名会改变 `APP_URL`：Secure Cookie 与 Origin 校验都会受影响，需重新登录。
+- 更换域名会改变 `APP_URL`：Secure Cookie 与 Origin 校验都会受影响，需重新登录；过渡期可把旧域名一并写进 `ALLOWED_ORIGINS`。
 - 更换服务器：迁移数据库、uploads、`.env`（主密钥必须一致）、证书；恢复后验证历史聊天/附件可解密。
 - 主密钥轮换见 [ENCRYPTION.md](ENCRYPTION.md)；不要在没验证前删旧 key。
