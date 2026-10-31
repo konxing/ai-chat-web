@@ -24,13 +24,14 @@ export async function POST(req: Request) {
       throw err;
     }
     const user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (!user) throw new ApiError(400, 'INVALID_CODE', '验证码无效');
+    // 被停用的账号不得通过重置自助恢复：与验证码无效走同一分支，避免泄露账号状态。
+    if (!user || user.status !== 'ACTIVE') throw new ApiError(400, 'INVALID_CODE', '验证码无效');
     const policy = passwordPolicyError(body.password, { username: user.username, email: user.email });
     if (policy) throw new ApiError(400, 'WEAK_PASSWORD', policy);
 
     const passwordHash = await hashPassword(body.password);
     await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { passwordHash, status: 'ACTIVE' } }),
+      prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
       prisma.session.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() }
