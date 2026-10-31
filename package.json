@@ -15,6 +15,7 @@
     "sync:firewall": "tsx scripts/sync-firewall.ts",
     "rotate-keys": "tsx scripts/rotate-keys.ts",
     "backup": "node scripts/backup.mjs",
+    "logs:prune": "tsx scripts/prune-logs.ts",
     "restore": "node scripts/restore.mjs",
     "test": "vitest run tests/unit",
     "test:unit": "vitest run tests/unit",
