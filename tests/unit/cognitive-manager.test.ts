@@ -83,24 +83,47 @@ describe('认知模块的读侧', () => {
 
   it('一个模块抛错，另一个照常产出，且错误原文不进返回值也不进日志', async () => {
     const manager = await loadManager();
-    db.row = { memoryEnabled: true, profileEnabled: true };
+    db.row = { memoryEnabled: true, userModelEnabled: true };
     manager.registerCognitiveModule({
       key: 'memory',
       read: () => Promise.reject(new Error('解析失败，原文：用户的孩子叫小满'))
     });
     manager.registerCognitiveModule({
-      key: 'profile',
-      read: () => Promise.resolve([{ module: 'profile', label: '用户画像', text: '偏好简短回答' }])
+      key: 'userModel',
+      read: () => Promise.resolve([{ module: 'userModel', label: '用户画像', text: '偏好简短回答' }])
     });
 
     const result = await manager.runCognitiveReads(turnFixture());
 
     expect(result.failed).toEqual(['memory']);
-    expect(result.blocks.map((block) => block.module)).toEqual(['profile']);
+    expect(result.blocks.map((block) => block.module)).toEqual(['userModel']);
     const serialized = JSON.stringify({ result, warns: db.warns });
     expect(serialized).not.toContain('小满');
     expect(serialized).not.toContain('解析失败');
     expect(db.warns.map((entry) => entry[0])).toContain('cognitive.read_failed');
+  });
+
+  it('七个模块各看各的开关，互不牵连', async () => {
+    const manager = await loadManager();
+    const keys = ['memory', 'userModel', 'emotion', 'association', 'timeline', 'reflection', 'decisionMemory'] as const;
+    const called: string[] = [];
+    for (const key of keys) {
+      manager.registerCognitiveModule({
+        key,
+        read: () => {
+          called.push(key);
+          return Promise.resolve([{ module: key, label: key, text: '片段' }]);
+        }
+      });
+    }
+
+    for (const key of keys) {
+      called.length = 0;
+      db.row = { [`${key}Enabled`]: true };
+      const result = await manager.runCognitiveReads(turnFixture());
+      expect(called).toEqual([key]);
+      expect(result.failed).toEqual([]);
+    }
   });
 
   it('模块卡住时在截止时间内被放弃，对话不必等它', async () => {
@@ -122,7 +145,7 @@ describe('认知模块的读侧', () => {
 describe('认知模块的写侧', () => {
   it('写侧同样按开关过滤，且失败不外抛', async () => {
     const manager = await loadManager();
-    db.row = { memoryEnabled: true, profileEnabled: true };
+    db.row = { memoryEnabled: true, userModelEnabled: true };
     const written: string[] = [];
     let emotionWrites = 0;
     manager.registerCognitiveModule({
@@ -134,7 +157,7 @@ describe('认知模块的写侧', () => {
       }
     });
     manager.registerCognitiveModule({
-      key: 'profile',
+      key: 'userModel',
       read: () => Promise.resolve([]),
       write: () => Promise.reject(new Error('画像写挂了'))
     });
@@ -147,7 +170,7 @@ describe('认知模块的写侧', () => {
       }
     });
 
-    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({ failed: ['profile'] });
+    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({ failed: ['userModel'] });
     expect(written).toEqual(['user-a']);
     expect(emotionWrites).toBe(0);
     expect(JSON.stringify(db.warns)).not.toContain('画像写挂了');

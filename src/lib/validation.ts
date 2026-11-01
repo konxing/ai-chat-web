@@ -107,10 +107,15 @@ export const adminConfigSchema = z.object({
   maintenanceNotice: z.string().max(500).optional()
 });
 
-/** 四个开关都是可选的：只提交改动的那一项，其余保持原值。 */
+/** 九个字段全部可选：只提交改动的那一项，其余保持原值。 */
 export const cognitivePreferencesPatchSchema = z.object({
   memoryEnabled: z.boolean().optional(),
-  profileEnabled: z.boolean().optional(),
+  userModelEnabled: z.boolean().optional(),
   emotionEnabled: z.boolean().optional(),
+  associationEnabled: z.boolean().optional(),
+  timelineEnabled: z.boolean().optional(),
+  reflectionEnabled: z.boolean().optional(),
+  decisionMemoryEnabled: z.boolean().optional(),
+  adaptiveMemoryEnabled: z.boolean().optional(),
   emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional()
 });

@@ -87,13 +87,18 @@ describe('认知开关接口', () => {
     expect(db.authCalls[0].opts).toBeUndefined();
   });
 
-  it('GET 返回当前四个开关，库里没记录时全是默认关闭', async () => {
+  it('GET 返回全部八个开关，库里没记录时全是默认关闭', async () => {
     const { payload } = await call('GET');
 
     expect(payload.data.preferences).toEqual({
       memoryEnabled: false,
-      profileEnabled: false,
+      userModelEnabled: false,
       emotionEnabled: false,
+      associationEnabled: false,
+      timelineEnabled: false,
+      reflectionEnabled: false,
+      decisionMemoryEnabled: false,
+      adaptiveMemoryEnabled: false,
       emotionTransparency: 'implicit'
     });
   });
@@ -114,12 +119,12 @@ describe('认知开关接口', () => {
   });
 
   it('空补丁不改变任何东西', async () => {
-    await call('PATCH', { profileEnabled: true });
+    await call('PATCH', { userModelEnabled: true });
 
     const { response } = await call('PATCH', {});
 
     expect(response.status).toBe(200);
-    expect(db.rows.get('user-a')).toMatchObject({ profileEnabled: true, memoryEnabled: false });
+    expect(db.rows.get('user-a')).toMatchObject({ userModelEnabled: true, memoryEnabled: false });
   });
 
   it('写进库的透明度用数据库的大写枚举，小写只活在外层接口', async () => {

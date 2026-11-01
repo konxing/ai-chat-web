@@ -1,7 +1,14 @@
 import { log } from '@/lib/logger';
 import { getCognitivePreferences, type CognitivePreferences } from './preferences';
 
-export type CognitiveModuleKey = 'memory' | 'profile' | 'emotion';
+export type CognitiveModuleKey =
+  | 'memory'
+  | 'userModel'
+  | 'emotion'
+  | 'association'
+  | 'timeline'
+  | 'reflection'
+  | 'decisionMemory';
 
 /** 一次对话轮次里模块能拿到的全部上下文——只给 id 和正文，不给别人的数据。 */
 export interface CognitiveTurn {
@@ -31,8 +38,12 @@ export const COGNITIVE_MODULE_DEADLINE_MS = 1000;
 
 const SWITCH: Record<CognitiveModuleKey, keyof CognitivePreferences> = {
   memory: 'memoryEnabled',
-  profile: 'profileEnabled',
-  emotion: 'emotionEnabled'
+  userModel: 'userModelEnabled',
+  emotion: 'emotionEnabled',
+  association: 'associationEnabled',
+  timeline: 'timelineEnabled',
+  reflection: 'reflectionEnabled',
+  decisionMemory: 'decisionMemoryEnabled'
 };
 
 const registry = new Map<CognitiveModuleKey, CognitiveModule>();
