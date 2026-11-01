@@ -254,3 +254,46 @@ icacls "D:\FamilyAIChat\uploads"          :: 不应再出现 Users / Authenticat
 ```
 
 ACL 检查只能证明「权限还在」，不能证明服务真的能起来。改完挑一个方便的时间重启一次 PostgreSQL 服务确认；日志在 `pgdata\log\`，出现 `could not open` / `Permission denied` 就说明授权漏了，先回滚再重来。
+
+## 14. 响应压缩
+
+站点用自定义 `server.js` 启动，而 `next.config.mjs` 里默认的 `compress: true` 只作用于 `next start`——自定义 server 不走那条路，所以压缩必须自己做。此前两处都没做，JS/CSS/HTML 全部明文过网；本机 127.0.0.1 带宽无限感知不到，公网访问就要把同样的字节跑一遍 RTT。本机实测（`zlib`，74KB 真实混合文本）压到 32KB，约 43%。
+
+现在的两层：
+
+- **Nginx**（`family-ai-chat.host.conf` / `.compose.conf` 的 443 server 块）：`gzip on` + `gzip_proxied any` + `comp_level 5` + `min_length 1024`。`gzip_proxied` 默认是 `off`，即对 `proxy_pass` 出来的响应一个字节都不压，这行是必须写的。
+- **应用层**（`server-gzip.cjs`，由 `server.js` 在每个请求上 `attachGzip`）：用 Node 自带 `zlib` 包一层，没有新增依赖。没有 Nginx 的部署（例如 Windows 上直连 3000）也照样有压缩。
+
+两处都刻意**不碰** `text/event-stream`：流式对话要逐 token 抵达浏览器，压了就会缓冲。另外跳过 `HEAD`、带 `Range` 的请求、非 2xx、已带 `Content-Encoding` 的响应、小于 1024 字节的 body，以及 woff2/图片（自身已压缩，重压只费 CPU）。响应会补 `Vary: Accept-Encoding`，已有的 `Vary`（`RSC` 等）是追加而不是覆盖。
+
+### 生效与验证
+
+Nginx 部分要 reload 才生效（配置有语法错误时 reload 会失败，先测再加载）：
+
+```bash
+sudo nginx -t && sudo nginx -s reload
+# Compose 部署：
+docker compose -f docker-compose.yml exec nginx nginx -t && docker compose -f docker-compose.yml restart nginx
+```
+
+应用部分改了 `server.js`/`server-gzip.cjs`，必须重启 Node 进程才生效。
+
+```bash
+# 首屏 HTML
+curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' https://chat.example.com/login | grep -i -E 'content-encoding|vary'
+# 找一个真实的 JS chunk 压不压
+ls .next/static/chunks/*.js | head -1
+curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \
+  "https://chat.example.com/_next/static/chunks/$(basename "$(ls .next/static/chunks/*.js | head -1)")" \
+  | grep -i -E 'content-encoding|content-length|vary'
+# 不带 Accept-Encoding 时必须原样返回，且不能出现 gzip 头
+curl -sS -o /dev/null -D - https://chat.example.com/login | grep -i -E 'content-encoding|content-length'
+```
+
+期望：带 `Accept-Encoding: gzip` 时 `content-encoding: gzip` 且**没有** `content-length`（长度变了，只能分块传输），`vary` 里有 `Accept-Encoding`。
+
+### 代价
+
+gzip level 5/6 是 CPU 换带宽。静态 chunk 由 Nginx 压，应用进程几乎不承担；`/login`、`/chat` 这类 SSR HTML 每次响应都要压一遍，本机实测 74KB 文本 level 6 用 1.3ms。要量化前后差异，就比对同一 URL 的 `curl -w '%{size_download}'`（带/不带 `Accept-Encoding` 各一次）。
+
+`Content-Security-Policy` 之类的头不受影响；`X-Content-Type-Options` 等安全头由 `addSecurityHeaders` 在压缩包装之前设置，两层互不覆盖。

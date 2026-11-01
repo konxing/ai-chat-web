@@ -47,7 +47,7 @@ COPY --from=build --chown=node:node /app/prisma ./prisma
 COPY --from=build --chown=node:node /app/public ./public
 COPY --from=build --chown=node:node /app/scripts ./scripts
 COPY --from=build --chown=node:node /app/src ./src
-COPY --from=build --chown=node:node /app/server.js ./
+COPY --from=build --chown=node:node /app/server.js /app/server-gzip.cjs ./
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh \
   && mkdir -p uploads backups \

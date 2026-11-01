@@ -14,6 +14,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { PrismaClient } = require('@prisma/client');
 const ipaddr = require('ipaddr.js');
+const { attachGzip } = require('./server-gzip.cjs');
 
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV !== 'production';
 const PORT = Number(process.env.PORT || 3000);
@@ -285,6 +286,7 @@ async function main() {
       const allowed = await guard(req, res);
       if (!allowed) return;
       addSecurityHeaders(res);
+      attachGzip(req, res);
       await handle(req, res);
     } catch (err) {
       logErr('server.request_failed', { error: err instanceof Error ? err.message : String(err) });
