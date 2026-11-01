@@ -216,3 +216,41 @@ journalctl -u family-ai-chat -f
 - 更换域名会改变 `APP_URL`：Secure Cookie 与 Origin 校验都会受影响，需重新登录；过渡期可把旧域名一并写进 `ALLOWED_ORIGINS`。
 - 更换服务器：迁移数据库、uploads、`.env`（主密钥必须一致）、证书；恢复后验证历史聊天/附件可解密。
 - 主密钥轮换见 [ENCRYPTION.md](ENCRYPTION.md)；不要在没验证前删旧 key。
+
+## 13. Windows 数据目录权限基线
+
+Windows 的卷根默认把访问权继承给所有本机账户：实测 `D:\` 上挂着 `NT AUTHORITY\Authenticated Users:(M)` 和 `BUILTIN\Users:(RX)` 且带 `(OI)(CI)`，于是 `D:\FamilyAIChat` 里的每一条都标着 `(I)`。换句话说，任何登录过这台机器的账户、以及任何以这些账户身份运行的进程，都能读数据库文件、上传文件和备份。聊天正文是密文，但库里仍有用户名、邮箱、bcrypt 散列、IP 规则、会话哈希与 provider base URL，值得单独圈起来。
+
+不要去改 `D:\` 根（盘上其他目录会一起受影响），在应用目录这一层断开继承就够。本机 2026-11-01 已应用的基线：
+
+| 对象 | ACE |
+| --- | --- |
+| `D:\FamilyAIChat` | `KONXING\kkxin:(OI)(CI)F`、`BUILTIN\Administrators:(OI)(CI)F`、`NT AUTHORITY\SYSTEM:(OI)(CI)F`、`NT AUTHORITY\NETWORK SERVICE:(RX)` —— 最后一条不带 `(OI)(CI)`，只作用于这个目录本身，让数据库服务能穿过它 |
+| `pgdata\**` | 上面三条 + `NETWORK SERVICE:(OI)(CI)F`（服务账号是 `postgresql-x64-17` 的登录身份，实测为 `NT AUTHORITY\NetworkService` = S-1-5-20） |
+| `uploads\**`、`backups\**` | 只有继承下来的三条，不授予任何服务账号 |
+
+重建命令：
+
+```bat
+icacls "D:\FamilyAIChat\pgdata" /grant "NT AUTHORITY\NetworkService:(OI)(CI)F"
+icacls "D:\FamilyAIChat" /inheritance:r /grant:r "KONXING\kkxin:(OI)(CI)F" "BUILTIN\Administrators:(OI)(CI)F" "NT AUTHORITY\SYSTEM:(OI)(CI)F" "NT AUTHORITY\NetworkService:(RX)"
+```
+
+顺序不能颠倒：必须先给 `pgdata` 补上服务账号，再断根目录的继承，否则下一次数据库服务重启会因为进不去数据目录而起不来。断开继承后新 ACE 会自动向下传播，不必对 pgdata 里几万个文件跑 `/t`。
+
+回滚（改前已把整棵树的 ACL 存档，`icacls <目录> /save <文件> /t /q`）：
+
+```bat
+icacls "D:\FamilyAIChat" /restore "C:\Users\kkxin\AppData\Local\Temp\familyaichat-acl-20261101.txt"
+```
+
+存档在 Temp 里，重启可能被清理，要长期保留就另拷一份；它只含 trustee 名字和 ACE，不含任何数据。
+
+验证基线还在：
+
+```bat
+icacls "D:\FamilyAIChat\pgdata\pg_wal"   :: 必须仍能看到 NETWORK SERVICE
+icacls "D:\FamilyAIChat\uploads"          :: 不应再出现 Users / Authenticated Users
+```
+
+ACL 检查只能证明「权限还在」，不能证明服务真的能起来。改完挑一个方便的时间重启一次 PostgreSQL 服务确认；日志在 `pgdata\log\`，出现 `could not open` / `Permission denied` 就说明授权漏了，先回滚再重来。

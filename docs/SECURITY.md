@@ -51,11 +51,12 @@
 
 ## 网络与运维
 
-- `server.js` 默认拒绝；数据库不可用超过 5 秒返回 503，而不是 fail-open；白名单缓存默认 1 秒，删除规则后最迟约 1 秒生效。
+- `server.js` 默认拒绝；数据库不可用超过 5 秒返回 503，而不是 fail-open；白名单缓存默认 1 秒，规则改动由后台定时器预热，最迟约 2×`IP_CACHE_MS` 生效。
 - 403 页面不回显任意 header，只回显清洗后的 IP。
 - Nginx `auth_request` 失败即拒绝；TLS 仅 1.2/1.3，HSTS 2 年；HTTP 301 到 HTTPS；SSE 关闭缓冲；访问日志去掉 query string。
 - nftables 只处理 80/443 与 3000，不影响 SSH；云安全组作为最外层。任何防火墙变更前先保留控制台/带外访问。
 - 备份文件、`.env`、证书私钥、`deploy/nginx/ssl/` 均在 `.gitignore`/`.dockerignore` 中；镜像构建使用无意义占位环境变量，不烘焙真实密钥。
+- Windows 单机部署的数据目录（`pgdata`/`uploads`/`backups`）不继承 `BUILTIN\Users` 与 `Authenticated Users`，只留给属主、SYSTEM、Administrators，数据库服务账号按最小需要单独授予；基线与回滚见 [DEPLOYMENT.md](DEPLOYMENT.md) 第 13 节。
 
 ## 审计
 

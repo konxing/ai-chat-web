@@ -84,7 +84,7 @@ npm run rotate-keys -- --new-key-id k2
 - 只打印文件路径，不把密钥打印到 stdout（stdout 会进 journald 与 SSH 会话记录），也**不会**自动改 `.env`，避免误覆盖；
 - 支持 `--dry-run` 预估数量；`--new-key` 可指定已有 key。
 
-Windows 上文件权限从目录继承，`0o600` 不起作用：把 `key-rotation` 目录单独收紧到当前用户，例如
+Windows 上文件权限从目录继承，`0o600` 不起作用。按 [DEPLOYMENT.md 第 13 节](DEPLOYMENT.md) 的基线把 `D:\FamilyAIChat` 收紧后，`backups\key-rotation` 会继承下来，只有属主、SYSTEM 和 Administrators 能读，无需额外操作。没做那套基线时，至少把这个目录单独收紧到当前用户，例如
 `icacls "D:\\FamilyAIChat\\backups\\key-rotation" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"`。
 
 测试证据：集成测试在隔离数据库中执行了真实轮换（k1 → it2），确认所有 Chat 标题前缀为 `enc:v1:it2:`，重启后聊天、消息、附件仍可解密；单元测试覆盖篡改密文/tag/AAD、旧 key 解密、未知 key id 失败。
