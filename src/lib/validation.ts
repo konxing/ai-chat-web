@@ -106,3 +106,11 @@ export const adminConfigSchema = z.object({
   maxUploadMB: z.number().int().min(1).max(320).optional(),
   maintenanceNotice: z.string().max(500).optional()
 });
+
+/** 四个开关都是可选的：只提交改动的那一项，其余保持原值。 */
+export const cognitivePreferencesPatchSchema = z.object({
+  memoryEnabled: z.boolean().optional(),
+  profileEnabled: z.boolean().optional(),
+  emotionEnabled: z.boolean().optional(),
+  emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional()
+});

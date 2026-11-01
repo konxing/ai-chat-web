@@ -51,6 +51,12 @@ enum AuditStatus {
   FAILURE
 }
 
+enum EmotionTransparency {
+  OFF
+  IMPLICIT
+  EXPLICIT
+}
+
 model User {
   id             String     @id @default(uuid())
   username       String     @unique @db.VarChar(32)
@@ -67,6 +73,7 @@ model User {
   sessions       Session[]
   chats          Chat[]
   aiProviders    AiProvider[]
+  cognitive      CognitivePreference?
   attachments    Attachment[]
   loginLogs      LoginLog[]
   auditLogs      AuditLog[]      @relation("AuditActor")
@@ -285,4 +292,18 @@ model EmailToken {
   @@index([email, purpose, createdAt])
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// 认知引擎的用户级开关。三个模块各自独立启用，默认全关——没有这一行也就等于全关。
+/// 关掉只停读写，不删任何数据；清空数据是另一个动作（Phase 6 的删除接口）。
+model CognitivePreference {
+  userId              String              @id
+  memoryEnabled       Boolean             @default(false)
+  profileEnabled      Boolean             @default(false)
+  emotionEnabled      Boolean             @default(false)
+  emotionTransparency EmotionTransparency @default(IMPLICIT)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
