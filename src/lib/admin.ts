@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import type { Prisma, User } from '@prisma/client';
+import { Prisma, type User } from '@prisma/client';
 import { prisma } from './prisma';
 import { loadEnv } from './env';
 import { ApiError, getRequestIp, getUserAgent } from './http';
@@ -125,26 +125,21 @@ export async function listUsers(url: URL): Promise<PageResult<PublicUser>> {
     }),
     prisma.user.count({ where })
   ]);
-  const counts = rows.length
-    ? await prisma.message.groupBy({
-        by: ['chatId'],
-        where: { chat: { userId: { in: rows.map((r) => r.id) } } },
-        _count: { _all: true }
-      })
-    : [];
-  const chatToUser = new Map(
-    (
-      await prisma.chat.findMany({
-        where: { userId: { in: rows.map((r) => r.id) } },
-        select: { id: true, userId: true }
-      })
-    ).map((c) => [c.id, c.userId])
-  );
+  /**
+   * 每个用户的消息数用一条按 userId 分组的聚合拿：回 Node 的行数最多等于这一页的用户数。
+   * 原先的写法是 message.groupBy(chatId) 再把整页用户的全部聊天行拉回内存拼 chatId→userId
+   * 映射，翻页一次的传输量随这些用户的聊天总数线性增长。
+   */
   const messageCounts = new Map<string, number>();
-  for (const row of counts) {
-    const userId = chatToUser.get(row.chatId);
-    if (!userId) continue;
-    messageCounts.set(userId, (messageCounts.get(userId) ?? 0) + row._count._all);
+  if (rows.length) {
+    const perUser = await prisma.$queryRaw<Array<{ userId: string; messages: number }>>`
+      SELECT c."userId" AS "userId", COUNT(m.id)::int AS "messages"
+      FROM "Chat" c
+      LEFT JOIN "Message" m ON m."chatId" = c.id
+      WHERE c."userId" IN (${Prisma.join(rows.map((row) => row.id))})
+      GROUP BY c."userId"
+    `;
+    for (const row of perUser) messageCounts.set(row.userId, row.messages);
   }
   return {
     items: rows.map((row) => publicUser({ ...row, messages: messageCounts.get(row.id) ?? 0 })),
@@ -501,15 +496,19 @@ export interface ServiceStatus {
 }
 
 /**
- * `pg_database_size()` 要逐个 stat 数据目录下的文件，Windows 上稳定 100ms 级，
- * 而它只是管理台的一个展示数字。60 秒内复用上一次结果；失败不写缓存，
- * 下一次仍然真查。顺带让 database.latencyMs 回到「查询往返延迟」本意。
+ * 管理台首屏那几个「展示用体积」数字的共同策略：底层 IO（逐文件 stat）比它
+ * 值得展示的准确度贵得多，所以 60 秒内复用上一次结果；失败不写缓存，下一次仍然真查。
  */
-const DB_SIZE_TTL_MS = 60_000;
+const DISPLAY_METRIC_TTL_MS = 60_000;
+
+/**
+ * `pg_database_size()` 要逐个 stat 数据目录下的文件，Windows 上稳定 100ms 级，
+ * 而它只是管理台的一个展示数字。顺带让 database.latencyMs 回到「查询往返延迟」本意。
+ */
 let dbSizeCache: { at: number; bytes: number } | null = null;
 
 async function databaseSizeBytes(): Promise<number | null> {
-  if (dbSizeCache && Date.now() - dbSizeCache.at < DB_SIZE_TTL_MS) return dbSizeCache.bytes;
+  if (dbSizeCache && Date.now() - dbSizeCache.at < DISPLAY_METRIC_TTL_MS) return dbSizeCache.bytes;
   const rows = await prisma.$queryRaw<Array<{ size: bigint }>>`SELECT pg_database_size(current_database()) AS size`;
   if (!rows[0]) return null;
   const bytes = Number(rows[0].size);
@@ -599,6 +598,18 @@ async function directorySize(dir: string): Promise<number> {
   return total;
 }
 
+/** 上传目录同样只为展示一个数字：递归 stat 整棵树 60 秒内只做一次。 */
+let uploadsSizeCache: { at: number; dir: string; bytes: number } | null = null;
+
+async function cachedDirectorySize(dir: string): Promise<number> {
+  if (uploadsSizeCache && uploadsSizeCache.dir === dir && Date.now() - uploadsSizeCache.at < DISPLAY_METRIC_TTL_MS) {
+    return uploadsSizeCache.bytes;
+  }
+  const bytes = await directorySize(dir);
+  uploadsSizeCache = { at: Date.now(), dir, bytes };
+  return bytes;
+}
+
 export async function getOverview(): Promise<OverviewData> {
   const env = loadEnv();
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -640,7 +651,7 @@ export async function getOverview(): Promise<OverviewData> {
     prisma.loginLog.count({ where: { createdAt: { gt: dayAgo }, success: true } }),
     prisma.ipAccessLog.count({ where: { createdAt: { gt: dayAgo }, allowed: false } }),
     getServiceStatus(),
-    directorySize(path.resolve(env.UPLOAD_DIR))
+    cachedDirectorySize(path.resolve(env.UPLOAD_DIR))
   ]);
   return {
     users: {

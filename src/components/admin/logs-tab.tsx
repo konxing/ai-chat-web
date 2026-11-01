@@ -28,6 +28,16 @@ const TITLES: Record<Mode, { title: string; hint: string; endpoint: string }> = 
   }
 };
 
+type Filters = { ip: string; username: string; action: string; loginSuccess: string; allowed: string; from: string; to: string };
+
+const EMPTY_FILTERS: Filters = { ip: '', username: '', action: '', loginSuccess: '', allowed: '', from: '', to: '' };
+
+// 条件没变就沿用旧引用：让「点筛选」之后那个还在排队的防抖定时器变成空转，
+// 不再触发第二次分页查询。
+function sameFilters(a: Filters, b: Filters): boolean {
+  return Object.keys(EMPTY_FILTERS).every((key) => a[key as keyof Filters] === b[key as keyof Filters]);
+}
+
 export function LogsTab({ mode }: { mode: Mode }) {
   const meta = TITLES[mode];
   const [ip, setIp] = useState('');
@@ -39,9 +49,18 @@ export function LogsTab({ mode }: { mode: Mode }) {
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
   const [reload, setReload] = useState(0);
+  const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [data, setData] = useState<Paged<LoginLogItem | AuditLogItem | AccessLogItem> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  function snapshot(): Filters {
+    return { ip, username, action, loginSuccess, allowed, from, to };
+  }
+
+  function commitFilters(next: Filters) {
+    setApplied((prev) => (sameFilters(prev, next) ? prev : next));
+  }
 
   useEffect(() => {
     setData(null);
@@ -53,29 +72,40 @@ export function LogsTab({ mode }: { mode: Mode }) {
     setAllowed('');
     setFrom('');
     setTo('');
+    commitFilters(EMPTY_FILTERS);
   }, [mode]);
+
+  // 和 users-tab 同一个节奏：输入停顿 320ms 才把条件交给查询，
+  // 否则每敲一个字符都要把三张日志表分页扫一遍。
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      commitFilters(snapshot());
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [ip, username, action, loginSuccess, allowed, from, to]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: '30' });
-      if (ip.trim()) params.set('ip', ip.trim());
-      if (from) params.set('from', new Date(`${from}T00:00:00`).toISOString());
-      if (to) params.set('to', new Date(`${to}T23:59:59`).toISOString());
+      if (applied.ip.trim()) params.set('ip', applied.ip.trim());
+      if (applied.from) params.set('from', new Date(`${applied.from}T00:00:00`).toISOString());
+      if (applied.to) params.set('to', new Date(`${applied.to}T23:59:59`).toISOString());
       if (mode === 'login') {
-        if (username.trim()) params.set('username', username.trim());
-        if (loginSuccess) params.set('success', loginSuccess);
+        if (applied.username.trim()) params.set('username', applied.username.trim());
+        if (applied.loginSuccess) params.set('success', applied.loginSuccess);
       }
-      if (mode === 'audit' && action.trim()) params.set('action', action.trim());
-      if (mode === 'access' && allowed) params.set('allowed', allowed);
+      if (mode === 'audit' && applied.action.trim()) params.set('action', applied.action.trim());
+      if (mode === 'access' && applied.allowed) params.set('allowed', applied.allowed);
       setData(await apiFetch<Paged<LoginLogItem | AuditLogItem | AccessLogItem>>(`${meta.endpoint}?${params.toString()}`));
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, [action, allowed, from, ip, loginSuccess, meta.endpoint, mode, page, to, username, reload]);
+  }, [applied, meta.endpoint, mode, page, reload]);
 
   useEffect(() => {
     void load();
@@ -83,6 +113,7 @@ export function LogsTab({ mode }: { mode: Mode }) {
 
   function applyFilters(event: React.FormEvent) {
     event.preventDefault();
+    commitFilters(snapshot());
     setPage(1);
     setReload((v) => v + 1);
   }
