@@ -13,7 +13,7 @@ const DEFAULTS: SystemSettings = {
   siteName: '澄境 · Family AI',
   registrationOpen: false,
   defaultProviderId: null,
-  maxUploadMB: 20,
+  maxUploadMB: 300,
   maintenanceNotice: ''
 };
 
@@ -29,7 +29,7 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
   if (key === 'registrationOpen') return Boolean(value) as SystemSettings[K];
   if (key === 'maxUploadMB') {
     const n = Number(value);
-    return (Number.isFinite(n) && n >= 1 && n <= 100 ? Math.floor(n) : DEFAULTS.maxUploadMB) as SystemSettings[K];
+    return (Number.isFinite(n) && n >= 1 && n <= 320 ? Math.floor(n) : DEFAULTS.maxUploadMB) as SystemSettings[K];
   }
   if (key === 'defaultProviderId') {
     return (typeof value === 'string' && value.length > 0 ? value : null) as SystemSettings[K];

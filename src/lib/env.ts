@@ -27,7 +27,7 @@ const schema = z.object({
   SMTP_PASS: z.string().optional().default(''),
   TEST_MAIL_DIR: z.string().optional().default('./test-results/mail'),
   UPLOAD_DIR: z.string().default('./uploads'),
-  MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(100).default(20),
+  MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(320).default(300),
   BACKUP_DIR: z.string().default('./backups'),
   BACKUP_PASSPHRASE: z.string().optional().default(''),
   ALLOW_PRIVATE_AI_URLS: boolFromString.default(false),

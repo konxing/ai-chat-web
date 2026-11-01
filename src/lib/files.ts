@@ -38,6 +38,53 @@ const ALLOWED: AllowedType[] = [
 
 const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'csv']);
 
+/**
+ * 图片按张算上限，和文档共用那个数是两回事：图片是 base64 原样进请求体的，
+ * 文档进模型的是抽出来的文本。所以 8MB 只钉图片，超了在上传时就拒掉——
+ * 以前是收下来再在「发给模型」那一步静默丢弃，用户只看见模型像没看到图。
+ */
+export const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * 一次请求最多送几张图给模型。图片是 base64 原样进请求体的，4 张 8MB 图就是几十 MB 出站，
+ * 再多会撞服务商的请求体上限——所以「挂得上」和「发得出去」是两个数。
+ */
+export const MAX_IMAGES_PER_REQUEST = 4;
+
+/**
+ * 这一次能进请求的图片：先过体积闸（库里可能还有规则之前收进来的大图），再截前 N 张。
+ * imageDataUrls 和「另外 N 张未发送」的提示共用它，规则只写一遍。
+ */
+export function selectableImages(attachments: Attachment[]): Attachment[] {
+  return attachments
+    .filter((a) => a.kind === 'IMAGE' && a.size <= IMAGE_MAX_BYTES)
+    .slice(0, MAX_IMAGES_PER_REQUEST);
+}
+
+/** 这一轮图片「发出几张、剩下几张没进模型」，规则只在 selectableImages 里写一遍。 */
+export function imageSendSummary(attachments: Attachment[]): { sent: number; skipped: number } {
+  const total = attachments.filter((a) => a.kind === 'IMAGE').length;
+  const sent = selectableImages(attachments).length;
+  return { sent, skipped: total - sent };
+}
+
+/**
+ * 原件存得下不等于解析得起：unpdf 和 mammoth 都是把整份文件在内存里展开的，
+ * 50MB 的 PDF 抽一次能吃掉几百 MB。超过这条线就只存原件，并把这个事实告诉前端——
+ * 用户看见的不能是「上传成功」然后以为模型读到了内容。
+ */
+export const TEXT_PARSE_MAX_BYTES = 50 * 1024 * 1024;
+
+const PARSED_MIMES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+]);
+
+/** 图片本来就抽不出文本，不算「跳过」；只有本该抽却没有抽的才需要在界面上说明。 */
+function parseSkippedFor(mime: string, size: number): boolean {
+  return PARSED_MIMES.has(mime) && size > TEXT_PARSE_MAX_BYTES;
+}
+
 export interface InspectedUpload {
   kind: AttachmentKind;
   mime: string;
@@ -45,6 +92,7 @@ export interface InspectedUpload {
   name: string;
   text: string | null;
   chunks: string[] | null;
+  textSkipped: boolean;
 }
 
 function safeFilename(input: string): string {
@@ -112,7 +160,8 @@ export async function inspectUpload(input: {
       extension: ext,
       name,
       text,
-      chunks: chunkText(text)
+      chunks: chunkText(text),
+      textSkipped: false
     };
   }
 
@@ -137,15 +186,21 @@ export async function inspectUpload(input: {
     }
   }
 
+  const imageCapBytes = Math.min(maxBytes, IMAGE_MAX_BYTES);
+  if (allowed.kind === 'IMAGE' && input.buffer.length > imageCapBytes) {
+    throw new ApiError(413, 'IMAGE_TOO_LARGE', `图片超过 ${Math.floor(imageCapBytes / 1024 / 1024)}MB 限制`);
+  }
+
+  const textSkipped = parseSkippedFor(allowed.mime, input.buffer.length);
   let text: string | null = null;
-  if (effectiveMime === 'application/pdf') {
+  if (!textSkipped && effectiveMime === 'application/pdf') {
     try {
       const result = await extractText(new Uint8Array(input.buffer), { mergePages: true });
       text = Array.isArray(result.text) ? result.text.join('\n') : result.text;
     } catch (err) {
       log.warn('file.pdf_extract_failed', { error: err instanceof Error ? err.message : String(err) });
     }
-  } else if (effectiveMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+  } else if (!textSkipped && effectiveMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     try {
       const result = await mammoth.extractRawText({ buffer: input.buffer });
       text = result.value;
@@ -165,7 +220,8 @@ export async function inspectUpload(input: {
     extension: allowed.extensions[0],
     name,
     text,
-    chunks: text ? chunkText(text) : null
+    chunks: text ? chunkText(text) : null,
+    textSkipped
   };
 }
 
@@ -259,6 +315,7 @@ export interface PublicAttachment {
   size: number;
   kind: AttachmentKind;
   hasText: boolean;
+  textSkipped: boolean;
   createdAt: string;
 }
 
@@ -289,6 +346,7 @@ export function publicAttachment(attachment: AttachmentSummary): PublicAttachmen
     size: attachment.size,
     kind: attachment.kind,
     hasText: !!attachment.extractedTextCiphertext,
+    textSkipped: !attachment.extractedTextCiphertext && parseSkippedFor(attachment.mime, attachment.size),
     createdAt: attachment.createdAt.toISOString()
   };
 }
@@ -410,10 +468,9 @@ export function buildAttachmentContext(
 }
 
 export async function imageDataUrls(attachments: Attachment[]): Promise<string[]> {
-  const images = attachments.filter((a) => a.kind === 'IMAGE' && a.size <= 8 * 1024 * 1024);
   // 多图消息原本串行读盘+解密，第一张照片发出去之前要多等前面每一张的时间。
   return Promise.all(
-    images.map(async (attachment) => {
+    selectableImages(attachments).map(async (attachment) => {
       const buffer = await readAttachmentBuffer(attachment);
       return `data:${attachment.mime};base64,${buffer.toString('base64')}`;
     })

@@ -76,7 +76,7 @@ export const chatModelSchema = z.object({
 
 export const sendMessageSchema = z.object({
   content: z.string().max(50_000).default(''),
-  attachmentIds: z.array(z.string().uuid()).max(12).default([])
+  attachmentIds: z.array(z.string().uuid()).max(15, '一条消息最多 15 个附件').default([])
 });
 
 export const ipRuleInputSchema = z.object({
@@ -103,6 +103,6 @@ export const adminConfigSchema = z.object({
   siteName: z.string().trim().min(1).max(80).optional(),
   registrationOpen: z.boolean().optional(),
   defaultProviderId: z.string().uuid().nullable().optional(),
-  maxUploadMB: z.number().int().min(1).max(100).optional(),
+  maxUploadMB: z.number().int().min(1).max(320).optional(),
   maintenanceNotice: z.string().max(500).optional()
 });

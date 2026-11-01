@@ -65,7 +65,7 @@ describe('request validation schemas', () => {
 
   it('defaults message fields and bounds attachment count', () => {
     expect(sendMessageSchema.parse({})).toEqual({ content: '', attachmentIds: [] });
-    const ids = Array.from({ length: 13 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    const ids = Array.from({ length: 16 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
     expect(sendMessageSchema.safeParse({ content: 'hi', attachmentIds: ids }).success).toBe(false);
   });
 

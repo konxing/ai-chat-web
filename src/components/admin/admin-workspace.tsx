@@ -374,9 +374,9 @@ function ConfigTab() {
               className="field"
               type="number"
               min={1}
-              max={100}
+              max={320}
               value={maxUploadMB}
-              onChange={(e) => setMaxUploadMB(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+              onChange={(e) => setMaxUploadMB(Math.max(1, Math.min(320, Number(e.target.value) || 1)))}
             />
           </div>
           <div className="sm:col-span-2">
