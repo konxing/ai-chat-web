@@ -89,6 +89,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   const abort = new AbortController();
   const onAbort = () => abort.abort();
   req.signal.addEventListener('abort', onAbort);
+  // 客户端可能在挂监听之前就已经断开，那种情况下 abort 事件永远不会再来：
+  // 不补这一刀，这一轮会冲着一条不存在的连接把模型调用跑完。
+  if (req.signal.aborted) abort.abort();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -96,7 +99,10 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       let content = '';
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
-      let doneSent = false;
+      // 审计问的是「这一轮发生过什么」，不是「模型有没有自己说 done」：
+      // 以 done 事件为闸门时，失败、取消、以及没发 done 就结束的轮次在审计里完全不存在。
+      let outcome: 'SUCCESS' | 'FAILURE' | 'ABORTED' = 'SUCCESS';
+      let failureCode: string | undefined;
       const send = (payload: unknown) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
       };
@@ -116,8 +122,6 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
             if (inputTokens !== undefined || outputTokens !== undefined) {
               send({ type: 'usage', inputTokens, outputTokens });
             }
-          } else if (event.type === 'done') {
-            doneSent = true;
           }
         }
 
@@ -149,9 +153,13 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           error: err instanceof Error ? err.message : String(err)
         });
         if (abort.signal.aborted && !content) {
+          outcome = 'ABORTED';
+          failureCode = 'ABORTED';
           controller.close();
           return;
         }
+        outcome = 'FAILURE';
+        failureCode = code;
         try {
           if (content) {
             const saved = await saveAssistantMessage({
@@ -166,6 +174,19 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
             });
             send({ type: 'partial', message: publicMessage(saved), error: { code, message } });
           } else {
+            // 一个字都没拿到也留一条记录：否则刷新之后历史里只剩用户那句孤零零的提问，
+            // 看不出这一轮问过、也看不出它失败了。这条行不进模型上下文
+            // （buildConversation 排除 ERROR），前端沿用原有的 error 事件 + 随后的重取。
+            await saveAssistantMessage({
+              chatId,
+              content: message,
+              providerId: provider.id,
+              modelId: provider.modelId,
+              status: 'ERROR',
+              inputTokens,
+              outputTokens,
+              errorCode: code
+            });
             send({ type: 'error', error: { code, message } });
           }
         } catch (saveErr) {
@@ -175,18 +196,18 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         controller.close();
       } finally {
         req.signal.removeEventListener('abort', onAbort);
-        if (doneSent) {
-          writeAudit({
-            actorId: user.id,
-            actorLabel: user.username,
-            action: 'chat.message',
-            targetType: 'chat',
-            targetId: chatId,
-            ip: getRequestIp(req),
-            userAgent: getUserAgent(req),
-            after: { providerId: provider.id, modelId: provider.modelId, chars: content.length }
-          }).catch(() => undefined);
-        }
+        writeAudit({
+          actorId: user.id,
+          actorLabel: user.username,
+          action: 'chat.message',
+          targetType: 'chat',
+          targetId: chatId,
+          ip: getRequestIp(req),
+          userAgent: getUserAgent(req),
+          after: { providerId: provider.id, modelId: provider.modelId, chars: content.length, outcome },
+          status: outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILURE',
+          error: failureCode ?? null
+        }).catch(() => undefined);
       }
     },
     cancel() {
