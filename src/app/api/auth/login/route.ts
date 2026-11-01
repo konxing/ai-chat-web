@@ -79,27 +79,35 @@ export async function POST(req: Request) {
       throw new ApiError(403, 'ACCOUNT_DISABLED', '账号已被禁用，请联系管理员');
     }
 
-    await clearLoginLock(ip);
-    const created = await createSession({ userId: user.id, ip, userAgent });
-    await setSessionCookies(created);
-    const updated = await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() }
-    });
-    await prisma.loginLog.create({
-      data: { userId: user.id, identifier: body.identifier.slice(0, 254), ip, userAgent, success: true, reason: null }
-    });
-    if (user.role === 'OWNER') {
-      await writeAudit({
-        actorId: user.id,
-        actorLabel: user.username,
-        action: 'owner.login',
-        targetType: 'session',
-        targetId: created.session.id,
-        ip,
-        userAgent
-      });
-    }
-    return { user: publicUser(updated), settings: await publicSettings() };
+    // 这四件互不依赖：并行掉，省的是四个往返延迟而不是四条 SQL 的工作量。
+    // 数据库在同机时差别微小，PG 一旦挪到另一台机器就是每省一个往返省一个 RTT。
+    const [created, updated, settings] = await Promise.all([
+      createSession({ userId: user.id, ip, userAgent }),
+      prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() }
+      }),
+      publicSettings(),
+      clearLoginLock(ip)
+    ]);
+    // 成功日志与审计要等会话真的落地：建会话失败时不能留下一条「登录成功」的记录。
+    await Promise.all([
+      setSessionCookies(created),
+      prisma.loginLog.create({
+        data: { userId: user.id, identifier: body.identifier.slice(0, 254), ip, userAgent, success: true, reason: null }
+      }),
+      user.role === 'OWNER'
+        ? writeAudit({
+            actorId: user.id,
+            actorLabel: user.username,
+            action: 'owner.login',
+            targetType: 'session',
+            targetId: created.session.id,
+            ip,
+            userAgent
+          })
+        : Promise.resolve()
+    ]);
+    return { user: publicUser(updated), settings };
   });
 }

@@ -217,34 +217,31 @@ export async function getProviderForUser(providerId: string, userId: string): Pr
 }
 
 export async function resolveDefaultProvider(userId: string): Promise<AiProvider> {
-  const userDefault = await prisma.aiProvider.findFirst({
-    where: { ownerType: 'USER', userId, enabled: true, isDefault: true },
-    orderBy: { createdAt: 'asc' }
-  });
-  if (userDefault) return userDefault;
+  // 四级优先级一次查完：候选 findMany 与配置 findUnique 并行，挑法与原来逐级 findFirst
+  // 完全一致（用户自己的默认 → 配置指定的全局 → 标了默认的全局 → 最早创建的全局）。
+  // 候选范围仍由 where 限定成本人的私有模型加全局模型，不会因为合并查询而放宽。
+  const [candidates, configured] = await Promise.all([
+    prisma.aiProvider.findMany({
+      where: {
+        enabled: true,
+        OR: [{ ownerType: 'GLOBAL' }, { ownerType: 'USER', userId }]
+      },
+      orderBy: { createdAt: 'asc' }
+    }),
+    prisma.systemConfig.findUnique({ where: { key: 'defaultProviderId' } })
+  ]);
+  const isGlobal = (p: AiProvider) => p.ownerType === 'GLOBAL';
+  const configuredId = typeof configured?.value === 'string' ? configured.value : null;
+  const picked =
+    candidates.find((p) => p.ownerType === 'USER' && p.isDefault) ??
+    (configuredId ? candidates.find((p) => p.id === configuredId && isGlobal(p)) : undefined) ??
+    candidates.find((p) => isGlobal(p) && p.isDefault) ??
+    candidates.find(isGlobal);
 
-  const settings = await prisma.systemConfig.findUnique({ where: { key: 'defaultProviderId' } });
-  const configuredId = typeof settings?.value === 'string' ? settings.value : null;
-  if (configuredId) {
-    const configured = await prisma.aiProvider.findFirst({
-      where: { id: configuredId, ownerType: 'GLOBAL', enabled: true }
-    });
-    if (configured) return configured;
+  if (!picked) {
+    throw new ApiError(400, 'NO_MODEL', '管理员尚未配置可用的 AI 模型，请先在设置中添加自己的模型');
   }
-
-  const globalDefault = await prisma.aiProvider.findFirst({
-    where: { ownerType: 'GLOBAL', enabled: true, isDefault: true },
-    orderBy: { createdAt: 'asc' }
-  });
-  if (globalDefault) return globalDefault;
-
-  const anyGlobal = await prisma.aiProvider.findFirst({
-    where: { ownerType: 'GLOBAL', enabled: true },
-    orderBy: { createdAt: 'asc' }
-  });
-  if (anyGlobal) return anyGlobal;
-
-  throw new ApiError(400, 'NO_MODEL', '管理员尚未配置可用的 AI 模型，请先在设置中添加自己的模型');
+  return picked;
 }
 
 export function capabilitiesOf(provider: AiProvider): Capability[] {

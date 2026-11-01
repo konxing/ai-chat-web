@@ -146,6 +146,9 @@ export async function getChatOwned(chatId: string, userId: string): Promise<Chat
 /** 打开会话时加载的最近消息条数；更早的消息按需翻页，避免长会话一次性解密整段历史。 */
 const MESSAGE_PAGE_SIZE = 60;
 
+/** 送给模型的历史窗口条数，本轮刚写库的用户消息也在这一窗里。 */
+const CONTEXT_MESSAGE_LIMIT = 40;
+
 export async function getChatDetail(chatId: string, userId: string): Promise<ChatDetailDto> {
   const chat = await prisma.chat.findFirst({
     where: { id: chatId, userId },
@@ -341,12 +344,14 @@ export async function buildConversation(input: {
     select: { id: true }
   });
   if (!chat) throw new ApiError(404, 'CHAT_NOT_FOUND', '会话不存在');
+  // 从最近一端取一窗再翻正：以前是 asc take 60 后 slice(-40)，长会话捞到的是最早 60 条，
+  // 送给模型的上下文停在会话开头，还要多搬 20 条密文。
   const historical = await prisma.message.findMany({
     where: { chatId: chat.id },
-    orderBy: { createdAt: 'asc' },
-    take: 60
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: CONTEXT_MESSAGE_LIMIT
   });
-  const trimmed = historical.slice(-40);
+  const trimmed = historical.reverse();
   const messages: AiMessage[] = [
     {
       role: 'system',
