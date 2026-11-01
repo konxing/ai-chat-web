@@ -119,3 +119,37 @@ export const cognitivePreferencesPatchSchema = z.object({
   adaptiveMemoryEnabled: z.boolean().optional(),
   emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional()
 });
+
+const MEMORY_CONTEXT_VALUES = [
+  'general',
+  'technicalProject',
+  'learning',
+  'personalGoal',
+  'personalReflection',
+  'emotionalSupport',
+  'decisionMaking'
+] as const;
+
+/**
+ * 记忆策略的改动一次只针对一个情境：patch 里的字段仍然全部可选，
+ * 没提交的保持原值——否则改保留期会把「允许记哪些类型」顺手重置。
+ */
+export const memoryPolicyPatchSchema = z.object({
+  context: z.enum(MEMORY_CONTEXT_VALUES),
+  patch: z.object({
+    allowPersistence: z.boolean().optional(),
+    allowedMemoryTypes: z
+      .array(z.enum(['fact', 'preference', 'goal', 'project', 'decision', 'emotion']))
+      .max(6)
+      .optional(),
+    requireConfirmation: z.boolean().optional(),
+    retention: z.enum(['forever', 'untilSuperseded', 'days30', 'days90', 'sessionOnly']).optional(),
+    allowUserProfile: z.boolean().optional(),
+    allowReflection: z.boolean().optional(),
+    allowAssociation: z.boolean().optional()
+  })
+});
+
+export const memoryPolicyResetSchema = z.object({
+  context: z.enum(MEMORY_CONTEXT_VALUES)
+});

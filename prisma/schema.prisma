@@ -57,6 +57,34 @@ enum EmotionTransparency {
   EXPLICIT
 }
 
+/// 任务书 1.2 的七种交互情境。每个用户每种情境一行策略。
+enum MemoryContext {
+  GENERAL
+  TECHNICAL_PROJECT
+  LEARNING
+  PERSONAL_GOAL
+  PERSONAL_REFLECTION
+  EMOTIONAL_SUPPORT
+  DECISION_MAKING
+}
+
+enum MemoryType {
+  FACT
+  PREFERENCE
+  GOAL
+  PROJECT
+  DECISION
+  EMOTION
+}
+
+enum MemoryRetention {
+  FOREVER
+  UNTIL_SUPERSEDED
+  DAYS_30
+  DAYS_90
+  SESSION_ONLY
+}
+
 model User {
   id             String     @id @default(uuid())
   username       String     @unique @db.VarChar(32)
@@ -74,6 +102,7 @@ model User {
   chats          Chat[]
   aiProviders    AiProvider[]
   cognitive      CognitivePreference?
+  memoryPolicies MemoryPolicy[]
   attachments    Attachment[]
   loginLogs      LoginLog[]
   auditLogs      AuditLog[]      @relation("AuditActor")
@@ -311,4 +340,24 @@ model CognitivePreference {
   updatedAt             DateTime            @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// 自适应记忆策略：同一用户在不同情境下允许记什么、留多久。
+/// 默认值取最保守的一档——库里没有行时由应用层补齐内置默认，两者必须等价。
+model MemoryPolicy {
+  userId              String
+  context             MemoryContext
+  allowPersistence    Boolean          @default(false)
+  allowedMemoryTypes  MemoryType[]     @default([])
+  requireConfirmation Boolean          @default(true)
+  retention           MemoryRetention  @default(SESSION_ONLY)
+  allowUserProfile    Boolean          @default(false)
+  allowReflection     Boolean          @default(false)
+  allowAssociation    Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, context])
 }
