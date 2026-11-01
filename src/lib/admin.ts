@@ -500,6 +500,23 @@ export interface ServiceStatus {
   startedAt: string;
 }
 
+/**
+ * `pg_database_size()` 要逐个 stat 数据目录下的文件，Windows 上稳定 100ms 级，
+ * 而它只是管理台的一个展示数字。60 秒内复用上一次结果；失败不写缓存，
+ * 下一次仍然真查。顺带让 database.latencyMs 回到「查询往返延迟」本意。
+ */
+const DB_SIZE_TTL_MS = 60_000;
+let dbSizeCache: { at: number; bytes: number } | null = null;
+
+async function databaseSizeBytes(): Promise<number | null> {
+  if (dbSizeCache && Date.now() - dbSizeCache.at < DB_SIZE_TTL_MS) return dbSizeCache.bytes;
+  const rows = await prisma.$queryRaw<Array<{ size: bigint }>>`SELECT pg_database_size(current_database()) AS size`;
+  if (!rows[0]) return null;
+  const bytes = Number(rows[0].size);
+  dbSizeCache = { at: Date.now(), bytes };
+  return bytes;
+}
+
 export async function getServiceStatus(): Promise<ServiceStatus> {
   const env = loadEnv();
   const startedAt = new Date(Date.now() - process.uptime() * 1000);
@@ -510,8 +527,7 @@ export async function getServiceStatus(): Promise<ServiceStatus> {
   try {
     await prisma.$queryRaw`SELECT 1`;
     dbOk = true;
-    const size = await prisma.$queryRaw<Array<{ size: bigint }>>`SELECT pg_database_size(current_database()) AS size`;
-    sizeBytes = size[0] ? Number(size[0].size) : null;
+    sizeBytes = await databaseSizeBytes();
     const ver = await prisma.$queryRaw<Array<{ server_version: string }>>`SHOW server_version`;
     version = ver[0]?.server_version ?? null;
   } catch (err) {
