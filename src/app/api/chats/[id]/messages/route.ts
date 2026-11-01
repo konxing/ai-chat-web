@@ -17,7 +17,7 @@ import {
   saveAssistantMessage,
   saveUserMessage
 } from '@/lib/chats';
-import { getAttachmentsForUser, publicAttachment } from '@/lib/files';
+import { getAttachmentsForUser, imageSendSummary, publicAttachment } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
 import { log } from '@/lib/logger';
@@ -85,6 +85,8 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     attachments,
     provider
   });
+  // 挂 15 张和发得出去 4 张是两个数：超出的部分这轮不进模型，不说明用户只会觉得模型没看图。
+  const imageSummary = imageSendSummary(attachments);
 
   const abort = new AbortController();
   const onAbort = () => abort.abort();
@@ -140,7 +142,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           userMessage: publicMessage(userMessage),
           providerId: provider.id,
           providerName: provider.name,
-          modelId: provider.modelId
+          modelId: provider.modelId,
+          imagesSent: imageSummary.sent,
+          imagesSkipped: imageSummary.skipped
         });
         controller.close();
       } catch (err) {

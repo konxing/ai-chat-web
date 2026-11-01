@@ -101,6 +101,9 @@ const SUGGESTIONS = [
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'family-ai.sidebar-collapsed';
+const MAX_FILES_PER_MESSAGE = 15;
+// 服务端同时只解密一个上传、最多再排两个人，客户端并发 3 刚好填满这条队而不撞 429。
+const UPLOAD_CONCURRENCY = 3;
 
 export function ChatWorkspace({
   user,
@@ -340,23 +343,40 @@ export function ChatWorkspace({
       if (!files.length) return;
       const chatId = await ensureChat();
       if (!chatId) return;
+      const overflow = Math.max(0, files.length - MAX_FILES_PER_MESSAGE);
+      const queue = files.slice(0, MAX_FILES_PER_MESSAGE);
       setUploading(true);
+      let firstError = '';
       try {
-        for (const file of files.slice(0, 12)) {
-          const form = new FormData();
-          form.append('file', file);
-          form.append('chatId', chatId);
-          const data = await apiFetch<{ attachment: AttachmentDto }>('/api/upload', {
-            method: 'POST',
-            body: form
-          });
-          setPending((prev) => [...prev, data.attachment]);
-        }
-      } catch (err) {
-        setNotice(errorMessage(err));
+        await Promise.all(
+          Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+            let file: File | undefined;
+            while ((file = queue.shift())) {
+              try {
+                const form = new FormData();
+                form.append('file', file);
+                form.append('chatId', chatId);
+                const data = await apiFetch<{ attachment: AttachmentDto }>('/api/upload', {
+                  method: 'POST',
+                  body: form
+                });
+                setPending((prev) => [...prev, data.attachment]);
+              } catch (err) {
+                // 一张失败不该拖垮后面十几张：记下第一个原因，其余继续传完。
+                if (!firstError) firstError = errorMessage(err);
+              }
+            }
+          })
+        );
       } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+      if (firstError) setNotice(firstError);
+      else if (overflow > 0) {
+        setNotice(
+          `一条消息最多 ${MAX_FILES_PER_MESSAGE} 个附件，本次只上传前 ${MAX_FILES_PER_MESSAGE} 个，另外 ${overflow} 个未上传`
+        );
       }
     },
     [ensureChat]
@@ -458,6 +478,8 @@ export function ChatWorkspace({
               providerId?: string;
               providerName?: string;
               modelId?: string;
+              imagesSent?: number;
+              imagesSkipped?: number;
             };
             try {
               event = JSON.parse(data);
@@ -500,6 +522,11 @@ export function ChatWorkspace({
                 );
                 setOptimisticUser(null);
                 setStreamText('');
+              }
+              if (event.imagesSkipped) {
+                setNotice(
+                  `已发送前 ${event.imagesSent ?? 0} 张图片，另外 ${event.imagesSkipped} 张图片未发送给模型`
+                );
               }
             }
           }
@@ -1280,6 +1307,9 @@ const MessageBubble = memo(function MessageBubble({
                   >
                     <FileText className="h-3.5 w-3.5 text-aurora-300/70" />
                     <span className="max-w-[180px] truncate">{attachment.name}</span>
+                    {attachment.textSkipped ? (
+                      <span className="text-white/35">文件过大，未解析内容</span>
+                    ) : null}
                     <Download className="h-3 w-3 opacity-50" />
                   </a>
                 )

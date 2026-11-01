@@ -16,6 +16,7 @@ export interface AttachmentDto {
   size: number;
   kind: 'IMAGE' | 'FILE' | 'AUDIO';
   hasText: boolean;
+  textSkipped: boolean;
   createdAt: string;
 }
 
