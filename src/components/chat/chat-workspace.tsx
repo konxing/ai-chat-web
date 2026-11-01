@@ -39,9 +39,9 @@ import {
 } from 'lucide-react';
 import { apiFetch, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
+import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
 import { Modal, Spinner } from '@/components/ui';
-import { Markdown } from '@/components/chat/markdown';
 import type {
   AttachmentDto,
   ChatDetailDto,
@@ -51,6 +51,12 @@ import type {
   ChatUser,
   ProviderDto
 } from '@/lib/chat-types';
+
+// react-markdown + katex + highlight.js 比聊天界面本身还大，且内容全来自本地库，
+// 不需要出现在首屏 HTML 与首屏 JS 里：挂载后再拉这个 chunk。
+const Markdown = dynamic(() => import('@/components/chat/markdown').then((mod) => mod.Markdown), {
+  ssr: false
+});
 
 interface SpeechRecognitionLike {
   lang: string;

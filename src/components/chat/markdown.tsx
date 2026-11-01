@@ -39,9 +39,11 @@ type MarkdownOptions = ComponentProps<typeof ReactMarkdown>;
  * 所以这些配置必须是模块级常量，否则流式输出时每个 token 都要重解析一遍。
  */
 const REMARK_PLUGINS: MarkdownOptions['remarkPlugins'] = [remarkGfm, remarkMath];
+// 没有 detect：自动识别会让每个不带语言标注的代码块在 48 种语言里各打一遍分，
+// 而流式输出期间每个 token 都要重跑一次。带 ```python 这类标注的块照常高亮。
 const REHYPE_PLUGINS: MarkdownOptions['rehypePlugins'] = [
   rehypeKatex,
-  [rehypeHighlight, { detect: true, ignoreMissing: true }]
+  [rehypeHighlight, { ignoreMissing: true }]
 ];
 const COMPONENTS: MarkdownOptions['components'] = {
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
