@@ -23,6 +23,50 @@ export interface StreamEvent {
 
 const MAX_OUTPUT_CHARS = 200_000;
 
+/**
+ * 整包读取的上限。SSE 分支早就有 2MB 的 buffer 守卫，但 `response.json()` /
+ * 错误分支的 `response.text()` 是把对面给的整包吞进内存——而 baseUrl 是管理员
+ * 在设置里填的，对面不一定会老实。
+ */
+const MAX_PROVIDER_BODY_BYTES = 2_000_000;
+/** 错误页只取前 800 字符做诊断，读够就撤。 */
+const MAX_ERROR_BODY_BYTES = 8_192;
+
+/** 对面回来的包：safeFetch 的返回类型里取，避免和 DOM 的 Response 类型打架。 */
+type ProviderResponse = Awaited<ReturnType<typeof safeFetch>>['response'];
+
+async function readBodyCapped(
+  response: ProviderResponse,
+  maxBytes: number
+): Promise<{ text: string; truncated: boolean }> {
+  const body = response.body;
+  if (!body) return { text: '', truncated: false };
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        return { text, truncated: true };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* 已经读完了，取消会报错，忽略 */
+    }
+    reader.releaseLock();
+  }
+  return { text, truncated: false };
+}
+
 function providerParams(provider: AiProvider): Record<string, unknown> {
   const raw = provider.params;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
@@ -102,7 +146,7 @@ export async function* streamChatCompletion(input: {
   if (!response.ok) {
     let detail = '';
     try {
-      detail = (await response.text()).slice(0, 800);
+      detail = (await readBodyCapped(response, MAX_ERROR_BODY_BYTES)).text.slice(0, 800);
     } catch {
       /* ignore */
     }
@@ -127,7 +171,11 @@ export async function* streamChatCompletion(input: {
 
   try {
     if (contentType.includes('application/json')) {
-      const payload = (await response.json()) as Record<string, unknown>;
+      const { text: raw, truncated } = await readBodyCapped(response, MAX_PROVIDER_BODY_BYTES);
+      if (truncated) {
+        throw new ApiError(502, 'AI_RESPONSE_TOO_LARGE', '模型返回内容过大');
+      }
+      const payload = JSON.parse(raw) as Record<string, unknown>;
       const choices = payload.choices as Array<Record<string, unknown>> | undefined;
       const message = choices?.[0]?.message as Record<string, unknown> | undefined;
       const text = extractTextFromDelta(message?.content);
@@ -244,7 +292,11 @@ export async function transcribeAudio(input: {
       await safe.response.body?.cancel();
       throw new ApiError(502, 'STT_FAILED', `语音转写服务返回 HTTP ${safe.response.status}`);
     }
-    const data = (await safe.response.json()) as { text?: unknown };
+    const { text: rawBody, truncated } = await readBodyCapped(safe.response, MAX_PROVIDER_BODY_BYTES);
+    if (truncated) {
+      throw new ApiError(502, 'AI_RESPONSE_TOO_LARGE', '语音转写返回内容过大');
+    }
+    const data = JSON.parse(rawBody) as { text?: unknown };
     if (typeof data.text !== 'string' || !data.text.trim()) {
       throw new ApiError(502, 'STT_EMPTY', '语音转写没有返回文本');
     }
