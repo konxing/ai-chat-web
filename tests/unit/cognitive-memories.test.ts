@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describeValidRange } from '@/lib/cognitive/memory-display';
 
 /**
  * Phase 2 片A：记忆主体。钉的是任务书 2.1、2.2 的三条硬要求——
@@ -404,8 +405,8 @@ describe('记忆读取与时间有效性', () => {
     expect(db.takes[0]).toBe(200);
   });
 
-  it('有效区间按精度回显，不显示成比实际更精确的日期', async () => {
-    const { createMemory, describeValidRange } = await memories();
+  it('存进去的时间精度原样回带，展示层才不会把它说得更精确', async () => {
+    const { createMemory } = await memories();
 
     const year = await createMemory(
       baseInput({ precision: 'year', validFrom: new Date('2026-01-01T00:00:00.000Z') })

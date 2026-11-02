@@ -45,7 +45,7 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/cognitive/memories')>();
   return {
     ...actual,
-    // 只替换要落库的两个出入口；describeValidRange 这类纯函数保持真实实现。
+    // 只替换落库和捞取的出入口；标签、时间回显这些纯函数走真实实现。
     createMemory: (input: Record<string, unknown>) => {
       db.creates.push(input);
       return Promise.resolve({ id: 'mem-new' });

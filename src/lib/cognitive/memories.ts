@@ -435,22 +435,3 @@ export async function listMemoryRevisions(memoryId: string, userId: string): Pro
     };
   });
 }
-
-function formatDate(value: string, precision: TimePrecision): string {
-  const date = new Date(value);
-  const ymd = `${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日`;
-  if (precision === 'year') return `${date.getUTCFullYear()}年`;
-  if (precision === 'month') return `${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月`;
-  if (precision !== 'timestamp') return ymd;
-  const hh = String(date.getUTCHours()).padStart(2, '0');
-  const mm = String(date.getUTCMinutes()).padStart(2, '0');
-  return `${ymd} ${hh}:${mm}`;
-}
-
-/** 按精度回显有效区间，绝不显示比当初记录更精确的时间。 */
-export function describeValidRange(memory: Pick<MemoryDto, 'precision' | 'validFrom' | 'validTo'>): string {
-  if (memory.precision === 'unknown' || !memory.validFrom) return '时间未知';
-  const from = formatDate(memory.validFrom, memory.precision);
-  if (!memory.validTo) return from;
-  return `${from}～${formatDate(memory.validTo, memory.precision)}`;
-}
