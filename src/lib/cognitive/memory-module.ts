@@ -10,6 +10,7 @@ import { createMemory, listMemories, reviseMemory } from './memories';
 import { excludedHashes, exclusionHash } from './exclusions';
 import { getMemoryPolicies } from './policy';
 import { getCognitivePreferences } from './preferences';
+import { rankMemories } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import type { MemoryOrigin } from './memories';
@@ -17,7 +18,8 @@ import type { MemoryOrigin } from './memories';
 /**
  * 记忆模块本体（③：让策略真正跑在对话链路上）。
  *
- * 读：把此刻有效、且还在保留期内的记忆渲染成一段「数据不是指令」的文本，交给上下文构建。
+ * 读：按这一轮的提问召回记忆（关键词重合度，不是时间倒序），过掉不在保留期内的，
+ * 再渲染成一段「数据不是指令」的文本交给上下文构建。
  * 写：抽候选 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
  * WRITE 落新行、UPDATE 走演化。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
@@ -31,14 +33,13 @@ export const MEMORY_READ_MAX_CHARS = 1500;
 export const MEMORY_WRITE_MAX_PER_TURN = 2;
 
 /**
- * 一次捞多少行来做保留期过滤。必须大于 MEMORY_READ_MAX_ITEMS：
- * 只捞 8 条的话，这 8 条恰好都过了保留期就会一条都用不上，而库里其实还有能用的。
- * 每行都要 AES-256-GCM 解密，所以这个倍数也不能随便放大。
+ * 关键词召回的候选池大小，等于服务层 listMemories 的硬上限。
  *
- * 这是个有意的浅窗口：比它更多的过期行排在前面时，更旧的可用行这一轮就捞不到。
- * 真正解决要靠按相关性召回而不是按时间取前 N 条（Phase 3）。
+ * 正文是密文，SQL 层看不到明文，所以召回只能在应用层解密之后比——池子必须整个捞回来。
+ * 池子只取最近几条的话，关键词召回就没东西可召回：改造前那个「按 recordedAt 取前 8 条」
+ * 的病根正是池子太小又太偏。代价是每轮最多解密 200 行，实测数字见 commit message。
  */
-export const MEMORY_READ_MAX_FETCH = 32;
+export const MEMORY_RETRIEVAL_POOL = 200;
 
 /** 演化原因里不放正文：新旧正文各自在自己的行上，这里只回答「为什么改」。 */
 const SUPERSEDE_REASON = '用户在后续对话中再次提到这件事，按新版本处理';
@@ -55,18 +56,20 @@ function dedupeKey(text: string): string {
 
 async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   const now = new Date();
-  // 捞回来的行按 recordedAt 倒序，多捞的部分是给保留期过滤留的余量。
-  const rows = await listMemories(turn.userId, { asOf: now, take: MEMORY_READ_MAX_FETCH });
+  // 候选池是当前有效的全部记忆（上限 MEMORY_RETRIEVAL_POOL 行），排序交给关键词召回。
+  const rows = await listMemories(turn.userId, { asOf: now, take: MEMORY_RETRIEVAL_POOL });
   if (rows.length === 0) return [];
 
   // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
   // 读不到保留期就注入，等于把用户设成「30 天」的记忆又端回模型面前，宁可这一轮不带记忆。
   const policies = await getMemoryPolicies(turn.userId);
-  const memories = rows.filter((memory) => isMemoryUsable(memory, { policies, chatId: turn.chatId, now }));
+  const usable = rows.filter((memory) => isMemoryUsable(memory, { policies, chatId: turn.chatId, now }));
+  // 一个相关项都匹配不上时，rankMemories 会退回 recordedAt 倒序，也就是改造前的行为。
+  const memories = rankMemories(turn.content, usable, { limit: MEMORY_READ_MAX_ITEMS });
 
   const lines: string[] = [];
   let size = BLOCK_HEADER.length;
-  for (const memory of memories.slice(0, MEMORY_READ_MAX_ITEMS)) {
+  for (const memory of memories) {
     const range = describeValidRange(memory);
     const suffix = range === '时间未知' ? '' : `（${range}）`;
     const line =

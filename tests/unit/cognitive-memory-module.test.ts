@@ -94,7 +94,7 @@ import {
   ensureCognitiveModules,
   memoryModule,
   MEMORY_READ_MAX_CHARS,
-  MEMORY_READ_MAX_FETCH,
+  MEMORY_RETRIEVAL_POOL,
   MEMORY_READ_MAX_ITEMS,
   MEMORY_WRITE_MAX_PER_TURN
 } from '@/lib/cognitive/memory-module';
@@ -346,7 +346,7 @@ describe('读侧：记忆作为数据进提示词', () => {
 
     expect(db.listFilters[0]).toMatchObject({
       userId: 'user-a',
-      filters: { asOf: expect.any(Date), take: MEMORY_READ_MAX_FETCH }
+      filters: { asOf: expect.any(Date), take: MEMORY_RETRIEVAL_POOL }
     });
   });
 
@@ -467,8 +467,8 @@ describe('读侧：保留期决定还能不能被用', () => {
   it('前面的记忆都过期时，后面还在保留期内的仍能被顶上来', async () => {
     db.memoryEnabled = true;
     db.policies = withRetention('days30');
-    // 只用 9 条过期行：够证明「过期行不再占掉可用行的名额」（旧行为按 take=8 会把这条切掉），
-    // 又不假装查询窗口是无限的——MEMORY_READ_MAX_FETCH 条过期行排在前面时，再往后的确实捞不到。
+    // 只用 9 条过期行：够证明「过期行不再占掉可用行的名额」（改造前按 take=8 会把这条切掉），
+    // 又不假装候选池是无限的——池子的上限就是服务层允许的 MEMORY_RETRIEVAL_POOL 行。
     const expired = Array.from({ length: MEMORY_READ_MAX_ITEMS + 1 }, (_, index) =>
       memoryRow({ id: `old-${index}`, content: `过期记忆 ${index}`, recordedAt: isoDaysAgo(60) })
     );
@@ -482,7 +482,7 @@ describe('读侧：保留期决定还能不能被用', () => {
 
   it('注入条数仍按 MEMORY_READ_MAX_ITEMS 截断，过滤不放大上限', async () => {
     db.memoryEnabled = true;
-    db.readRows = Array.from({ length: MEMORY_READ_MAX_FETCH }, (_, index) =>
+    db.readRows = Array.from({ length: MEMORY_RETRIEVAL_POOL }, (_, index) =>
       memoryRow({ id: `mem-${index}`, content: `第 ${index} 条`, recordedAt: isoDaysAgo(1) })
     );
 
@@ -584,5 +584,78 @@ describe('写侧：永久删除过的内容不会被自动记回来', () => {
 
     expect(db.exclusionCalls).toEqual([]);
     expect(db.creates).toEqual([]);
+  });
+});
+
+/**
+ * ③ 关键词召回。改造前读侧是按 recordedAt 倒序取前 8 条，和用户这一轮问什么完全无关。
+ * 这一组钉的是：相关的旧记忆能被顶上来、无关的新记忆会被挤下去、
+ * 以及一个都匹配不上时退回时间顺序（不许比改造前更差）。
+ */
+describe('读侧：按这一轮的提问召回，不是按时间倒序', () => {
+  const now = Date.now();
+
+  /** 8 条最近的无关记忆，用来占满注入名额：相关的那条必须真把它们挤掉才算数。 */
+  function filler() {
+    return Array.from({ length: MEMORY_READ_MAX_ITEMS }, (_, index) =>
+      memoryRow({
+        id: `filler-${index}`,
+        content: `无关的填充内容 ${index}`,
+        recordedAt: new Date(now - index * 1000).toISOString()
+      })
+    );
+  }
+
+  it('最旧的那条只要相关，也能挤掉最近的无关记忆', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [...filler(), memoryRow({ id: 'relevant', content: '我住在杭州', recordedAt: isoDaysAgo(300) })];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '我住在哪个城市来着？' });
+
+    expect(block?.text).toContain('我住在杭州');
+    expect(block?.text).not.toContain(`无关的填充内容 ${MEMORY_READ_MAX_ITEMS - 1}`);
+  });
+
+  it('查询词就是用户这一轮说的话：同一批记忆，问法不同召回的就不同', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      ...filler(),
+      memoryRow({ id: 'exam', content: '我打算明年考研', recordedAt: isoDaysAgo(300) }),
+      memoryRow({ id: 'db', content: '我在用 Prisma', recordedAt: isoDaysAgo(301) })
+    ];
+
+    const [aboutExam] = await memoryModule.read({ ...TURN, content: '考研的事我怎么说的' });
+    const [aboutDb] = await memoryModule.read({ ...TURN, content: 'Prisma 还在用吗' });
+
+    expect(aboutExam?.text).toContain('我打算明年考研');
+    expect(aboutExam?.text).not.toContain('我在用 Prisma');
+    expect(aboutDb?.text).toContain('我在用 Prisma');
+    expect(aboutDb?.text).not.toContain('我打算明年考研');
+  });
+
+  it('一个问题都匹配不上时退回时间倒序，不会一条都不给', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      memoryRow({ id: 'm1', content: '我在用 Prisma', recordedAt: isoDaysAgo(1) }),
+      memoryRow({ id: 'm2', content: '我住在杭州', recordedAt: isoDaysAgo(2) })
+    ];
+
+    const [block] = await memoryModule.read({ ...TURN, content: 'zzz qqq' });
+
+    expect(block?.text).toContain('我在用 Prisma');
+    expect(block?.text).toContain('我住在杭州');
+  });
+
+  it('候选池放开到服务层上限，不再只看最近那几条', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow()];
+
+    await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(db.listFilters[0]).toMatchObject({
+      userId: 'user-a',
+      filters: { asOf: expect.any(Date), take: MEMORY_RETRIEVAL_POOL }
+    });
+    expect(MEMORY_RETRIEVAL_POOL).toBeGreaterThan(MEMORY_READ_MAX_ITEMS);
   });
 });
