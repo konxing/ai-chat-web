@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   memoryEnabled: false,
   creates: [] as Array<Record<string, unknown>>,
+  revises: [] as Array<Record<string, unknown>>,
   readRows: [] as Array<Record<string, unknown>>,
   listFilters: [] as unknown[]
 }));
@@ -47,6 +48,10 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
     // 只替换要落库的两个出入口；describeValidRange 这类纯函数保持真实实现。
     createMemory: (input: Record<string, unknown>) => {
       db.creates.push(input);
+      return Promise.resolve({ id: 'mem-new' });
+    },
+    reviseMemory: (input: Record<string, unknown>) => {
+      db.revises.push(input);
       return Promise.resolve({ id: 'mem-new' });
     },
     listMemories: (userId: string, filters?: { take?: number }) => {
@@ -103,6 +108,7 @@ async function write(content: string) {
 beforeEach(() => {
   db.memoryEnabled = false;
   db.creates = [];
+  db.revises = [];
   db.readRows = [];
   db.listFilters = [];
 });
@@ -167,6 +173,93 @@ describe('写侧：策略在服务端真的生效', () => {
     await write('我在用 Prisma。我住在杭州。我喜欢喝温水。我打算考研。');
 
     expect(db.creates).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+  });
+});
+
+/**
+ * ④ 演化接线：用户把同一件事又说了一遍、只是某个值换了。
+ * 这里钉的是「不许并排放进两条当前版本」——读侧只能按 recordedAt 倒序挑，
+ * 两条都有效就等于 AI 自己猜用户现在到底用哪个版本。
+ *
+ * 反面同样要钉住：句子只是像，不代表同一件事。误取代的代价是销毁一条用户真说过的话，
+ * 比多留一条脏数据贵得多，所以相似度不够时一律并存。
+ */
+describe('写侧：同一件事的新说法走演化，不新增第二条', () => {
+  it('库里已有同一件事的旧说法时，改口写成新版本而不是再落一条', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14' })];
+
+    await write('我在用 Next.js 15。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toHaveLength(1);
+    expect(db.revises[0]).toMatchObject({
+      userId: 'user-a',
+      previousId: 'mem-1',
+      content: '我在用 Next.js 15',
+      // 改口的仍然是用户原话，来源不能因为「系统认出来了」就升级成已确认。
+      origin: 'explicit',
+      precision: 'unknown',
+      type: 'project'
+    });
+    // 情境沿用旧行：这句短话的分类比旧行更弱，顺手换主题等于把用户当初说清的信息弄丢。
+    expect(db.revises[0].context).toBeUndefined();
+    expect(db.revises[0].confirmedAt).toEqual(OCCURRED);
+  });
+
+  it('说法只是长得像、说的不是同一件事时并存，绝不自动取代', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 React 写页面' })];
+
+    await write('我在用 Vue 写页面。');
+
+    expect(db.revises).toEqual([]);
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0].content).toBe('我在用 Vue 写页面');
+  });
+
+  it('关掉长期记忆时既不新增也不演化，连旧行都不碰', async () => {
+    db.memoryEnabled = false;
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14' })];
+
+    await write('我在用 Next.js 15。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toEqual([]);
+  });
+
+  it('同一轮里同一行只演化一次，连着两个新说法不会抢同一个旧行', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14' })];
+
+    await write('我在用 Next.js 15。我在用 Next.js 16。');
+
+    expect(db.revises).toHaveLength(1);
+    expect(db.revises[0].previousId).toBe('mem-1');
+    expect(db.creates).toEqual([]);
+  });
+
+  it('演化也占每轮写入名额，第三条候选会被名额挡掉', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14' })];
+
+    await write('我在用 Next.js 15。我住在杭州。我喜欢喝温水。');
+
+    expect(db.revises).toHaveLength(1);
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0].content).toBe('我住在杭州');
+  });
+
+  it('演化原因只说明为什么改，不带新旧正文', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14' })];
+
+    await write('我在用 Next.js 15。');
+
+    const reason = String(db.revises[0].reason);
+    expect(reason.length).toBeGreaterThan(0);
+    expect(reason).not.toContain('Next.js');
+    expect(reason).not.toContain('14');
   });
 });
 

@@ -5,25 +5,29 @@ import {
   type CognitiveTurn
 } from './manager';
 import { extractMemoryCandidates } from './memory-extractor';
-import { createMemory, describeValidRange, listMemories } from './memories';
+import { createMemory, describeValidRange, listMemories, reviseMemory } from './memories';
 import { getMemoryPolicies, type MemoryContext, type MemoryType } from './policy';
 import { getCognitivePreferences } from './preferences';
-import { planMemoryWrite } from './write-decision';
+import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import type { MemoryOrigin } from './memories';
 
 /**
  * 记忆模块本体（③：让策略真正跑在对话链路上）。
  *
  * 读：把此刻有效的记忆渲染成一段「数据不是指令」的文本，交给上下文构建。
- * 写：抽候选 → 分类情境 → 按该情境的策略决定留不留，只有 WRITE 才落库。
+ * 写：抽候选 → 分类情境 → 按该情境的策略决定留不留，WRITE 落新行、UPDATE 走演化。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
  *
- * 这一版不做 UPDATE/LINK/DELETE：那需要拿已有行做语义比对（Phase 2 片B）；
- * ASK_CONFIRM 也只表现为「不落库」——向用户要确认的界面是 Phase 6，没有界面就不能假装问过。
+ * LINK 和 DELETE 这里仍然没有分支：关系要的是 Phase 2 片D 的图，
+ * 删除要的是用户点下那个按钮（Phase 6 界面），都不能由词法猜出来。
+ * ASK_CONFIRM 也只表现为「不落库」——没有界面就不能假装问过用户。
  */
 export const MEMORY_READ_MAX_ITEMS = 8;
 export const MEMORY_READ_MAX_CHARS = 1500;
 export const MEMORY_WRITE_MAX_PER_TURN = 2;
+
+/** 演化原因里不放正文：新旧正文各自在自己的行上，这里只回答「为什么改」。 */
+const SUPERSEDE_REASON = '用户在后续对话中再次提到这件事，按新版本处理';
 
 const TYPE_LABELS: Record<MemoryType, string> = {
   fact: '事实',
@@ -92,33 +96,50 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   if (!preferences.memoryEnabled) return;
 
   const policies = await getMemoryPolicies(turn.userId);
-  const known = new Set((await listMemories(turn.userId)).map((memory) => dedupeKey(memory.content)));
+  // listMemories 只给当前有效版本、按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。
+  const existing = await listMemories(turn.userId);
+  const known = new Set(existing.map((memory) => dedupeKey(memory.content)));
+  const superseded = new Set<string>();
 
   let written = 0;
   for (const candidate of candidates) {
     if (written >= MEMORY_WRITE_MAX_PER_TURN) break;
+    const key = dedupeKey(candidate.text);
+    if (known.has(key)) continue;
+    const previousId = findNearDuplicate(candidate, existing);
+    // 同一轮里连着两个新说法时，第二个的落点取决于第一个的结果，而我们没有那个结果：
+    // 少记一条比留下两条互相冲突的版本便宜。
+    if (previousId && superseded.has(previousId)) continue;
+
     const plan = planMemoryWrite({
       memoryEnabled: preferences.memoryEnabled,
       memoryType: candidate.type,
       text: candidate.text,
-      policies
+      policies,
+      supersedeId: previousId
     });
-    if (plan.decision !== 'WRITE') continue;
-    const key = dedupeKey(candidate.text);
-    if (known.has(key)) continue;
-    await createMemory({
+    if (plan.decision !== 'WRITE' && plan.decision !== 'UPDATE') continue;
+
+    // 规则抽出来的是用户原话，所以来源是「亲口说」而不是「系统推断」；
+    // 但这句话到底说的是什么时候，我们并不知道，所以时间精度一律 unknown。
+    const entry = {
       userId: turn.userId,
       chatId: turn.chatId,
       sourceMessageId: turn.sourceMessageId ?? null,
       type: candidate.type,
-      context: plan.context,
       content: candidate.text,
-      // 规则抽出来的是用户原话，所以来源是「亲口说」而不是「系统推断」；
-      // 但这句话到底说的是什么时候，我们并不知道，所以时间精度一律 unknown。
-      origin: 'explicit',
+      origin: 'explicit' as MemoryOrigin,
       confirmedAt: turn.occurredAt ?? new Date(),
-      precision: 'unknown'
-    });
+      precision: 'unknown' as const
+    };
+    if (plan.decision === 'WRITE') {
+      await createMemory({ ...entry, context: plan.context });
+    } else if (previousId) {
+      // 演化不带 context：能走到这里说明这句就是旧行那件事的新说法，
+      // 主题没变，而只看着这一句短话重新分类只会比旧行记的更弱。
+      await reviseMemory({ ...entry, previousId, reason: SUPERSEDE_REASON });
+      superseded.add(previousId);
+    } else continue;
     known.add(key);
     written += 1;
   }

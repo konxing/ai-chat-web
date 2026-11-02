@@ -2,18 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 
 /**
  * 写入决策（任务书 1.2 的后半段）：把「情境」和「该情境的策略」合成一个动作——
- * 落库、只活在当前会话、先问用户、还是干脆不要。
+ * 落库、写成新版本、只活在当前会话、先问用户、还是干脆不要。
  *
- * 这一版只实现四个动作 WRITE / EPHEMERAL / ASK_CONFIRM / IGNORE。
- * UPDATE / LINK / DELETE 要先有已存在的记忆行才判断得了，等 Phase 2 的记忆表落地再接，
- * 这里不放假分支充数。
+ * UPDATE 的动作由调用方给：它得先拿已有记忆行比对（findNearDuplicate），
+ * 这里只负责「比对结果能不能插到策略前面」——答案是不能。
  *
- * 顺序是有意的：模块总开关 > 类型白名单 > 能否持久化 > 是否需要确认。
+ * 顺序是有意的：模块总开关 > 类型白名单 > 能否持久化 > 是否需要确认 > 取代。
  * 类型不在白名单里表示用户连「这类内容」都不要，比「不持久化」更彻底，所以先 IGNORE。
+ * 取代排在最后：前面四道关卡没过，就不许动已有记忆的历史。
+ *
+ * LINK / DELETE 仍然没有分支：关系要靠 Phase 2 片D 的图，删除要靠用户点下按钮，
+ * 都不该由词法猜出来。
  */
 vi.mock('@/lib/prisma', () => ({ prisma: {} }));
 
 type Overrides = Partial<Record<string, Partial<import('@/lib/cognitive/policy').MemoryPolicy>>>;
+type MemoryType = import('@/lib/cognitive/policy').MemoryType;
 
 async function planner(overrides: Overrides = {}) {
   const module = await import('@/lib/cognitive/write-decision');
@@ -193,6 +197,45 @@ describe('写入决策', () => {
     expect(conservative(['general', 'learning'], learningTight).context).toBe('learning');
   });
 
+  it('同一件事的新说法判成 UPDATE，并把要取代的那一行带出来', async () => {
+    const { plan, policies } = await planner();
+
+    const result = plan({
+      ...ON,
+      memoryType: 'project',
+      text: '我在用 Next.js 15',
+      policies,
+      supersedeId: 'old-1'
+    });
+
+    expect(result.decision).toBe('UPDATE');
+    expect(result.reason).toBe('supersedes_existing');
+    expect(result.supersedeId).toBe('old-1');
+    expect(result.retention).toBe('forever');
+  });
+
+  it('UPDATE 不能插队：要先确认或本来不落库的情境，即使撞上旧记忆也不动历史', async () => {
+    const { plan, policies } = await planner();
+
+    const needsConfirm = plan({
+      ...ON,
+      memoryType: 'decision',
+      text: '这台显示器要不要买，预算两千，纠结值不值，等降价会不会更划算',
+      policies,
+      supersedeId: 'old-1'
+    });
+    const moduleOff = plan({
+      memoryEnabled: false,
+      memoryType: 'project',
+      text: '我在用 Next.js 15',
+      policies,
+      supersedeId: 'old-1'
+    });
+
+    expect(needsConfirm.decision).toBe('ASK_CONFIRM');
+    expect(moduleOff.decision).toBe('EPHEMERAL');
+  });
+
   it('输入文本不会被写进决策结果', async () => {
     const { plan, policies } = await planner();
 
@@ -205,6 +248,108 @@ describe('写入决策', () => {
 
     expect(JSON.stringify(result)).not.toContain('外键');
     expect(JSON.stringify(result)).not.toContain('Prisma');
+  });
+});
+
+/**
+ * 取代匹配（Phase 2 片C）：新来的这句话是不是在说同一件事、只是把某个值改了。
+ * 判据是「近乎同句」——同类型、长度相仿、字符二元组相似度 ≥0.8。
+ *
+ * 阈值故意压在 0.8：短句改一个值时差异占比太大，宁可让两条并存也不能误删。
+ * 下面那组「不命中」的用例就是这个取舍的证据，不是漏配。
+ */
+describe('取代匹配：近乎同句才算同一件事', () => {
+  const row = (id: string, content: string, type: MemoryType = 'project') => ({ id, content, type });
+
+  async function matcher() {
+    const module = await import('@/lib/cognitive/write-decision');
+    return module.findNearDuplicate;
+  }
+
+  it('只差一个值时命中旧行：版本号换了就是同一件事的新说法', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate(
+      { text: '我在用 Next.js 15', type: 'project' },
+      [row('old-1', '我在用 Next.js 14')]
+    );
+
+    expect(hit).toBe('old-1');
+  });
+
+  it('空白、大小写和标点不算差异', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate(
+      { text: '我在用NEXTJS15', type: 'project' },
+      [row('old-1', '我在用 Next.js 14')]
+    );
+
+    expect(hit).toBe('old-1');
+  });
+
+  it('改的值占比太大时不取代：宁可并存，也不赌一句就当用户改口了', async () => {
+    const findNearDuplicate = await matcher();
+    const existing = [
+      row('old-a', '我儿子今年 14 岁', 'fact'),
+      row('old-b', '我住北京', 'fact'),
+      row('old-c', '我家猫叫豆豆', 'fact')
+    ];
+
+    for (const [text, expectId] of [
+      ['我女儿今年 14 岁', 'old-a'],
+      ['我住上海', 'old-b'],
+      ['我家猫叫团团', 'old-c']
+    ] as const) {
+      expect(findNearDuplicate({ text, type: 'fact' }, existing)).toBeNull();
+    }
+  });
+
+  it('类型不同就不可能是同一件事，句子一模一样也不取代', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate(
+      { text: '我在用 Next.js 14 多一点', type: 'goal' },
+      [row('old-1', '我在用 Next.js 14', 'project')]
+    );
+
+    expect(hit).toBeNull();
+  });
+
+  it('完全同句交给调用方跳过，不消耗一次演化', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate({ text: '我在用 Next.js 14', type: 'project' }, [row('old-1', '我在用 Next.js 14')]);
+
+    expect(hit).toBeNull();
+  });
+
+  it('多行都算近乎同句时，取传进来的第一条——调用方按 recordedAt 倒序给', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate(
+      { text: '我在用 Next.js 15', type: 'project' },
+      [row('newer', '我在用 Next.js 16'), row('older', '我在用 Next.js 14')]
+    );
+
+    expect(hit).toBe('newer');
+  });
+
+  it('归一化之后短于两个字符的候选不参与匹配', async () => {
+    const findNearDuplicate = await matcher();
+
+    expect(findNearDuplicate({ text: '嗯', type: 'fact' }, [row('old-1', '嗯哈')])).toBeNull();
+  });
+
+  it('匹配只看 id，不把两边正文塞进返回值', async () => {
+    const findNearDuplicate = await matcher();
+
+    const hit = findNearDuplicate(
+      { text: '我在用 Next.js 15', type: 'project' },
+      [row('old-1', '我在用 Next.js 14')]
+    );
+
+    expect(hit).toBe('old-1');
   });
 });
 
