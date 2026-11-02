@@ -247,7 +247,7 @@ export function MemoryPanel() {
                       <span
                         className={
                           memory.origin === 'inferred' || memory.origin === 'hypothesis'
-                            ? 'badge-warn !px-2 !py-0.5 !text-[10.5px]'
+                            ? 'badge badge-amber !px-2 !py-0.5 !text-[10.5px]'
                             : 'chip !px-2 !py-0.5 !text-[10.5px]'
                         }
                       >

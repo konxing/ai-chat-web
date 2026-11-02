@@ -301,7 +301,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
             <BrandMark className="h-8 w-8" />
             <div>
               <div className="text-[15px] font-semibold text-white">设置</div>
-              <div className="text-[11px] text-white/35">账户 · 安全 · 模型</div>
+              <div className="text-[11px] text-white/35">账户 · 安全 · 模型 · 记忆</div>
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
