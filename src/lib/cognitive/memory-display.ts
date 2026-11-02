@@ -1,5 +1,6 @@
 import type { MemoryDto, MemoryOrigin, MemoryRevisionAction, TimePrecision } from './memories';
 import type { MemoryContext, MemoryRetention, MemoryType } from './policy';
+import type { ConfidenceBand, ConfidenceFactor } from './confidence';
 
 /**
  * 记忆的前端展示词汇：枚举的中文标签 + 有效区间回显。
@@ -75,6 +76,44 @@ export const RETENTION_ORDER: readonly MemoryRetention[] = [
   'days30',
   'sessionOnly'
 ];
+
+export const CONFIDENCE_BAND_LABELS: Record<ConfidenceBand, string> = {
+  high: '可信度高',
+  medium: '可信度中',
+  low: '可信度低'
+};
+
+/**
+ * 置信度因子里的来源说明，比 ORIGIN_LABELS 那组 chip 长：
+ * chip 只要一个词，而这里是「凭什么信这条」的解释，必须把「未经用户确认」说出来。
+ * 任务书 2.2 的红线是禁止把推断直接当成用户事实，所以措辞上不许含糊。
+ */
+const ORIGIN_CONFIDENCE_LABELS: Record<MemoryOrigin, string> = {
+  explicit: '用户亲口说过',
+  userConfirmed: '用户亲手确认过',
+  observed: '系统观察到，未经用户确认',
+  inferred: '系统推断，未经用户确认',
+  hypothesis: '仅为假设',
+  retracted: '已撤回'
+};
+
+/** 因子是结构化数据，中文只在这一层出现：算分的模块不该管界面怎么措辞。 */
+export function describeConfidenceFactor(factor: ConfidenceFactor): string {
+  switch (factor.kind) {
+    case 'origin':
+      return ORIGIN_CONFIDENCE_LABELS[factor.origin];
+    case 'restated':
+      return `在 ${factor.count} 个不同场合重复过`;
+    case 'contradicted':
+      return `存在 ${factor.count} 条相反证据`;
+    case 'superseded':
+      return '已被新说法取代';
+    case 'expired':
+      return '已过有效期';
+    case 'retracted':
+      return '已撤回';
+  }
+}
 
 export interface PolicySummaryInput {
   allowPersistence: boolean;

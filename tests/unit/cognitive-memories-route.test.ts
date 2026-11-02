@@ -23,6 +23,8 @@ const db = vi.hoisted(() => ({
   purgeAllCalls: [] as string[],
   learnCalls: [] as Array<{ userId: string; contexts: string[] }>,
   learned: [] as string[],
+  assessCalls: [] as Array<{ userId: string; ids: string[] }>,
+  confidence: new Map<string, Record<string, unknown>>(),
   titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
@@ -143,6 +145,13 @@ vi.mock('@/lib/cognitive/policy-learner', () => ({
   }
 }));
 
+vi.mock('@/lib/cognitive/evidence', () => ({
+  assessMemories: (userId: string, memories: Array<{ id: string }>) => {
+    db.assessCalls.push({ userId, ids: memories.map((memory) => memory.id) });
+    return Promise.resolve(new Map([...db.confidence]));
+  }
+}));
+
 vi.mock('@/lib/chats', () => ({
   listChatTitles: (userId: string, chatIds: Array<string | null>) => {
     db.titleCalls.push({ userId, chatIds });
@@ -215,6 +224,8 @@ beforeEach(() => {
   db.purgeAllCalls = [];
   db.learnCalls = [];
   db.learned = [];
+  db.assessCalls = [];
+  db.confidence = new Map();
   db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
@@ -648,5 +659,55 @@ describe('删除之后触发策略学习', () => {
     await call('DELETE', '/mem-1');
 
     expect(db.audits[0].after).toMatchObject({ purged: 1, learned: ['technicalProject'] });
+  });
+});
+
+/**
+ * 1a 置信度旁表（任务书 2.2）。
+ * 和 chats 一样做成旁表而不是塞进每条记忆：MemoryDto 是服务层的形状，
+ * 不该为了一个界面在这里编字段。
+ *
+ * 对外只给档位和因子，不给分数——一个三位小数会被当成精确真理，而它只是规则的产物。
+ */
+describe('记忆列表带置信度', () => {
+  it('按记忆 id 给出档位和因子，不给分数', async () => {
+    store(memoryDto({ id: 'mem-1' }));
+    db.confidence.set('mem-1', {
+      score: 0.84,
+      band: 'high',
+      factors: [{ kind: 'origin', origin: 'explicit' }, { kind: 'restated', count: 3 }]
+    });
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.confidence).toEqual({
+      'mem-1': { band: 'high', factors: [{ kind: 'origin', origin: 'explicit' }, { kind: 'restated', count: 3 }] }
+    });
+    expect(JSON.stringify(payload.data.confidence)).not.toContain('0.84');
+  });
+
+  it('只给列表里的记忆算分，一次调用', async () => {
+    store(memoryDto({ id: 'mem-1' }));
+    store(memoryDto({ id: 'mem-2' }));
+
+    await call('GET');
+
+    expect(db.assessCalls).toHaveLength(1);
+    expect(db.assessCalls[0]?.ids).toEqual(['mem-1', 'mem-2']);
+  });
+
+  it('没有记忆时不去算置信度', async () => {
+    await call('GET');
+
+    expect(db.assessCalls).toEqual([]);
+  });
+
+  it('未登录时不算置信度', async () => {
+    db.authThrows = true;
+    store(memoryDto({ id: 'mem-1' }));
+
+    await call('GET');
+
+    expect(db.assessCalls).toEqual([]);
   });
 });

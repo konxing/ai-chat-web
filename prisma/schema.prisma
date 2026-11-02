@@ -95,6 +95,12 @@ enum MemoryOrigin {
   RETRACTED
 }
 
+/// 一条证据是支持还是反对它所指向的那条记忆（任务书 2.2 的支持证据 / 反对证据）。
+enum EvidenceKind {
+  SUPPORTS
+  CONTRADICTS
+}
+
 /// 时间信息的精度（任务书 2.1）。模糊时间按原样保留，不许伪造成精确日期。
 enum TimePrecision {
   UNKNOWN
@@ -133,6 +139,7 @@ model User {
   memoryRevisions  MemoryRevision[]
   memoryExclusions MemoryExclusion[]
   policySignals    MemoryPolicySignal[]
+  memoryEvidences  MemoryEvidence[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -442,6 +449,7 @@ model MemoryItem {
   /// 这条行作为「新版本」产生的演化边，和作为「被取代的旧版本」产生的边。
   revisions       MemoryRevision[] @relation("MemoryRevisionNew")
   replacedByEdges MemoryRevision[] @relation("MemoryRevisionPrevious")
+  evidences       MemoryEvidence[]
 
   @@index([userId, supersededAt])
   @@index([userId, type])
@@ -486,4 +494,34 @@ model MemoryExclusion {
 
   @@unique([userId, contentHash])
   @@index([userId, createdAt])
+}
+
+/// 认知证据账本（任务书 2.2）。一条证据只回答「这条记忆凭什么在这里」，不改变它的内容。
+///
+/// 置信度不存在 MemoryItem 上，而是读时按这些证据算出来：存一列就要维护刷新时机，
+/// 漏一处就是一个过期的假数字。
+///
+/// 复合唯一约束把「同一条消息对同一条记忆只算一次」交给数据库，
+/// 而不是靠服务层记得先查一遍（任务书 5.1 要求尽量在库层兜住）。
+/// sourceMessageId 可空是给「手工输入的记忆」留的（7.4 门槛 3 允许这种例外，
+/// 但要求记下来源类型）；PostgreSQL 的唯一索引把 NULL 视为互不相同，
+/// 所以这一类证据的去重由服务层负责，今天的四条产生路径都带消息 id，走的是库层约束。
+model MemoryEvidence {
+  id              String       @id @default(uuid())
+  userId          String
+  memoryId        String
+  kind            EvidenceKind
+  /// 这条证据是怎么来的：用户又原话说了一遍、用户亲手更正、还是系统自己观察/推断的。
+  origin          MemoryOrigin
+  sourceMessageId String?
+  sourceChatId    String?
+  /// 可选说明，密文。多数证据不需要正文；留这一列给「用户更正时写的理由」这类东西。
+  noteCiphertext  String?      @db.Text
+  createdAt       DateTime     @default(now())
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memory MemoryItem @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, memoryId, kind, sourceMessageId])
+  @@index([userId, memoryId])
 }

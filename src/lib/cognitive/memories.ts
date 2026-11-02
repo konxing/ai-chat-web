@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
+import { recordEvidence } from './evidence';
 import {
   fromDbMemoryContext,
   fromDbMemoryType,
@@ -171,6 +172,10 @@ const fromStoredOrigin = (value: string): MemoryOrigin => fromStoredEnum(ORIGIN_
 const fromStoredPrecision = (value: string): TimePrecision =>
   fromStoredEnum(PRECISION_PAIRS, value, '时间精度') as TimePrecision;
 
+/** 证据表和记忆表共用同一套来源枚举，映射只在这里定义一份，两边不会漂。 */
+export const toDbMemoryOrigin = toStoredOrigin;
+export const fromDbMemoryOrigin = fromStoredOrigin;
+
 // AAD 里带上 userId 和 schemaVersion：别人的行即使密文到手也解不开，日后换密钥也能按版本迁移。
 const aadFor = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
 
@@ -297,8 +302,20 @@ function prepareMemory(input: MemoryInput, version: number) {
 
 export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
   const memory = prepareMemory(input, 1);
-  const row = await prisma.memoryItem.create({ data: memory.data });
-  return toDto(row as unknown as MemoryRow, input.userId);
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.memoryItem.create({ data: memory.data });
+    // 那句话本身就是第一条支持证据。少了它，一条刚记下来的记忆在置信度上会显得毫无凭据，
+    // 而「用户亲口说过一次」恰恰是它唯一也是足够的凭据。
+    await recordEvidence(tx, {
+      userId: input.userId,
+      memoryId: memory.id,
+      kind: 'supports',
+      origin: input.origin,
+      sourceMessageId: input.sourceMessageId ?? null,
+      sourceChatId: input.chatId ?? null
+    });
+    return toDto(row as unknown as MemoryRow, input.userId);
+  });
 }
 
 export async function listMemories(userId: string, filters: MemoryListFilters = {}): Promise<MemoryDto[]> {
@@ -381,6 +398,17 @@ export async function reviseMemory(input: MemoryReviseInput): Promise<MemoryDto>
         sourceMessageId: input.sourceMessageId ?? null
       }
     });
+    // 新说法同时是新版本的支持证据和旧版本的反对证据（任务书 2.2 的冲突记录）。
+    // 这是事实不是猜测：用户确实对同一件事说了另一件。
+    // 理由不往证据里复制一份——它已经在演化边上了，两处存两份密文只是多一处不一致的可能。
+    const source = {
+      userId: input.userId,
+      origin: input.origin,
+      sourceMessageId: input.sourceMessageId ?? null,
+      sourceChatId: input.chatId ?? previous.chatId
+    };
+    await recordEvidence(tx, { ...source, memoryId: next.id, kind: 'supports' });
+    await recordEvidence(tx, { ...source, memoryId: previous.id, kind: 'contradicts' });
     return toDto(row as unknown as MemoryRow, input.userId);
   });
 }

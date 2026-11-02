@@ -7,7 +7,9 @@ import {
 import { extractMemoryCandidates } from './memory-extractor';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory } from './memories';
+import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
 import { excludedHashes, exclusionHash } from './exclusions';
+import { log } from '@/lib/logger';
 import { getMemoryPolicies } from './policy';
 import { getCognitivePreferences } from './preferences';
 import { rankMemories } from './retrieval';
@@ -49,6 +51,12 @@ const BLOCK_HEADER =
   '记忆可能已经过时：与用户此刻的说法冲突时，以用户此刻的说法为准。' +
   '不要向用户逐条复述这份清单，只在相关时自然使用。';
 
+/**
+ * 低可信度的记忆必须自带这句标注（任务书 3.3：置信度不足时不得以确定性语气联想）。
+ * 模型看得到的是这段文本，所以约束只能写进这段文本里——放在别的任何地方它都读不到。
+ */
+const LOW_CONFIDENCE_MARKER = '（可信度低，不得以确定性语气使用）';
+
 /** 忽略空白和大小写后相同，就认为是同一句话——重复陈述不该变成第二条记忆。 */
 function dedupeKey(text: string): string {
   return text.replace(/\s+/g, '').toLowerCase();
@@ -66,15 +74,19 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   const usable = rows.filter((memory) => isMemoryUsable(memory, { policies, chatId: turn.chatId, now }));
   // 一个相关项都匹配不上时，rankMemories 会退回 recordedAt 倒序，也就是改造前的行为。
   const memories = rankMemories(turn.content, usable, { limit: MEMORY_READ_MAX_ITEMS });
+  // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
+  const confidence = await assessMemories(turn.userId, memories, now);
 
   const lines: string[] = [];
   let size = BLOCK_HEADER.length;
   for (const memory of memories) {
     const range = describeValidRange(memory);
     const suffix = range === '时间未知' ? '' : `（${range}）`;
+    // 算不出档位就按低的处理：宁可多标一句，也不能让一条没凭据的记忆以确定的口气进提示词。
+    const marker = (confidence.get(memory.id)?.band ?? 'low') === 'low' ? LOW_CONFIDENCE_MARKER : '';
     const line =
       `- [${TYPE_LABELS[memory.type]}｜${CONTEXT_LABELS[memory.context]}｜${ORIGIN_LABELS[memory.origin]}] ` +
-      `${memory.content}${suffix}`;
+      `${memory.content}${suffix}${marker}`;
     if (size + line.length > MEMORY_READ_MAX_CHARS) break;
     lines.push(line);
     size += line.length;
@@ -98,14 +110,23 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 这里不按保留期过滤：过期只是「不再进对话」，行还在库里，用户改口就该落在那一行上；
   // 把过期行剔出匹配池只会让同一件事多存一条。
   const existing = await listMemories(turn.userId);
-  const known = new Set(existing.map((memory) => dedupeKey(memory.content)));
+  // 键是归一化后的正文，值记着 id 和来源对话：判断「换个对话又原话说了一遍」得知道旧那条是哪来的。
+  const known = new Map(
+    existing.map((memory) => [dedupeKey(memory.content), { id: memory.id, chatId: memory.chatId }])
+  );
   const superseded = new Set<string>();
 
   let written = 0;
   for (const candidate of candidates) {
     if (written >= MEMORY_WRITE_MAX_PER_TURN) break;
     const key = dedupeKey(candidate.text);
-    if (known.has(key)) continue;
+    const saidBefore = known.get(key);
+    if (saidBefore) {
+      // 换个对话又原话说一遍＝一次独立陈述，正是置信度要数的那个东西，此前这里是直接丢掉的。
+      // 同一个对话里再说一遍只算强调：记进去等于让一段啰嗦的话把自己抬成高可信。
+      if (saidBefore.chatId !== turn.chatId) await recordRestatement(turn, saidBefore.id);
+      continue;
+    }
     if (excluded.has(exclusionHash(turn.userId, candidate.text))) continue;
     const previousId = findNearDuplicate(candidate, existing);
     // 同一轮里连着两个新说法时，第二个的落点取决于第一个的结果，而我们没有那个结果：
@@ -134,15 +155,38 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       precision: 'unknown' as const
     };
     if (plan.decision === 'WRITE') {
-      await createMemory({ ...entry, context: plan.context });
+      const created = await createMemory({ ...entry, context: plan.context });
+      known.set(key, { id: created.id, chatId: turn.chatId });
     } else if (previousId) {
       // 演化不带 context：能走到这里说明这句就是旧行那件事的新说法，
       // 主题没变，而只看着这一句短话重新分类只会比旧行记的更弱。
-      await reviseMemory({ ...entry, previousId, reason: SUPERSEDE_REASON });
+      const revised = await reviseMemory({ ...entry, previousId, reason: SUPERSEDE_REASON });
       superseded.add(previousId);
+      known.set(key, { id: revised.id, chatId: turn.chatId });
     } else continue;
-    known.add(key);
     written += 1;
+  }
+}
+
+/**
+ * 记一条「用户又原话说了一遍」的独立证据。
+ *
+ * 失败只记一条不含正文的告警就放过：证据是附带记录，
+ * 写不进去不该把这一轮剩下的候选一起带下水，更不该让用户看到对话报错。
+ */
+async function recordRestatement(turn: CognitiveTurn, memoryId: string): Promise<void> {
+  try {
+    await recordEvidenceOutsideTransaction({
+      userId: turn.userId,
+      memoryId,
+      kind: 'supports',
+      // 抽出来的是用户原话，所以是「亲口说」，不是系统推断。
+      origin: 'explicit',
+      sourceMessageId: turn.sourceMessageId ?? null,
+      sourceChatId: turn.chatId
+    });
+  } catch {
+    log.warn('cognitive.evidence_failed', { userId: turn.userId, chatId: turn.chatId });
   }
 }
 

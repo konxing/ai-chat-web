@@ -24,6 +24,8 @@ vi.mock('@/lib/prisma', () => ({
         )
     },
     memoryPolicy: { findMany: () => Promise.resolve([]) },
+    // 读侧现在还要算置信度：没有证据行就是全 0，档位由来源基线决定。
+    memoryEvidence: { groupBy: () => Promise.resolve([]) },
     memoryItem: {
       findMany: ({ where }: { where: Record<string, unknown> }) => {
         db.wheres.push(where);

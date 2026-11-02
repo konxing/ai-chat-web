@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import type { MemoryOrigin, MemoryRevisionAction, TimePrecision } from '@/lib/cognitive/memories';
 import type { MemoryContext, MemoryRetention, MemoryType } from '@/lib/cognitive/policy';
 import {
+  CONFIDENCE_BAND_LABELS,
   CONTEXT_LABELS,
   CONTEXT_ORDER,
   ORIGIN_LABELS,
@@ -22,6 +23,7 @@ import {
   REVISION_ACTION_LABELS,
   TYPE_LABELS,
   TYPE_ORDER,
+  describeConfidenceFactor,
   describePolicySummary,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
@@ -137,6 +139,35 @@ describe('策略摘要', () => {
 
   it('一个类型都不选时明说不记任何类型，而不是显示「记 0 种类型」', () => {
     expect(describePolicySummary({ ...base, allowedMemoryTypes: [] })).toBe('允许保存 · 不记任何类型');
+  });
+});
+
+describe('置信度的档位与因子说明', () => {
+  it('三个档位都有中文标签', () => {
+    expect(CONFIDENCE_BAND_LABELS).toEqual({ high: '可信度高', medium: '可信度中', low: '可信度低' });
+  });
+
+  it('六种来源都有说明，系统和推断出来的必须写明「未经用户确认」', () => {
+    expect(describeConfidenceFactor({ kind: 'origin', origin: 'explicit' })).toBe('用户亲口说过');
+    expect(describeConfidenceFactor({ kind: 'origin', origin: 'userConfirmed' })).toBe('用户亲手确认过');
+    for (const origin of ['observed', 'inferred'] as MemoryOrigin[]) {
+      expect(describeConfidenceFactor({ kind: 'origin', origin })).toContain('未经用户确认');
+    }
+    // 推断永远不许写成用户说过
+    expect(describeConfidenceFactor({ kind: 'origin', origin: 'inferred' })).not.toContain('亲口');
+    expect(describeConfidenceFactor({ kind: 'origin', origin: 'hypothesis' })).toBe('仅为假设');
+    expect(describeConfidenceFactor({ kind: 'origin', origin: 'retracted' })).toBe('已撤回');
+  });
+
+  it('重复陈述和反对证据都带上次数', () => {
+    expect(describeConfidenceFactor({ kind: 'restated', count: 2 })).toBe('在 2 个不同场合重复过');
+    expect(describeConfidenceFactor({ kind: 'contradicted', count: 1 })).toBe('存在 1 条相反证据');
+  });
+
+  it('三个终态各有说明', () => {
+    expect(describeConfidenceFactor({ kind: 'superseded' })).toBe('已被新说法取代');
+    expect(describeConfidenceFactor({ kind: 'expired' })).toBe('已过有效期');
+    expect(describeConfidenceFactor({ kind: 'retracted' })).toBe('已撤回');
   });
 });
 

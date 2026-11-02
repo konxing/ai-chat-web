@@ -18,6 +18,7 @@ type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   edges: [] as Row[],
+  evidence: [] as Row[],
   creates: [] as Row[],
   reads: [] as unknown[],
   takes: [] as Array<number | undefined>,
@@ -106,6 +107,9 @@ function fakeTransaction(pending: Array<() => void>) {
     memoryItem: {
       create: ({ data }: { data: Row }) => {
         if (db.failOn === 'create') return Promise.reject(new Error('新行插入失败'));
+        // 和事务外那个 create 一样记账：createMemory 现在走事务，
+        // 断言「写了什么进去」的用例不该因为换了执行路径就看不见数据。
+        db.creates.push(data);
         const row = stamped(data);
         pending.push(() => db.rows.set(String(row.id), row));
         return Promise.resolve(row);
@@ -123,6 +127,15 @@ function fakeTransaction(pending: Array<() => void>) {
         if (db.failOn === 'edge') return Promise.reject(new Error('演化边写入失败'));
         const row = { createdAt: new Date(Date.now() + (db.tick += 1)), ...data };
         pending.push(() => db.edges.push(row));
+        return Promise.resolve(row);
+      }
+    },
+    memoryEvidence: {
+      findFirst: ({ where }: { where: unknown }) =>
+        Promise.resolve(db.evidence.filter((row) => matches(row, where))[0] ?? null),
+      create: ({ data }: { data: Row }) => {
+        const row: Row = { createdAt: new Date(Date.now() + (db.tick += 1)), ...data };
+        pending.push(() => db.evidence.push(row));
         return Promise.resolve(row);
       }
     }
@@ -198,6 +211,7 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   db.rows.clear();
   db.edges = [];
+  db.evidence = [];
   db.creates = [];
   db.reads = [];
   db.takes = [];
@@ -500,6 +514,9 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
   it('事务里任何一步失败都不留下半截演化：旧行没被盖戳，也不多出当前版本', async () => {
     const { createMemory, reviseMemory } = await memories();
     const previous = await createMemory(baseInput());
+    // createMemory 自己也走事务（记忆行和第一条证据要么都在要么都不在），
+    // 这里数的是「演化那几次」提交了几回，所以把计数清零再开始。
+    db.commits = 0;
 
     for (const point of ['create', 'update', 'edge'] as const) {
       db.failOn = point;
@@ -533,6 +550,7 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
   it('理由为空就不许改：撤回和演化都得留下说得出口的原因', async () => {
     const { createMemory, retractMemory, reviseMemory } = await memories();
     const memory = await createMemory(baseInput());
+    db.commits = 0;
 
     await expect(retractMemory(memory.id, USER, '   ')).rejects.toThrow(/理由/);
     await expect(reviseMemory({ ...REVISE, previousId: memory.id, reason: '' })).rejects.toThrow(/理由/);
@@ -543,6 +561,7 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
   it('别人那条记忆改不动：按 userId 找不到旧行就报错，一行一边都不写', async () => {
     const { createMemory, reviseMemory } = await memories();
     const theirs = await createMemory(baseInput({ userId: 'user-b' }));
+    db.commits = 0;
 
     await expect(reviseMemory({ ...REVISE, previousId: theirs.id })).rejects.toThrow(/记忆/);
 
@@ -566,6 +585,7 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
   it('已经被取代的行不能再改：报冲突，一行一边都不写', async () => {
     const { createMemory, reviseMemory } = await memories();
     const previous = await createMemory(baseInput());
+    db.commits = 0;
     await reviseMemory({ ...REVISE, previousId: previous.id });
     db.updates = [];
 
@@ -580,6 +600,7 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
   it('读完之后被人抢先：靠盖戳的条件回滚，而不是靠那次读', async () => {
     const { createMemory, reviseMemory } = await memories();
     const previous = await createMemory(baseInput());
+    db.commits = 0;
     // 库里这一行已经取代过了，但读回来的还是抢先之前的快照——真库里就是这两步之间的窗口。
     Object.assign(db.rows.get(previous.id)!, { supersededAt: new Date() });
     db.staleRead = true;
@@ -602,5 +623,77 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
     expect(mine[0]).toMatchObject({ action: 'superseded', memoryId: next.id, previousId: previous.id });
     expect(mine[0]!.reason).toBe('用户说了新的版本号');
     expect(await listMemoryRevisions(next.id, 'user-b')).toEqual([]);
+  });
+});
+
+/**
+ * 1a 证据账本接线（任务书 2.2）。
+ *
+ * 记忆一落地就要有它的第一条支持证据：那句话本身就是凭据，
+ * 否则一条刚记下来的记忆在置信度上会显得毫无根据。
+ * 改口时新说法既是新版本的支持证据，也是旧版本的反对证据——
+ * 这是事实，不是猜测：用户确实说了另一件事。
+ */
+describe('证据随记忆一起落库', () => {
+  /** 用户亲手更正的形状：origin 由服务端定死为 userConfirmed，理由必填。 */
+  const REVISE = {
+    userId: USER,
+    content: '用户的澄境项目用 Next.js 15。',
+    origin: 'userConfirmed' as const,
+    confirmedAt: new Date('2026-11-03T10:00:00.000Z'),
+    precision: 'unknown' as const,
+    reason: '用户说了新的版本号',
+    sourceMessageId: 'msg-9'
+  };
+
+  it('创建记忆时留下一条支持证据，来源就是那句话所在的消息', async () => {
+    const { createMemory } = await memories();
+
+    const memory = await createMemory(baseInput({ chatId: 'chat-1', sourceMessageId: 'msg-1' }));
+
+    expect(db.evidence).toHaveLength(1);
+    expect(db.evidence[0]).toMatchObject({
+      userId: USER,
+      memoryId: memory.id,
+      kind: 'SUPPORTS',
+      origin: 'EXPLICIT',
+      sourceMessageId: 'msg-1',
+      sourceChatId: 'chat-1'
+    });
+  });
+
+  it('证据和记忆行在同一个事务里：插入失败就一起回滚', async () => {
+    db.failOn = 'create';
+    const { createMemory } = await memories();
+
+    await expect(createMemory(baseInput())).rejects.toThrow();
+
+    expect(db.rows.size).toBe(0);
+    expect(db.evidence).toEqual([]);
+  });
+
+  it('改口时新版本拿到支持证据、旧版本拿到反对证据，两条都指向同一句话', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+    db.evidence = [];
+
+    const next = await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    expect(db.evidence).toHaveLength(2);
+    const supports = db.evidence.find((row) => row.kind === 'SUPPORTS');
+    const contradicts = db.evidence.find((row) => row.kind === 'CONTRADICTS');
+    expect(supports).toMatchObject({ memoryId: next.id, origin: 'USER_CONFIRMED' });
+    expect(contradicts).toMatchObject({ memoryId: previous.id, origin: 'USER_CONFIRMED' });
+    expect(supports?.sourceMessageId).toBe(contradicts?.sourceMessageId);
+  });
+
+  it('撤回不记证据：撤回是「别再用了」，不等于「这是假的」', async () => {
+    const { createMemory, retractMemory } = await memories();
+    const memory = await createMemory(baseInput());
+    db.evidence = [];
+
+    await retractMemory(memory.id, USER, '这已经不是我的情况');
+
+    expect(db.evidence).toEqual([]);
   });
 });

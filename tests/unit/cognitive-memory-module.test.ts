@@ -17,6 +17,11 @@ const db = vi.hoisted(() => ({
   listFilters: [] as unknown[],
   excluded: [] as string[],
   exclusionCalls: [] as string[],
+  evidenceCalls: [] as Array<Record<string, unknown>>,
+  evidenceThrows: false,
+  assessCalls: [] as string[],
+  assessReturnsEmpty: false,
+  band: 'medium' as 'low' | 'medium' | 'high',
   policies: null as unknown,
   policyCalls: 0
 }));
@@ -88,6 +93,26 @@ vi.mock('@/lib/cognitive/exclusions', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/cognitive/evidence', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/evidence')>();
+  return {
+    ...actual,
+    // 打分和记账都在这里换成探针：算分规则本身在 cognitive-confidence / cognitive-evidence 里测过，
+    // 这里要测的是模块有没有在正确的时机调用它们、以及低档位有没有被标出来。
+    assessMemories: (userId: string, memories: Array<{ id: string }>) => {
+      db.assessCalls.push(userId);
+      if (db.assessReturnsEmpty) return Promise.resolve(new Map());
+      return Promise.resolve(
+        new Map(memories.map((memory) => [memory.id, { score: 0.6, band: db.band, factors: [] }]))
+      );
+    },
+    recordEvidenceOutsideTransaction: (input: Record<string, unknown>) => {
+      db.evidenceCalls.push(input);
+      return db.evidenceThrows ? Promise.reject(new Error('证据写入失败')) : Promise.resolve();
+    }
+  };
+});
+
 import { DEFAULT_MEMORY_POLICIES } from '@/lib/cognitive/policy';
 import { exclusionHash } from '@/lib/cognitive/exclusions';
 import {
@@ -149,6 +174,11 @@ beforeEach(() => {
   db.listFilters = [];
   db.excluded = [];
   db.exclusionCalls = [];
+  db.evidenceCalls = [];
+  db.evidenceThrows = false;
+  db.assessCalls = [];
+  db.assessReturnsEmpty = false;
+  db.band = 'medium';
   db.policies = null;
   db.policyCalls = 0;
 });
@@ -657,5 +687,125 @@ describe('读侧：按这一轮的提问召回，不是按时间倒序', () => {
       filters: { asOf: expect.any(Date), take: MEMORY_RETRIEVAL_POOL }
     });
     expect(MEMORY_RETRIEVAL_POOL).toBeGreaterThan(MEMORY_READ_MAX_ITEMS);
+  });
+});
+
+/**
+ * 1a 证据账本接线（任务书 2.2）。
+ *
+ * 写侧：同一句话被用户再说一遍，此前是直接丢掉的（`known.has(key)` 就 continue）。
+ * 但「换了个对话又说一遍」是一次独立陈述，正是置信度要数的那个东西；
+ * 同一个对话里再说一遍只是强调，不算独立证据——否则一段啰嗦的话就能把自己抬成高可信。
+ *
+ * 读侧：低档位的记忆必须标出来。任务书 3.3 要求「置信度不足时不得以确定性语气联想」，
+ * 而模型看得到的是这段文本，所以标注只能写在这段文本里。
+ */
+describe('写侧：重复陈述记成独立证据', () => {
+  it('同一句话在另一个对话里再说一遍，记一条支持证据，既不新增也不演化', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ chatId: 'chat-1' })];
+
+    await memoryModule.write!({
+      ...TURN,
+      chatId: 'chat-2',
+      sourceMessageId: 'msg-2',
+      content: '我在用 Prisma。',
+      occurredAt: OCCURRED
+    });
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toEqual([]);
+    expect(db.evidenceCalls).toEqual([
+      {
+        userId: 'user-a',
+        memoryId: 'mem-1',
+        kind: 'supports',
+        origin: 'explicit',
+        sourceMessageId: 'msg-2',
+        sourceChatId: 'chat-2'
+      }
+    ]);
+  });
+
+  it('同一个对话里再说一遍不算独立证据，那只是强调', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ chatId: 'chat-1' })];
+
+    await write('我在用 Prisma。');
+
+    expect(db.evidenceCalls).toEqual([]);
+    expect(db.creates).toEqual([]);
+  });
+
+  it('关掉长期记忆时连证据都不记', async () => {
+    db.memoryEnabled = false;
+    db.readRows = [memoryRow({ chatId: 'chat-1' })];
+
+    await memoryModule.write!({ ...TURN, chatId: 'chat-2', content: '我在用 Prisma。', occurredAt: OCCURRED });
+
+    expect(db.evidenceCalls).toEqual([]);
+  });
+
+  it('记证据失败不影响这一轮剩下的候选：那是附带效果，不是主写入', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ chatId: 'chat-1' })];
+    db.evidenceThrows = true;
+
+    await memoryModule.write!({
+      ...TURN,
+      chatId: 'chat-2',
+      sourceMessageId: 'msg-2',
+      content: '我在用 Prisma。我住在杭州。',
+      occurredAt: OCCURRED
+    });
+
+    // 第一句是重复陈述（记证据，失败被吞掉），第二句该照常落库
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]?.content).toBe('我住在杭州');
+  });
+});
+
+describe('读侧：低可信度的记忆要标出来', () => {
+  it('低档位的记忆带上「不得以确定性语气使用」', async () => {
+    db.memoryEnabled = true;
+    db.band = 'low';
+    db.readRows = [memoryRow()];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('（可信度低，不得以确定性语气使用）');
+  });
+
+  it('中高档位不加标注，免得每行都挂一句免责', async () => {
+    db.memoryEnabled = true;
+    db.band = 'high';
+    db.readRows = [memoryRow()];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).not.toContain('可信度低');
+  });
+
+  it('一批记忆只算一次置信度，不是每条各查一次', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      memoryRow({ id: 'mem-1' }),
+      memoryRow({ id: 'mem-2', content: '我住在杭州' }),
+      memoryRow({ id: 'mem-3', content: '我在学 Rust' })
+    ];
+
+    await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(db.assessCalls).toEqual(['user-a']);
+  });
+
+  it('算不出置信度时按低档位处理，宁可多标一句也不冒充确定', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow()];
+    db.assessReturnsEmpty = true;
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('（可信度低，不得以确定性语气使用）');
   });
 });
