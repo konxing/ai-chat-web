@@ -153,3 +153,18 @@ export const memoryPolicyPatchSchema = z.object({
 export const memoryPolicyResetSchema = z.object({
   context: z.enum(MEMORY_CONTEXT_VALUES)
 });
+
+/**
+ * 用户亲手改记忆：正文和理由都必填，也不许只有空格。
+ * 请求体里没有 origin 这个字段——那是服务端定死的「用户已确认」，
+ * 留着口子就等于允许把系统推断伪装成用户亲口说过。
+ * 两个上限跟服务层（记忆正文 1000 字、理由 500 字）保持一致，服务层还会再校一遍。
+ */
+export const memoryReviseSchema = z.object({
+  content: z.string().trim().min(1, '记忆正文不能为空').max(1000, '记忆正文不能超过 1000 字'),
+  reason: z.string().trim().min(1, '改记忆要写明理由').max(500, '理由不能超过 500 字')
+});
+
+export const memoryRetractSchema = z.object({
+  reason: z.string().trim().min(1, '撤回记忆要写明理由').max(500, '理由不能超过 500 字')
+});
