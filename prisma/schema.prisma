@@ -85,6 +85,25 @@ enum MemoryRetention {
   SESSION_ONLY
 }
 
+/// 一条记忆的认识论地位（任务书 2.2）。推断和假设永远不等于用户说过或确认过。
+enum MemoryOrigin {
+  EXPLICIT
+  USER_CONFIRMED
+  OBSERVED
+  INFERRED
+  HYPOTHESIS
+  RETRACTED
+}
+
+/// 时间信息的精度（任务书 2.1）。模糊时间按原样保留，不许伪造成精确日期。
+enum TimePrecision {
+  UNKNOWN
+  YEAR
+  MONTH
+  DAY
+  TIMESTAMP
+}
+
 model User {
   id             String     @id @default(uuid())
   username       String     @unique @db.VarChar(32)
@@ -103,6 +122,7 @@ model User {
   aiProviders    AiProvider[]
   cognitive      CognitivePreference?
   memoryPolicies MemoryPolicy[]
+  memories       MemoryItem[]
   attachments    Attachment[]
   loginLogs      LoginLog[]
   auditLogs      AuditLog[]      @relation("AuditActor")
@@ -144,6 +164,7 @@ model Chat {
   provider   AiProvider?  @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
   messages   Message[]
   attachments Attachment[]
+  memories   MemoryItem[]
 
   @@index([userId, updatedAt])
   @@index([modelProviderId])
@@ -165,6 +186,7 @@ model Message {
 
   chat        Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
   attachments Attachment[]
+  memories    MemoryItem[] @relation("MemorySource")
 
   @@index([chatId, createdAt])
 }
@@ -323,8 +345,8 @@ model EmailToken {
   @@index([expiresAt])
 }
 
-/// 认知引擎的用户级开关。三个模块各自独立启用，默认全关——没有这一行也就等于全关。
-/// 关掉只停读写，不删任何数据；清空数据是另一个动作（Phase 6 的删除接口）。
+/// 认知引擎的用户级开关。八个开关各自独立启用，默认全关——没有这一行也就等于全关。
+/// 关掉只停读写，不删任何数据；清空数据是另一个动作（Phase 7 的遗忘接口）。
 model CognitivePreference {
   userId                String              @id
   memoryEnabled         Boolean             @default(false)
@@ -360,4 +382,34 @@ model MemoryPolicy {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, context])
+}
+
+/// 长期记忆主体（任务书 2.1、2.2）。双时间模型：validFrom/validTo 是事实成立的区间，
+/// recordedAt 是系统记下的时间，两者互不替代；区间只有在 validPrecision 支持时才允许精确。
+/// 正文加密存储，AAD 绑住 userId 与记录 id——整表导出也读不出内容。
+/// 会话或删除时其派生记忆随行cascade 一起消失（Phase 7 的清理口径）。
+model MemoryItem {
+  id                String        @id @default(uuid())
+  userId            String
+  chatId            String?
+  sourceMessageId   String?
+  type              MemoryType
+  context           MemoryContext
+  origin            MemoryOrigin
+  contentCiphertext String        @db.Text
+  confirmedAt       DateTime?
+  version           Int           @default(1)
+  supersededAt      DateTime?
+  validFrom         DateTime?
+  validTo           DateTime?
+  validPrecision    TimePrecision @default(UNKNOWN)
+  recordedAt        DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat          Chat?    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sourceMessage Message? @relation("MemorySource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, supersededAt])
+  @@index([userId, type])
 }

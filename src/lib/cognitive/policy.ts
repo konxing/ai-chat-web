@@ -73,6 +73,23 @@ export const MEMORY_CONTEXTS: readonly MemoryContext[] = CONTEXT_PAIRS.map(([app
 export const MEMORY_TYPES: readonly MemoryType[] = TYPE_PAIRS.map(([app]) => app);
 export const MEMORY_RETENTIONS: readonly MemoryRetention[] = RETENTION_PAIRS.map(([app]) => app);
 
+/** 记忆表也要按同一套「对外小写 / 入库大写」转换，映射只在这里定义一份。 */
+export function toDbMemoryType(type: MemoryType): DbMemoryType {
+  return toDb(TYPE_PAIRS, type, '记忆类型', MEMORY_TYPES);
+}
+
+export function fromDbMemoryType(value: string): MemoryType {
+  return fromDb(TYPE_PAIRS, value, '记忆类型');
+}
+
+export function toDbMemoryContext(context: MemoryContext): DbContext {
+  return toDb(CONTEXT_PAIRS, context, '情境', MEMORY_CONTEXTS);
+}
+
+export function fromDbMemoryContext(value: string): MemoryContext {
+  return fromDb(CONTEXT_PAIRS, value, '记忆情境');
+}
+
 function toDb<K extends string, V extends string>(
   pairs: ReadonlyArray<readonly [K, V]>,
   value: K,
