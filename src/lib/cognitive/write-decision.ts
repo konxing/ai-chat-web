@@ -1,4 +1,5 @@
 import { classifyContext } from '@/lib/cognitive/context-classifier';
+import { normalizeForMatch } from '@/lib/cognitive/normalize';
 import {
   MEMORY_CONTEXTS,
   type MemoryContext,
@@ -151,11 +152,6 @@ export interface NearDuplicateRow {
   id: string;
   type: MemoryType;
   content: string;
-}
-
-/** 空白、大小写和标点不构成「另一句话」——同一件事写得不一样不该多存一条。 */
-function normalizeForMatch(text: string): string {
-  return text.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 }
 
 function bigrams(text: string): string[] {

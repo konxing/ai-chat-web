@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { encryptString } from '@/lib/crypto';
 
 /**
  * 永久删除（任务书 7.2 的 DELETE、7.3 的用户遗忘功能、7.4 门槛 2「派生数据按策略清理」）。
@@ -8,7 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * 活着的那一行版本链就凭空断了。所以先把指向被删行的边摘开（previousId 置 null，
  * 该列本身可空），保住「这一版来自一次改口」这个事实，同时不留指向已删内容的指针。
  *
- * 派生数据当前只有演化边一种：Embedding、图关系、时间线、反思、决策、认知任务都还没落地，
+ * 派生数据当前有两种：演化边，以及「删掉的内容不许被自动记回来」的排除规则。
+ * Embedding、图关系、时间线、反思、决策、认知任务都还没落地，
  * 等它们出现时这里要跟着加清理，测试也要跟着加断言。
  */
 type Row = Record<string, unknown>;
@@ -16,6 +18,7 @@ type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   edges: [] as Row[],
+  exclusions: [] as Row[],
   txOps: [] as string[],
   topOps: [] as string[],
   commits: 0
@@ -61,18 +64,47 @@ function detach(where: unknown, data: Row, sink: string[]): { count: number } {
   return { count: rows.length };
 }
 
+function exclusionClient(sink: string[]) {
+  return {
+    findMany: ({ where }: { where: unknown }) =>
+      Promise.resolve(db.exclusions.filter((row) => matches(row, where)).map((row) => ({ ...row }))),
+    create: ({ data }: { data: Row }) => {
+      sink.push('exclude');
+      const row = { createdAt: new Date(), ...data };
+      db.exclusions.push(row);
+      return Promise.resolve(row);
+    },
+    count: ({ where }: { where: unknown }) =>
+      Promise.resolve(db.exclusions.filter((row) => matches(row, where)).length),
+    deleteMany: ({ where }: { where: unknown }) => {
+      const rows = db.exclusions.filter((row) => matches(row, where));
+      db.exclusions = db.exclusions.filter((row) => !rows.includes(row));
+      return Promise.resolve({ count: rows.length });
+    }
+  };
+}
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: (run: (tx: unknown) => Promise<unknown>) =>
       run({
         memoryItem: {
-          findMany: ({ where }: { where: unknown }) => Promise.resolve(matching(where).map((row) => ({ ...row }))),
+          findFirst: ({ where }: { where: unknown }) => {
+            db.txOps.push('find');
+            const row = matching(where)[0];
+            return Promise.resolve(row ? { ...row } : null);
+          },
+          findMany: ({ where }: { where: unknown }) => {
+            db.txOps.push('find');
+            return Promise.resolve(matching(where).map((row) => ({ ...row })));
+          },
           deleteMany: ({ where }: { where: unknown }) => Promise.resolve(deleteMany(where, db.txOps))
         },
         memoryRevision: {
           updateMany: ({ where, data }: { where: unknown; data: Row }) =>
             Promise.resolve(detach(where, data, db.txOps))
-        }
+        },
+        memoryExclusion: exclusionClient(db.txOps)
       }).then((result) => {
         db.commits += 1;
         return result;
@@ -83,7 +115,8 @@ vi.mock('@/lib/prisma', () => ({
     memoryRevision: {
       updateMany: ({ where, data }: { where: unknown; data: Row }) =>
         Promise.resolve(detach(where, data, db.topOps))
-    }
+    },
+    memoryExclusion: exclusionClient(db.topOps)
   }
 }));
 
@@ -94,16 +127,20 @@ async function forgetting() {
   return await import('@/lib/cognitive/forgetting');
 }
 
-function row(id: string, overrides: Row = {}): Row {
+/** 正文用真加密：删除要读回明文才能建排除，mock 一个假密文就测不到这条路径。 */
+const contentAad = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
+
+function row(id: string, overrides: Row = {}, content = '我在用 Prisma'): Row {
+  const userId = String(overrides.userId ?? USER);
   return {
     id,
-    userId: USER,
+    userId,
     chatId: 'chat-1',
     sourceMessageId: null,
     type: 'FACT',
     context: 'GENERAL',
     origin: 'EXPLICIT',
-    contentCiphertext: 'enc:v1:not-used-here',
+    contentCiphertext: encryptString(content, contentAad(userId, id)),
     confirmedAt: null,
     version: 1,
     supersededAt: null,
@@ -122,6 +159,7 @@ function edge(id: string, memoryId: string, previousId: string | null, userId = 
 beforeEach(() => {
   db.rows.clear();
   db.edges = [];
+  db.exclusions = [];
   db.txOps = [];
   db.topOps = [];
   db.commits = 0;
@@ -176,7 +214,7 @@ describe('永久删除一条', () => {
     await expect(purgeMemory('nope', USER)).resolves.toBe(0);
   });
 
-  it('摘边和删行在同一个事务里，不走事务外的连接', async () => {
+  it('摘边、删行和建排除在同一个事务里，不走事务外的连接', async () => {
     db.rows.set('mem-1', row('mem-1'));
     db.edges = [edge('edge-1', 'mem-2', 'mem-1')];
     const { purgeMemory } = await forgetting();
@@ -184,8 +222,70 @@ describe('永久删除一条', () => {
     await purgeMemory('mem-1', USER);
 
     expect(db.commits).toBe(1);
-    expect(db.txOps).toEqual(['detach', 'delete']);
+    expect(db.txOps).toContain('detach');
+    expect(db.txOps).toContain('delete');
+    expect(db.txOps).toContain('exclude');
     expect(db.topOps).toEqual([]);
+  });
+});
+
+/**
+ * 删掉的内容要进排除表（任务书 7.3「建立来源排除规则，防止后台再次提取相同信息」）。
+ * 没有这一步，用户永久删除一条记忆之后，下次在对话里说同一句话它又被记回来了。
+ */
+describe('删除时建立来源排除', () => {
+  it('删一条就记一条排除，存的是哈希和密文，不是明文', async () => {
+    db.rows.set('mem-1', row('mem-1', {}, '我住在杭州'));
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.exclusions).toHaveLength(1);
+    const [exclusion] = db.exclusions;
+    expect(exclusion?.userId).toBe(USER);
+    expect(exclusion?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(String(exclusion?.contentCiphertext)).not.toContain('我住在杭州');
+    expect(exclusion).toMatchObject({ chatId: 'chat-1' });
+  });
+
+  it('按来源会话删除时，每一条都各记一条排除', async () => {
+    db.rows.set('mem-1', row('mem-1', { chatId: 'chat-1' }, '我住在杭州'));
+    db.rows.set('mem-2', row('mem-2', { chatId: 'chat-1' }, '我在用 Prisma'));
+    db.rows.set('mem-3', row('mem-3', { chatId: 'chat-2' }, '别的事'));
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.exclusions).toHaveLength(2);
+  });
+
+  it('清空全部不建排除：那是重新开始，不是「这些话永远别再记」', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-2', row('mem-2'));
+    const { purgeAllMemories } = await forgetting();
+
+    await expect(purgeAllMemories(USER)).resolves.toBe(2);
+
+    expect(db.exclusions).toEqual([]);
+  });
+
+  it('删别人的记忆不建排除', async () => {
+    db.rows.set('mem-1', row('mem-1', { userId: OTHER }));
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toBe(0);
+
+    expect(db.exclusions).toEqual([]);
+  });
+
+  it('正文解不开时照样删掉，只是不建排除——坏数据不能挡住用户的删除', async () => {
+    db.rows.set('mem-1', row('mem-1', { contentCiphertext: 'enc:v1:garbage' }));
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toBe(1);
+
+    expect(db.rows.size).toBe(0);
+    expect(db.exclusions).toEqual([]);
   });
 });
 

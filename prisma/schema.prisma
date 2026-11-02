@@ -124,18 +124,19 @@ model User {
   updatedAt     DateTime   @updatedAt
   lastLoginAt   DateTime?
 
-  sessions        Session[]
-  chats           Chat[]
-  aiProviders     AiProvider[]
-  cognitive       CognitivePreference?
-  memoryPolicies  MemoryPolicy[]
-  memories        MemoryItem[]
-  memoryRevisions MemoryRevision[]
-  attachments     Attachment[]
-  loginLogs       LoginLog[]
-  auditLogs       AuditLog[]           @relation("AuditActor")
-  ipRulesCreated  IpRule[]             @relation("IpRuleCreator")
-  configsUpdated  SystemConfig[]       @relation("ConfigUpdater")
+  sessions         Session[]
+  chats            Chat[]
+  aiProviders      AiProvider[]
+  cognitive        CognitivePreference?
+  memoryPolicies   MemoryPolicy[]
+  memories         MemoryItem[]
+  memoryRevisions  MemoryRevision[]
+  memoryExclusions MemoryExclusion[]
+  attachments      Attachment[]
+  loginLogs        LoginLog[]
+  auditLogs        AuditLog[]           @relation("AuditActor")
+  ipRulesCreated   IpRule[]             @relation("IpRuleCreator")
+  configsUpdated   SystemConfig[]       @relation("ConfigUpdater")
 
   @@index([role])
   @@index([status])
@@ -444,5 +445,25 @@ model MemoryRevision {
 
   @@index([memoryId])
   @@index([previousId])
+  @@index([userId, createdAt])
+}
+
+/// 用户永久删除过的内容不再被自动记回来（任务书 7.3 的来源排除规则）。
+/// chatId 和 sourceMessageId 故意不建外键：排除必须比来源活得久，
+/// 会话被删掉之后，那句话仍然不该被重新记住。
+model MemoryExclusion {
+  id                String   @id @default(uuid())
+  userId            String
+  /// HMAC(APP_SECRET, userId:归一化正文)：匹配用，本身不是明文的等价物。
+  contentHash       String
+  /// 另存一份密文，只为界面能显示和撤销；只有哈希的话用户认不出哪条是哪条。
+  contentCiphertext String   @db.Text
+  chatId            String?
+  sourceMessageId   String?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentHash])
   @@index([userId, createdAt])
 }

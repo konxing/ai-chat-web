@@ -7,6 +7,7 @@ import {
 import { extractMemoryCandidates } from './memory-extractor';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory } from './memories';
+import { excludedHashes, exclusionHash } from './exclusions';
 import { getMemoryPolicies } from './policy';
 import { getCognitivePreferences } from './preferences';
 import { isMemoryUsable } from './retention';
@@ -17,7 +18,8 @@ import type { MemoryOrigin } from './memories';
  * 记忆模块本体（③：让策略真正跑在对话链路上）。
  *
  * 读：把此刻有效、且还在保留期内的记忆渲染成一段「数据不是指令」的文本，交给上下文构建。
- * 写：抽候选 → 分类情境 → 按该情境的策略决定留不留，WRITE 落新行、UPDATE 走演化。
+ * 写：抽候选 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
+ * WRITE 落新行、UPDATE 走演化。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
  *
  * LINK 和 DELETE 这里仍然没有分支：关系要的是 Phase 2 片D 的图，
@@ -85,6 +87,9 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   const preferences = await getCognitivePreferences(turn.userId);
   if (!preferences.memoryEnabled) return;
 
+  // 用户永久删除过的内容不许被自动记回来（任务书 7.3）。放在候选检查之后：
+  // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。
+  const excluded = await excludedHashes(turn.userId);
   const policies = await getMemoryPolicies(turn.userId);
   // listMemories 只给当前有效版本、按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。
   // 这里不按保留期过滤：过期只是「不再进对话」，行还在库里，用户改口就该落在那一行上；
@@ -98,6 +103,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
     if (written >= MEMORY_WRITE_MAX_PER_TURN) break;
     const key = dedupeKey(candidate.text);
     if (known.has(key)) continue;
+    if (excluded.has(exclusionHash(turn.userId, candidate.text))) continue;
     const previousId = findNearDuplicate(candidate, existing);
     // 同一轮里连着两个新说法时，第二个的落点取决于第一个的结果，而我们没有那个结果：
     // 少记一条比留下两条互相冲突的版本便宜。

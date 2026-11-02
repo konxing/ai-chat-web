@@ -13,6 +13,7 @@ import {
   describeValidRange
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
+import type { ExclusionDto } from '@/lib/cognitive/exclusions';
 
 /**
  * 记忆管理那一屏：看到系统记住了什么，并逐条更正、撤回、永久删除。
@@ -24,6 +25,8 @@ import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
  *    所以全链要一格一格走，不该在这里假设链很短就一次拉完。
  * 三、撤回和永久删除是两个动作，都留着：撤回是可逆的「不再使用」，正文仍在库里；
  *    永久删除是不可逆的「这条从来没存在过」。界面上必须能看出这两者的区别。
+ * 四、永久删除过的内容会进排除表，不会被自动记回来。那张表必须看得见、撤得掉，
+ *    否则就成了一条没有任何入口能解开的静默封禁——用户只会发现 AI 再也记不住某些话。
  */
 
 interface ChainEntry {
@@ -46,6 +49,9 @@ export function MemoryPanel() {
   const [chats, setChats] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [exclusions, setExclusions] = useState<ExclusionDto[]>([]);
+  const [exclusionsError, setExclusionsError] = useState('');
+  const [removingId, setRemovingId] = useState('');
 
   const [panel, setPanel] = useState<Panel>(null);
   const [chain, setChain] = useState<ChainEntry[]>([]);
@@ -73,8 +79,20 @@ export function MemoryPanel() {
     }
   }, []);
 
+  /** 排除表单独读：它读不出来时记忆列表照样要能看，两件事不该互相拖住。 */
+  const loadExclusions = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ exclusions: ExclusionDto[] }>('/api/account/cognitive/exclusions');
+      setExclusions(data.exclusions);
+      setExclusionsError('');
+    } catch (err) {
+      setExclusionsError(errorMessage(err));
+    }
+  }, []);
+
   useEffect(() => {
     void load();
+    void loadExclusions();
     void (async () => {
       try {
         const data = await apiFetch<{ preferences: { memoryEnabled: boolean } }>('/api/account/cognitive');
@@ -83,7 +101,7 @@ export function MemoryPanel() {
         // 开关读不到就保持 null：界面显示「状态未知」，而不是假装它是关着的。
       }
     })();
-  }, [load]);
+  }, [load, loadExclusions]);
 
   async function toggleEnabled() {
     if (enabled === null || flagBusy) return;
@@ -209,7 +227,7 @@ export function MemoryPanel() {
       await apiFetch(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}`, { method: 'DELETE' });
       push('已永久删除');
       close();
-      await load();
+      await Promise.all([load(), loadExclusions()]);
     } catch (err) {
       setFormError(errorMessage(err));
     } finally {
@@ -240,7 +258,7 @@ export function MemoryPanel() {
       );
       push(`已删除 ${data.purged} 条记忆`);
       close();
-      await load();
+      await Promise.all([load(), loadExclusions()]);
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -269,6 +287,20 @@ export function MemoryPanel() {
       push(errorMessage(err), 'error');
     } finally {
       setBulkBusy('');
+    }
+  }
+
+  async function cancelExclusion(id: string) {
+    if (removingId) return;
+    setRemovingId(id);
+    try {
+      await apiFetch(`/api/account/cognitive/exclusions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      push('已撤销，之后可以重新记住');
+      await loadExclusions();
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setRemovingId('');
     }
   }
 
@@ -531,6 +563,39 @@ export function MemoryPanel() {
           })
         )}
       </div>
+
+      {/* 空表时整块不渲染：没有排除项却摆一段解释，只会让人以为系统在瞒着什么。 */}
+      {exclusions.length > 0 ? (
+        <div className="mt-6 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+          <h3 className="text-[13.5px] font-medium text-white/85">不再自动记住的内容</h3>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-white/40">
+            你永久删除过的内容不会被自动记回来。要允许它重新被记住，点「撤销」。
+          </p>
+          {exclusionsError ? (
+            <Alert tone="error" className="mt-3">
+              {exclusionsError}
+            </Alert>
+          ) : null}
+          <ul className="mt-3 space-y-2.5">
+            {exclusions.map((entry) => (
+              <li key={entry.id} className="flex flex-wrap items-start justify-between gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-[12.5px] text-white/70">{entry.content}</span>
+                  <span className="mt-0.5 block text-[11px] text-white/30">排除于 {timeAgo(entry.createdAt)}</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost shrink-0 !px-2.5 !py-1 !text-[12px]"
+                  disabled={removingId === entry.id}
+                  onClick={() => void cancelExclusion(entry.id)}
+                >
+                  {removingId === entry.id ? <Spinner /> : null} 撤销
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* 一条记忆都没有时不放这个按钮：一个「清空全部」的空控件只会让人怀疑它到底删了什么。 */}
       {memories.length > 0 ? (

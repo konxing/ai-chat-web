@@ -15,6 +15,8 @@ const db = vi.hoisted(() => ({
   revises: [] as Array<Record<string, unknown>>,
   readRows: [] as Array<Record<string, unknown>>,
   listFilters: [] as unknown[],
+  excluded: [] as string[],
+  exclusionCalls: [] as string[],
   policies: null as unknown,
   policyCalls: 0
 }));
@@ -73,7 +75,21 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/cognitive/exclusions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/exclusions')>();
+  return {
+    ...actual,
+    // 哈希用真实现：归一化和 HMAC 绑定本身在 cognitive-exclusions 里测过了，
+    // 这里要测的是写侧有没有拿它当闸门。
+    excludedHashes: (userId: string) => {
+      db.exclusionCalls.push(userId);
+      return Promise.resolve(new Set(db.excluded));
+    }
+  };
+});
+
 import { DEFAULT_MEMORY_POLICIES } from '@/lib/cognitive/policy';
+import { exclusionHash } from '@/lib/cognitive/exclusions';
 import {
   ensureCognitiveModules,
   memoryModule,
@@ -131,6 +147,8 @@ beforeEach(() => {
   db.revises = [];
   db.readRows = [];
   db.listFilters = [];
+  db.excluded = [];
+  db.exclusionCalls = [];
   db.policies = null;
   db.policyCalls = 0;
 });
@@ -493,5 +511,78 @@ describe('读侧：保留期决定还能不能被用', () => {
     expect(db.creates).toEqual([]);
     expect(db.revises).toHaveLength(1);
     expect(db.revises[0]).toMatchObject({ previousId: 'mem-1' });
+  });
+});
+
+/**
+ * ④b 来源排除规则（任务书 7.3）。用户永久删除过的那句话，下次再说不该被自动记回来——
+ * 否则「忘掉这条」这个动作等于没做。匹配按归一化后的正文，不按 sourceMessageId：
+ * 换一条消息重说同一件事，消息 id 就变了，按 id 排除等于什么都没排除。
+ */
+describe('写侧：永久删除过的内容不会被自动记回来', () => {
+  it('命中排除表的候选既不新增也不演化', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-a', '我住在杭州')];
+
+    await write('我住在杭州。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toEqual([]);
+  });
+
+  it('换个大小写和标点也算命中，归一化和排除表用的是同一套', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-a', '我住在杭州')];
+
+    await write('  我住在杭州。 ');
+
+    expect(db.creates).toEqual([]);
+  });
+
+  it('没被排除的内容照常落库，排除不许扩大到别的话', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-a', '我住在杭州')];
+
+    await write('我在用 Prisma。');
+
+    expect(db.creates).toHaveLength(1);
+  });
+
+  it('别人的排除不影响自己', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-b', '我住在杭州')];
+
+    await write('我住在杭州。');
+
+    expect(db.creates).toHaveLength(1);
+  });
+
+  it('撤销排除之后，同一句话可以重新被记住', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-a', '我住在杭州')];
+    await write('我住在杭州。');
+    expect(db.creates).toEqual([]);
+
+    db.excluded = [];
+    await write('我住在杭州。');
+
+    expect(db.creates).toHaveLength(1);
+  });
+
+  it('这一轮没有候选时不查排除表，白问一次数据库也是开销', async () => {
+    db.memoryEnabled = true;
+
+    await write('你好');
+
+    expect(db.exclusionCalls).toEqual([]);
+  });
+
+  it('关掉长期记忆时连排除表都不查', async () => {
+    db.memoryEnabled = false;
+
+    await write('我住在杭州。');
+
+    expect(db.exclusionCalls).toEqual([]);
+    expect(db.creates).toEqual([]);
   });
 });
