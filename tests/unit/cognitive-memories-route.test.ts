@@ -25,6 +25,8 @@ const db = vi.hoisted(() => ({
   learned: [] as string[],
   assessCalls: [] as Array<{ userId: string; ids: string[] }>,
   confidence: new Map<string, Record<string, unknown>>(),
+  evidenceCalls: [] as Array<{ memoryId: string; userId: string }>,
+  evidenceRows: [] as Array<Record<string, unknown>>,
   titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
@@ -149,6 +151,10 @@ vi.mock('@/lib/cognitive/evidence', () => ({
   assessMemories: (userId: string, memories: Array<{ id: string }>) => {
     db.assessCalls.push({ userId, ids: memories.map((memory) => memory.id) });
     return Promise.resolve(new Map([...db.confidence]));
+  },
+  listEvidence: (memoryId: string, userId: string) => {
+    db.evidenceCalls.push({ memoryId, userId });
+    return Promise.resolve(db.evidenceRows);
   }
 }));
 
@@ -199,9 +205,11 @@ async function call(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path = '', body
   });
   const route = path.endsWith('/retract')
     ? await import('@/app/api/account/cognitive/memories/[id]/retract/route')
-    : path === ''
-      ? await import('@/app/api/account/cognitive/memories/route')
-      : await import('@/app/api/account/cognitive/memories/[id]/route');
+    : path.endsWith('/evidence')
+      ? await import('@/app/api/account/cognitive/memories/[id]/evidence/route')
+      : path === ''
+        ? await import('@/app/api/account/cognitive/memories/route')
+        : await import('@/app/api/account/cognitive/memories/[id]/route');
   // Next 15 把动态段做成 Promise 传进来；列表路由只收 request。
   const ctx = path === '' ? {} : { params: Promise.resolve({ id: path.split('/')[1] ?? '' }) };
   // 三个模块导出的动词各不相同（GET/PATCH/POST），按联合类型取不到，这里只按方法名查表。
@@ -226,6 +234,8 @@ beforeEach(() => {
   db.learned = [];
   db.assessCalls = [];
   db.confidence = new Map();
+  db.evidenceCalls = [];
+  db.evidenceRows = [];
   db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
@@ -709,5 +719,45 @@ describe('记忆列表带置信度', () => {
     await call('GET');
 
     expect(db.assessCalls).toEqual([]);
+  });
+});
+
+/**
+ * 1b 一条记忆的证据（任务书 2.2 的支持证据 / 反对证据要能被用户自己看到）。
+ * 和版本链同一个模式：不在列表里一次带回来，点一次取一条记忆的，
+ * 每一次解密都对应一个真实的用户动作。
+ */
+describe('一条记忆的证据', () => {
+  it('返回自己的证据，userId 取自 session', async () => {
+    db.evidenceRows = [{ id: 'ev-1', kind: 'supports', origin: 'explicit' }];
+
+    const { response, payload } = await call('GET', '/mem-1/evidence');
+
+    expect(response.status).toBe(200);
+    expect(payload.data.evidence).toEqual(db.evidenceRows);
+    expect(db.evidenceCalls).toEqual([{ memoryId: 'mem-1', userId: 'user-a' }]);
+  });
+
+  it('未登录时 401，一次查询都不发', async () => {
+    db.authThrows = true;
+
+    const { response } = await call('GET', '/mem-1/evidence');
+
+    expect(response.status).toBe(401);
+    expect(db.evidenceCalls).toEqual([]);
+  });
+
+  it('还没有证据时返回空数组而不是 404：这张表之前根本不存在，老记忆一条账都没记', async () => {
+    const { response, payload } = await call('GET', '/mem-1/evidence');
+
+    expect(response.status).toBe(200);
+    expect(payload.data.evidence).toEqual([]);
+  });
+
+  it('随便塞一个 id 也只按 session 用户查，探不出别人的记忆存不存在', async () => {
+    const { response } = await call('GET', '/whatever/evidence');
+
+    expect(response.status).toBe(200);
+    expect(db.evidenceCalls).toEqual([{ memoryId: 'whatever', userId: 'user-a' }]);
   });
 });

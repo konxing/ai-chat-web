@@ -2,25 +2,30 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Brain, History, Pencil, Trash2, X } from 'lucide-react';
+import { Brain, History, Pencil, Scale, Trash2, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
 import {
+  CONFIDENCE_BAND_LABELS,
   CONTEXT_LABELS,
   ORIGIN_LABELS,
   REVISION_ACTION_LABELS,
   TYPE_LABELS,
+  describeConfidenceFactor,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
 import type { ExclusionDto } from '@/lib/cognitive/exclusions';
+import type { EvidenceDto } from '@/lib/cognitive/evidence';
+import type { ConfidenceBand, ConfidenceFactor } from '@/lib/cognitive/confidence';
 
 /**
  * 记忆管理那一屏：看到系统记住了什么，并逐条更正、撤回、永久删除。
  *
  * 三条约束决定了这里的形状：
- * 一、一屏只有一个展开区。列表行上四个按钮——更正 / 撤回 / 版本 / 永久删除——各自打开自己的表单，
- *    同时只开一个，否则页面上会堆出好几套输入框，谁也说不清哪套是当前要提交的。
+ * 一、一屏只有一个展开区。列表行上五个按钮——更正 / 撤回 / 版本 / 证据 / 永久删除——
+ *    各自打开自己的表单，同时只开一个，否则页面上会堆出好几套输入框，
+ *    谁也说不清哪套是当前要提交的。
  * 二、版本链点一次往前取一版。服务端的边只回答「这一版是怎么来的」，
  *    所以全链要一格一格走，不该在这里假设链很短就一次拉完。
  * 三、撤回和永久删除是两个动作，都留着：撤回是可逆的「不再使用」，正文仍在库里；
@@ -34,7 +39,19 @@ interface ChainEntry {
   revisions: MemoryRevisionDto[];
 }
 
-type Panel = { kind: 'edit' | 'retract' | 'history' | 'purge'; id: string } | null;
+type Panel = { kind: 'edit' | 'retract' | 'history' | 'purge' | 'evidence'; id: string } | null;
+
+/** 置信度旁表：只有档位和因子，分数不出服务端。 */
+interface ConfidenceEntry {
+  band: ConfidenceBand;
+  factors: ConfidenceFactor[];
+}
+
+const BAND_BADGE: Record<ConfidenceBand, string> = {
+  high: 'badge badge-green !px-2 !py-0.5 !text-[10.5px]',
+  medium: 'chip !px-2 !py-0.5 !text-[10.5px]',
+  low: 'badge badge-amber !px-2 !py-0.5 !text-[10.5px]'
+};
 
 const CONTENT_MAX = 1000;
 const REASON_MAX = 500;
@@ -47,6 +64,9 @@ export function MemoryPanel() {
 
   const [memories, setMemories] = useState<MemoryDto[]>([]);
   const [chats, setChats] = useState<Record<string, string>>({});
+  const [confidence, setConfidence] = useState<Record<string, ConfidenceEntry>>({});
+  const [evidence, setEvidence] = useState<EvidenceDto[]>([]);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [exclusions, setExclusions] = useState<ExclusionDto[]>([]);
@@ -66,11 +86,14 @@ export function MemoryPanel() {
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ memories: MemoryDto[]; chats: Record<string, string> }>(
-        '/api/account/cognitive/memories'
-      );
+      const data = await apiFetch<{
+        memories: MemoryDto[];
+        chats: Record<string, string>;
+        confidence: Record<string, ConfidenceEntry>;
+      }>('/api/account/cognitive/memories');
       setMemories(data.memories);
       setChats(data.chats);
+      setConfidence(data.confidence ?? {});
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -123,13 +146,14 @@ export function MemoryPanel() {
   function close() {
     setPanel(null);
     setChain([]);
+    setEvidence([]);
     setDraft('');
     setReason('');
     setFormError('');
   }
 
   /** 再点同一个按钮收起；点别的按钮就换到那一栏——同时只有一个展开区。 */
-  function reopen(kind: 'edit' | 'retract' | 'history' | 'purge', memory: MemoryDto) {
+  function reopen(kind: 'edit' | 'retract' | 'history' | 'purge' | 'evidence', memory: MemoryDto) {
     if (panel && panel.kind === kind && panel.id === memory.id) {
       close();
       return false;
@@ -150,6 +174,23 @@ export function MemoryPanel() {
       setPanel(null);
     } finally {
       setChainBusy(false);
+    }
+  }
+
+  /** 证据和版本链一样，点一次取一条记忆的：说明文字是密文，不该为没人看的行白解一遍。 */
+  async function openEvidence(memory: MemoryDto) {
+    if (!reopen('evidence', memory)) return;
+    setEvidenceBusy(true);
+    try {
+      const data = await apiFetch<{ evidence: EvidenceDto[] }>(
+        `/api/account/cognitive/memories/${encodeURIComponent(memory.id)}/evidence`
+      );
+      setEvidence(data.evidence);
+    } catch (err) {
+      push(errorMessage(err), 'error');
+      setPanel(null);
+    } finally {
+      setEvidenceBusy(false);
     }
   }
 
@@ -346,6 +387,8 @@ export function MemoryPanel() {
             const isRetract = panel?.kind === 'retract' && panel.id === memory.id;
             const isHistory = panel?.kind === 'history' && panel.id === memory.id;
             const isPurge = panel?.kind === 'purge' && panel.id === memory.id;
+            const isEvidence = panel?.kind === 'evidence' && panel.id === memory.id;
+            const band = confidence[memory.id]?.band;
             const chatPurgeBusy = bulkBusy === `chat:${memory.chatId}`;
             return (
               <div key={memory.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
@@ -372,6 +415,10 @@ export function MemoryPanel() {
                       ) : null}
                       {memory.version > 1 ? (
                         <span className="chip !px-2 !py-0.5 !text-[10.5px]">第 {memory.version} 版</span>
+                      ) : null}
+                      {/* 算不出档位就不挂标签：这张表是后加的，老记忆可能还没有账可查。 */}
+                      {band ? (
+                        <span className={BAND_BADGE[band]}>{CONFIDENCE_BAND_LABELS[band]}</span>
                       ) : null}
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-white/30">
@@ -422,6 +469,13 @@ export function MemoryPanel() {
                       onClick={() => void openHistory(memory)}
                     >
                       <History className="h-3.5 w-3.5" /> 版本
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
+                      onClick={() => void openEvidence(memory)}
+                    >
+                      <Scale className="h-3.5 w-3.5" /> 证据
                     </button>
                     <button
                       type="button"
@@ -534,6 +588,42 @@ export function MemoryPanel() {
                         </div>
                       );
                     })}
+                  </div>
+                ) : null}
+
+                {isEvidence ? (
+                  <div className="mt-3 space-y-2.5 border-t border-white/[0.06] pt-3">
+                    <div className="text-[12.5px] font-medium text-white/70">支持与反对的证据</div>
+                    <p className="text-[11.5px] text-white/35">
+                      证据只回答「这条记忆凭什么在这里」，不改变它的内容。
+                    </p>
+                    {(confidence[memory.id]?.factors ?? []).length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {(confidence[memory.id]?.factors ?? []).map((factor, index) => (
+                          <span key={index} className="chip !px-2 !py-0.5 !text-[10.5px]">
+                            {describeConfidenceFactor(factor)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {evidenceBusy ? (
+                      <LoadingBlock label="加载证据" />
+                    ) : evidence.length === 0 ? (
+                      <p className="text-[12px] text-white/40">
+                        没有额外证据：这条记忆只有它自己那一次陈述。
+                      </p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {evidence.map((entry) => (
+                          <li key={entry.id} className="text-[11.5px] text-white/45">
+                            {entry.kind === 'supports' ? '支持' : '反对'} ·{' '}
+                            {describeConfidenceFactor({ kind: 'origin', origin: entry.origin })} ·{' '}
+                            {timeAgo(entry.createdAt)}
+                            {entry.note ? <span className="block text-white/35">{entry.note}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 ) : null}
 
