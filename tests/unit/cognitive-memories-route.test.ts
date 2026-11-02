@@ -18,6 +18,7 @@ const db = vi.hoisted(() => ({
   revisionCalls: [] as Array<{ id: string; userId: string }>,
   reviseCalls: [] as Array<Record<string, unknown>>,
   retractCalls: [] as Array<{ id: string; userId: string; reason: string }>,
+  titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
 }));
@@ -94,6 +95,16 @@ vi.mock('@/lib/cognitive/memories', () => ({
   }
 }));
 
+vi.mock('@/lib/chats', () => ({
+  listChatTitles: (userId: string, chatIds: Array<string | null>) => {
+    db.titleCalls.push({ userId, chatIds });
+    // 真实现只返回查得到的会话；这里给每个 id 一个标题，测的是路由传什么进去、带什么回去。
+    return Promise.resolve(
+      Object.fromEntries(chatIds.filter((id): id is string => Boolean(id)).map((id) => [id, `标题 ${id}`]))
+    );
+  }
+}));
+
 const BASE = 'http://127.0.0.1:3000/api/account/cognitive/memories';
 
 /** 服务层返回的那一行的形状；到这里正文已经是解密后的明文，只回给所有者。 */
@@ -151,6 +162,7 @@ beforeEach(() => {
   db.revisionCalls = [];
   db.reviseCalls = [];
   db.retractCalls = [];
+  db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
 });
@@ -168,6 +180,7 @@ describe('读：用户看 AI 记了自己什么', () => {
       401, 401, 401, 401
     ]);
     expect(db.listCalls).toEqual([]);
+    expect(db.titleCalls).toEqual([]);
     expect(db.getCalls).toEqual([]);
     expect(db.reviseCalls).toEqual([]);
     expect(db.retractCalls).toEqual([]);
@@ -181,6 +194,34 @@ describe('读：用户看 AI 记了自己什么', () => {
 
     expect(db.listCalls[0]).toMatchObject({ userId: 'user-a' });
     expect(payload.data.memories.map((memory: { content: string }) => memory.content)).toEqual(['我在用 Prisma']);
+  });
+
+  it('列表同时带回这些记忆来自哪次对话的标题，归属仍按 session 用户查', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    store(memoryDto({ id: 'mem-2', chatId: 'chat-2', content: '周末去爬山' }));
+
+    const { payload } = await call('GET');
+
+    expect(db.titleCalls).toEqual([{ userId: 'user-a', chatIds: ['chat-1', 'chat-2'] }]);
+    expect(payload.data.chats).toEqual({ 'chat-1': '标题 chat-1', 'chat-2': '标题 chat-2' });
+  });
+
+  it('标题查询只喂当前列表里的 chatId，界面传什么都不多查一条', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    store(memoryDto({ id: 'mem-2', userId: 'user-b', chatId: 'chat-b', content: '别人家的记忆' }));
+
+    await call('GET', '', undefined, '?chatId=chat-b');
+
+    expect(db.titleCalls[0].chatIds).toEqual(['chat-1']);
+  });
+
+  it('记忆没有来源对话时带回空映射，不拿 null 去查库', async () => {
+    store(memoryDto({ chatId: null, content: '我在用 Prisma' }));
+
+    const { payload } = await call('GET');
+
+    expect(db.titleCalls[0].chatIds).toEqual([null]);
+    expect(payload.data.chats).toEqual({});
   });
 
   it('撤回过的记忆不再出现在当前列表里', async () => {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Brain, History, Pencil, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
@@ -40,6 +41,7 @@ export function MemoryPanel() {
   const [flagBusy, setFlagBusy] = useState(false);
 
   const [memories, setMemories] = useState<MemoryDto[]>([]);
+  const [chats, setChats] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -54,8 +56,11 @@ export function MemoryPanel() {
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ memories: MemoryDto[] }>('/api/account/cognitive/memories');
+      const data = await apiFetch<{ memories: MemoryDto[]; chats: Record<string, string> }>(
+        '/api/account/cognitive/memories'
+      );
       setMemories(data.memories);
+      setChats(data.chats);
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -261,7 +266,21 @@ export function MemoryPanel() {
                         <span className="chip !px-2 !py-0.5 !text-[10.5px]">第 {memory.version} 版</span>
                       ) : null}
                     </div>
-                    <div className="mt-1.5 text-[11.5px] text-white/30">记于 {timeAgo(memory.recordedAt)}</div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-white/30">
+                      <span>记于 {timeAgo(memory.recordedAt)}</span>
+                      {memory.chatId ? (
+                        chats[memory.chatId] ? (
+                          <Link
+                            href={`/chat/${encodeURIComponent(memory.chatId)}`}
+                            className="inline-block max-w-[260px] truncate align-bottom text-white/45 underline-offset-2 hover:text-white/80 hover:underline"
+                          >
+                            来自：{chats[memory.chatId]}
+                          </Link>
+                        ) : (
+                          <span>来自：原对话已删除</span>
+                        )
+                      ) : null}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <button

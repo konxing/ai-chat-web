@@ -121,6 +121,24 @@ export async function listChats(userId: string): Promise<ChatSummary[]> {
   }));
 }
 
+/** 按 id 批量取标题，给记忆面板标出「这条来自哪次对话」。
+ * where 必须带 userId：传进来的 id 是界面上任意字符串，不带归属就成了一条跨用户读别人会话名的通道。
+ * 空列表一次查询都不发——记忆行上的 chatId 可能全是 null。 */
+export async function listChatTitles(
+  userId: string,
+  chatIds: readonly (string | null)[]
+): Promise<Record<string, string>> {
+  const ids = [...new Set(chatIds.filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return {};
+  const rows = await prisma.chat.findMany({
+    where: { id: { in: ids }, userId },
+    select: { id: true, titleCiphertext: true }
+  });
+  const titles: Record<string, string> = {};
+  for (const row of rows) titles[row.id] = decryptChatTitle(row);
+  return titles;
+}
+
 export async function createChat(input: {
   userId: string;
   provider?: AiProvider | null;
