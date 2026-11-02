@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
 import { decryptMemoryContent } from './memories';
+import { fromDbMemoryContext, type MemoryContext } from './policy';
+import { recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
 import type { Prisma } from '@prisma/client';
 
@@ -28,7 +30,17 @@ interface PurgeTargetRow {
   userId: string;
   chatId: string | null;
   sourceMessageId: string | null;
+  context: string;
   contentCiphertext: string;
+}
+
+export interface PurgeResult {
+  purged: number;
+  /**
+   * 被删记忆涉及的情境（去重）。调用方在事务提交后据此跑一次策略学习
+   * （任务书 1.3：证据够了才把该情境收紧）。清空全部返回空数组——见 purgeAllMemories。
+   */
+  contexts: MemoryContext[];
 }
 
 /** 删掉的内容要进排除表，否则用户下次说同一句话它又被记回来了（任务书 7.3）。 */
@@ -62,31 +74,38 @@ async function detachEdges(tx: Prisma.TransactionClient, userId: string, ids: st
   });
 }
 
-/** 删掉一条记忆。不属于当前用户或者已经不存在都返回 0，不报错——调用方按 404 处理。 */
-export async function purgeMemory(memoryId: string, userId: string): Promise<number> {
+/** 删掉一条记忆。不属于当前用户或者已经不存在都返回 purged: 0，不报错——调用方按 404 处理。 */
+export async function purgeMemory(memoryId: string, userId: string): Promise<PurgeResult> {
   return prisma.$transaction(async (tx) => {
     const row = await tx.memoryItem.findFirst({ where: { id: memoryId, userId } });
-    if (!row) return 0;
+    if (!row) return { purged: 0, contexts: [] };
     const target = row as unknown as PurgeTargetRow;
+    const context = fromDbMemoryContext(target.context);
     await detachEdges(tx, userId, [memoryId]);
     const result = await tx.memoryItem.deleteMany({ where: { id: memoryId, userId } });
     await recordSources(tx, userId, [target]);
-    return result.count;
+    // 一次删除只算一条证据，哪怕这一条同时触发了排除和演化边清理。
+    await recordPolicySignal(tx, userId, context);
+    return { purged: result.count, contexts: [context] };
   });
 }
 
 /** 忘记某次对话产生的全部记忆，对话本身保留。 */
-export async function purgeMemoriesByChat(chatId: string, userId: string): Promise<number> {
+export async function purgeMemoriesByChat(chatId: string, userId: string): Promise<PurgeResult> {
   return prisma.$transaction(async (tx) => {
     const rows = (await tx.memoryItem.findMany({
       where: { userId, chatId }
     })) as unknown as PurgeTargetRow[];
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return { purged: 0, contexts: [] };
     const ids = rows.map((row) => row.id);
+    const contexts = [...new Set(rows.map((row) => fromDbMemoryContext(row.context)))];
     await detachEdges(tx, userId, ids);
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
     await recordSources(tx, userId, rows);
-    return result.count;
+    // 用户点的是一次按钮：删掉 5 条技术项目记忆算一条证据，不是五条，
+    // 否则一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
+    for (const context of contexts) await recordPolicySignal(tx, userId, context);
+    return { purged: result.count, contexts };
   });
 }
 
@@ -94,11 +113,12 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
  * 清空这个用户的全部长期记忆。
  *
  * 不需要先摘边：每条演化边的 memoryId 都指向本用户某一行，全删之下级联会把边一并清掉。
- * 也**不建排除**：清空是「重新开始」，不是「这些话永远别再记」。
- * 顺手给几百条内容建排除，等于让用户在不知情的前提下把记忆功能对这些话永久失聪，
- * 而撤销要一条一条点。要禁止某句话被记回来，用单条删除或按会话删除。
+ * 也**不建排除、不记学习证据**：清空是「重新开始」，不是「这些话永远别再记」，
+ * 更不是「这七个情境都记太多了」。一口气给每个情境记几十条证据，
+ * 等于让学习层在一次点击之后把所有情境全部收紧，而那根本不是用户表达的意思。
+ * 要禁止某句话被记回来、或者要收紧某个情境，用单条删除或按会话删除。
  */
-export async function purgeAllMemories(userId: string): Promise<number> {
+export async function purgeAllMemories(userId: string): Promise<PurgeResult> {
   const result = await prisma.memoryItem.deleteMany({ where: { userId } });
-  return result.count;
+  return { purged: result.count, contexts: [] };
 }

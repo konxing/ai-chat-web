@@ -132,6 +132,7 @@ model User {
   memories         MemoryItem[]
   memoryRevisions  MemoryRevision[]
   memoryExclusions MemoryExclusion[]
+  policySignals    MemoryPolicySignal[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -387,10 +388,29 @@ model MemoryPolicy {
   allowAssociation    Boolean         @default(false)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
+  /// 学习层自动收紧过这个情境的时刻。非空表示当前配置里有一处不是用户亲手定的。
+  learnedAt           DateTime?
+  /// 用户在策略界面亲手改过这个情境的时刻。非空即「用户已接管」，学习层不再碰它。
+  manualOverrideAt    DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, context])
+}
+
+/// 策略学习的证据（任务书 1.3）。只有「永久删除」会产生信号：
+/// 撤回不算（用户可能只是想让它别再用，而不是抱怨这个情境记太多），
+/// 改记忆更不算（那是想让它记对）。清空全部也不算，那是一次重置，
+/// 一口气给七个情境各记几十条信号，等于让学习层瞬间把所有情境都收紧。
+model MemoryPolicySignal {
+  id        String        @id @default(uuid())
+  userId    String
+  context   MemoryContext
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, context, createdAt])
 }
 
 /// 长期记忆主体（任务书 2.1、2.2）。双时间模型：validFrom/validTo 是事实成立的区间，

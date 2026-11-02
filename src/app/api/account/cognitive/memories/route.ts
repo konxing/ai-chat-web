@@ -5,6 +5,7 @@ import { writeAudit } from '@/lib/audit';
 import { memoryPurgeSchema } from '@/lib/validation';
 import { listMemories } from '@/lib/cognitive/memories';
 import { purgeAllMemories, purgeMemoriesByChat } from '@/lib/cognitive/forgetting';
+import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
 import { listChatTitles } from '@/lib/chats';
 
 export const runtime = 'nodejs';
@@ -57,27 +58,31 @@ export async function DELETE(req: Request) {
     if (scope.scope === 'all') {
       const limit = rateLimit(`memory-purge-all:${user.id}`, PURGE_ALL_LIMIT, PURGE_WINDOW_MS);
       if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
-      const purged = await purgeAllMemories(user.id);
-      await audit(req, user, 'user.memory_purge_all', 'user', user.id, purged);
-      return { purged };
+      const result = await purgeAllMemories(user.id);
+      // 清空全部不产生学习证据，所以这里永远是空数组：一次重置不该被读成「七个情境都记太多了」。
+      const learned = await learnAfterPurge(user.id, result.contexts);
+      await audit(req, user, 'user.memory_purge_all', 'user', user.id, result.purged, learned);
+      return { purged: result.purged, learned };
     }
 
     const limit = rateLimit(`memory-purge-chat:${user.id}`, PURGE_CHAT_LIMIT, PURGE_WINDOW_MS);
     if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
-    const purged = await purgeMemoriesByChat(scope.chatId, user.id);
-    await audit(req, user, 'user.memory_purge_by_chat', 'chat', scope.chatId, purged);
-    return { purged };
+    const result = await purgeMemoriesByChat(scope.chatId, user.id);
+    const learned = await learnAfterPurge(user.id, result.contexts);
+    await audit(req, user, 'user.memory_purge_by_chat', 'chat', scope.chatId, result.purged, learned);
+    return { purged: result.purged, learned };
   });
 }
 
-/** 删除是不可逆动作，必须留痕；但审计里只有范围、目标 id 和条数，没有正文（任务书 5.5）。 */
+/** 删除是不可逆动作，必须留痕；但审计里只有范围、目标 id、条数和情境枚举，没有正文（任务书 5.5）。 */
 async function audit(
   req: Request,
   user: { id: string; username: string },
   action: string,
   targetType: string,
   targetId: string,
-  purged: number
+  purged: number,
+  learned: readonly string[]
 ): Promise<void> {
   await writeAudit({
     actorId: user.id,
@@ -85,7 +90,7 @@ async function audit(
     action,
     targetType,
     targetId,
-    after: { purged },
+    after: { purged, learned },
     ip: getRequestIp(req),
     userAgent: getUserAgent(req)
   });

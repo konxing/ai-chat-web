@@ -5,6 +5,7 @@ import { writeAudit } from '@/lib/audit';
 import { memoryReviseSchema } from '@/lib/validation';
 import { getMemory, listMemoryRevisions, reviseMemory, type MemoryDto } from '@/lib/cognitive/memories';
 import { purgeMemory } from '@/lib/cognitive/forgetting';
+import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
 
 export const runtime = 'nodejs';
 
@@ -88,7 +89,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     // 「删掉的是哪一类、第几版」。代价是多解密一行正文，换一条查得懂的审计。
     const before = await getMemory(id, user.id);
     if (!before) throw new ApiError(404, 'MEMORY_NOT_FOUND', '记忆不存在');
-    const purged = await purgeMemory(id, user.id);
+    const result = await purgeMemory(id, user.id);
+    // 学习跑在删除提交之后：证据要先落库才数得到，而且学习失败不能反过来让删除失败。
+    const learned = await learnAfterPurge(user.id, result.contexts);
 
     await writeAudit({
       actorId: user.id,
@@ -97,12 +100,12 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
       targetType: 'memory',
       targetId: id,
       before: auditTrace(before),
-      // 只记条数：审计里不能出现正文（任务书 5.5）。
-      after: { purged },
+      // 只记条数和被收紧的情境枚举：审计里不能出现正文（任务书 5.5）。
+      after: { purged: result.purged, learned },
       ip: getRequestIp(req),
       userAgent: getUserAgent(req)
     });
-    return { purged };
+    return { purged: result.purged, learned };
   });
 }
 

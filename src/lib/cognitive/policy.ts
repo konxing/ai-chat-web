@@ -67,6 +67,8 @@ interface StoredRow {
   allowUserProfile: boolean;
   allowReflection: boolean;
   allowAssociation: boolean;
+  learnedAt: Date | null;
+  manualOverrideAt: Date | null;
 }
 
 export const MEMORY_CONTEXTS: readonly MemoryContext[] = CONTEXT_PAIRS.map(([app]) => app);
@@ -182,7 +184,12 @@ export const DEFAULT_MEMORY_POLICIES: Record<MemoryContext, MemoryPolicy> = {
   }
 };
 
-function toStored(policy: MemoryPolicy): Omit<StoredRow, 'userId'> {
+/**
+ * 只搬策略字段本身。learnedAt / manualOverrideAt 记的是「这一行是谁改的」，不属于策略内容，
+ * 由 updateMemoryPolicy 和 applyLearnedPolicy 各自负责——绝不能从 MemoryPolicy 里带出来，
+ * 否则学习层的一次收紧就能顺手把「用户已接管」也写上，那是在替用户表达意图。
+ */
+function toStored(policy: MemoryPolicy): Omit<StoredRow, 'userId' | 'learnedAt' | 'manualOverrideAt'> {
   return {
     context: toDb(CONTEXT_PAIRS, policy.context, '情境', MEMORY_CONTEXTS),
     allowPersistence: policy.allowPersistence,
@@ -252,18 +259,48 @@ export async function updateMemoryPolicy(
   patch: MemoryPolicyPatch
 ): Promise<MemoryPolicy> {
   const dbContext = toDb(CONTEXT_PAIRS, context, '情境', MEMORY_CONTEXTS);
+  // 用户亲手改过一次，这个情境就归用户管：学习层从此不再碰它。
+  // 否则用户把策略改回宽松、学习层下一轮又给改严，那是在和用户抢方向盘。
+  const manualOverrideAt = new Date();
   const row = await prisma.memoryPolicy.upsert({
     where: { userId_context: { userId, context: dbContext } },
-    create: { userId, ...toStored({ ...DEFAULT_MEMORY_POLICIES[context], ...patch, context }) },
-    update: toStoredPatch(patch)
+    create: {
+      userId,
+      ...toStored({ ...DEFAULT_MEMORY_POLICIES[context], ...patch, context }),
+      manualOverrideAt
+    },
+    update: { ...toStoredPatch(patch), manualOverrideAt }
   });
   return toPolicy(row as unknown as StoredRow);
 }
 
+/**
+ * 学习层收紧一个情境（任务书 1.3：证据够了才生效）。
+ *
+ * 只动 requireConfirmation 和 learnedAt 两处：用户亲手定过的其余设置一个都不碰，
+ * 也绝不写 manualOverrideAt——那不是用户改的，标记上去就等于把学习层自己的动作
+ * 冒充成用户意图，之后再也分不清这一条是谁定的。
+ * 方向也只有这一个：收紧。放宽必须用户自己点。
+ */
+export async function applyLearnedPolicy(userId: string, context: MemoryContext): Promise<void> {
+  const dbContext = toDb(CONTEXT_PAIRS, context, '情境', MEMORY_CONTEXTS);
+  const learnedAt = new Date();
+  await prisma.memoryPolicy.upsert({
+    where: { userId_context: { userId, context: dbContext } },
+    create: {
+      userId,
+      ...toStored({ ...DEFAULT_MEMORY_POLICIES[context], requireConfirmation: true, context }),
+      learnedAt
+    },
+    update: { requireConfirmation: true, learnedAt }
+  });
+}
+
 /** 重置＝删掉用户那一行，回到内置默认。跟「关掉模块」不是一回事。 */
 export async function resetMemoryPolicy(userId: string, context: MemoryContext): Promise<MemoryPolicy> {
-  await prisma.memoryPolicy.deleteMany({
-    where: { userId, context: toDb(CONTEXT_PAIRS, context, '情境', MEMORY_CONTEXTS) }
-  });
+  const dbContext = toDb(CONTEXT_PAIRS, context, '情境', MEMORY_CONTEXTS);
+  // 学习证据一起清：留着的话，用户刚点完「恢复默认」，下一次删除就又把策略收紧回去。
+  await prisma.memoryPolicySignal.deleteMany({ where: { userId, context: dbContext } });
+  await prisma.memoryPolicy.deleteMany({ where: { userId, context: dbContext } });
   return { ...DEFAULT_MEMORY_POLICIES[context] };
 }

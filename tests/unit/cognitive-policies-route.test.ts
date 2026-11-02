@@ -9,7 +9,8 @@ const db = vi.hoisted(() => ({
   rows: new Map<string, Record<string, unknown>>(),
   authCalls: [] as Array<{ url: string; opts: unknown }>,
   authThrows: false,
-  audits: [] as Array<Record<string, unknown>>
+  audits: [] as Array<Record<string, unknown>>,
+  signalDeletes: [] as Array<{ userId: string; context: string }>
 }));
 
 function key(userId: string, context: string) {
@@ -53,6 +54,12 @@ vi.mock('@/lib/prisma', () => ({
         return Promise.resolve({ count: 1 });
       }
     },
+    memoryPolicySignal: {
+      deleteMany: ({ where }: { where: { userId: string; context: string } }) => {
+        db.signalDeletes.push(where);
+        return Promise.resolve({ count: 0 });
+      }
+    },
     auditLog: {
       create: ({ data }: { data: Record<string, unknown> }) => {
         db.audits.push(data);
@@ -82,6 +89,7 @@ beforeEach(() => {
   db.authCalls = [];
   db.authThrows = false;
   db.audits = [];
+  db.signalDeletes = [];
 });
 
 describe('记忆策略接口', () => {
@@ -192,6 +200,8 @@ describe('记忆策略接口', () => {
     expect(db.audits).toHaveLength(2);
     expect(db.audits[1]).toMatchObject({ action: 'user.memory_policy_reset' });
     expect(db.audits[1].before).toMatchObject({ allowUserProfile: false });
+    // 学习证据一起清：留着的话用户刚点完「恢复默认」，下一次删除又把策略收紧回去。
+    expect(db.signalDeletes).toEqual([{ userId: 'user-a', context: 'GENERAL' }]);
   });
 
   it('空补丁和没配过的情境重置，都不产生新审计', async () => {

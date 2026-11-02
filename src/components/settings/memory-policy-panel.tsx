@@ -15,6 +15,7 @@ import {
   describePolicySummary
 } from '@/lib/cognitive/memory-display';
 import type { MemoryContext, MemoryPolicy, MemoryRetention, MemoryType } from '@/lib/cognitive/policy';
+import type { PolicyLearningState } from '@/lib/cognitive/policy-learner';
 
 /**
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
@@ -59,6 +60,8 @@ function isSameDraft(left: Draft, right: Draft): boolean {
 export function MemoryPolicyPanel() {
   const { push } = useToast();
   const [policies, setPolicies] = useState<Record<MemoryContext, MemoryPolicy> | null>(null);
+  const [learning, setLearning] = useState<Record<MemoryContext, PolicyLearningState> | null>(null);
+  const [threshold, setThreshold] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState<MemoryContext | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -67,8 +70,14 @@ export function MemoryPolicyPanel() {
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ policies: Record<MemoryContext, MemoryPolicy> }>(POLICIES_URL);
+      const data = await apiFetch<{
+        policies: Record<MemoryContext, MemoryPolicy>;
+        learning: Record<MemoryContext, PolicyLearningState>;
+        learningThreshold: number;
+      }>(POLICIES_URL);
       setPolicies(data.policies);
+      setLearning(data.learning);
+      setThreshold(data.learningThreshold);
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -111,20 +120,18 @@ export function MemoryPolicyPanel() {
     });
   }
 
-  function apply(context: MemoryContext, policy: MemoryPolicy) {
-    setPolicies((current) => (current ? { ...current, [context]: policy } : current));
-  }
-
   async function save(context: MemoryContext, next: Draft) {
     setBusy(true);
     try {
-      const data = await apiFetch<{ policy: MemoryPolicy }>(POLICIES_URL, {
+      await apiFetch<{ policy: MemoryPolicy }>(POLICIES_URL, {
         method: 'PATCH',
         json: { context, patch: next }
       });
-      apply(context, data.policy);
       push('策略已更新');
       close();
+      // 重新读一遍而不是就地打补丁：这一改同时留下了「用户已接管」的标记，
+      // 学习状态得跟着刷新，否则界面上还挂着上一轮的学习提示。
+      await load();
     } catch (err) {
       setFormError(errorMessage(err));
     } finally {
@@ -135,13 +142,13 @@ export function MemoryPolicyPanel() {
   async function reset(context: MemoryContext) {
     setBusy(true);
     try {
-      const data = await apiFetch<{ policy: MemoryPolicy }>(
+      await apiFetch<{ policy: MemoryPolicy }>(
         `${POLICIES_URL}?context=${encodeURIComponent(context)}`,
         { method: 'DELETE' }
       );
-      apply(context, data.policy);
       push('已恢复默认');
       close();
+      await load();
     } catch (err) {
       setFormError(errorMessage(err));
     } finally {
@@ -180,6 +187,12 @@ export function MemoryPolicyPanel() {
                     <span className="mt-1 block truncate text-[11.5px] text-white/35">
                       {describePolicySummary(policy)}
                     </span>
+                    {/* 学习层替用户做的决定不许是隐形的。阈值取自接口，不写死在文案里。 */}
+                    {learning?.[context]?.learnedAt ? (
+                      <span className="mt-1 block truncate text-[11.5px] text-amber-300/70">
+                        已按你最近 {threshold} 次永久删除自动收紧 · 可重置
+                      </span>
+                    ) : null}
                   </span>
                   <ChevronDown
                     className={cn('h-4 w-4 shrink-0 text-white/35 transition', isOpen ? 'rotate-180' : '')}

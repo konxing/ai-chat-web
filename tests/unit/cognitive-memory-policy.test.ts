@@ -9,7 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   rows: new Map<string, Record<string, unknown>>(),
   reads: [] as string[],
-  writes: [] as Array<Record<string, unknown>>
+  writes: [] as Array<Record<string, unknown>>,
+  signalDeletes: [] as Array<{ userId: string; context: string }>
 }));
 
 function key(userId: string, context: string) {
@@ -46,6 +47,12 @@ vi.mock('@/lib/prisma', () => ({
         }
         return Promise.resolve({ count: 1 });
       }
+    },
+    memoryPolicySignal: {
+      deleteMany: ({ where }: { where: { userId: string; context: string } }) => {
+        db.signalDeletes.push(where);
+        return Promise.resolve({ count: 0 });
+      }
     }
   }
 }));
@@ -69,6 +76,7 @@ beforeEach(() => {
   db.rows.clear();
   db.reads = [];
   db.writes = [];
+  db.signalDeletes = [];
 });
 
 describe('七情境记忆策略的默认值', () => {

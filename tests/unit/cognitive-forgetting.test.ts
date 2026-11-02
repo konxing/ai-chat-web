@@ -19,6 +19,7 @@ const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   edges: [] as Row[],
   exclusions: [] as Row[],
+  signals: [] as Row[],
   txOps: [] as string[],
   topOps: [] as string[],
   commits: 0
@@ -84,6 +85,17 @@ function exclusionClient(sink: string[]) {
   };
 }
 
+function signalClient(sink: string[]) {
+  return {
+    create: ({ data }: { data: Row }) => {
+      sink.push('signal');
+      const row: Row = { createdAt: new Date(), ...data };
+      db.signals.push(row);
+      return Promise.resolve(row);
+    }
+  };
+}
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: (run: (tx: unknown) => Promise<unknown>) =>
@@ -104,7 +116,8 @@ vi.mock('@/lib/prisma', () => ({
           updateMany: ({ where, data }: { where: unknown; data: Row }) =>
             Promise.resolve(detach(where, data, db.txOps))
         },
-        memoryExclusion: exclusionClient(db.txOps)
+        memoryExclusion: exclusionClient(db.txOps),
+        memoryPolicySignal: signalClient(db.txOps)
       }).then((result) => {
         db.commits += 1;
         return result;
@@ -116,7 +129,8 @@ vi.mock('@/lib/prisma', () => ({
       updateMany: ({ where, data }: { where: unknown; data: Row }) =>
         Promise.resolve(detach(where, data, db.topOps))
     },
-    memoryExclusion: exclusionClient(db.topOps)
+    memoryExclusion: exclusionClient(db.topOps),
+    memoryPolicySignal: signalClient(db.topOps)
   }
 }));
 
@@ -160,6 +174,7 @@ beforeEach(() => {
   db.rows.clear();
   db.edges = [];
   db.exclusions = [];
+  db.signals = [];
   db.txOps = [];
   db.topOps = [];
   db.commits = 0;
@@ -170,7 +185,7 @@ describe('永久删除一条', () => {
     db.rows.set('mem-1', row('mem-1'));
     const { purgeMemory } = await forgetting();
 
-    await expect(purgeMemory('mem-1', USER)).resolves.toBe(1);
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 1 });
 
     expect(db.rows.size).toBe(0);
   });
@@ -203,7 +218,7 @@ describe('永久删除一条', () => {
     db.rows.set('mem-1', row('mem-1', { userId: OTHER }));
     const { purgeMemory } = await forgetting();
 
-    await expect(purgeMemory('mem-1', USER)).resolves.toBe(0);
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 0 });
 
     expect(db.rows.size).toBe(1);
   });
@@ -211,7 +226,7 @@ describe('永久删除一条', () => {
   it('不存在的 id 返回 0，不报错', async () => {
     const { purgeMemory } = await forgetting();
 
-    await expect(purgeMemory('nope', USER)).resolves.toBe(0);
+    await expect(purgeMemory('nope', USER)).resolves.toMatchObject({ purged: 0 });
   });
 
   it('摘边、删行和建排除在同一个事务里，不走事务外的连接', async () => {
@@ -264,7 +279,7 @@ describe('删除时建立来源排除', () => {
     db.rows.set('mem-2', row('mem-2'));
     const { purgeAllMemories } = await forgetting();
 
-    await expect(purgeAllMemories(USER)).resolves.toBe(2);
+    await expect(purgeAllMemories(USER)).resolves.toMatchObject({ purged: 2 });
 
     expect(db.exclusions).toEqual([]);
   });
@@ -273,7 +288,7 @@ describe('删除时建立来源排除', () => {
     db.rows.set('mem-1', row('mem-1', { userId: OTHER }));
     const { purgeMemory } = await forgetting();
 
-    await expect(purgeMemory('mem-1', USER)).resolves.toBe(0);
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 0 });
 
     expect(db.exclusions).toEqual([]);
   });
@@ -282,7 +297,7 @@ describe('删除时建立来源排除', () => {
     db.rows.set('mem-1', row('mem-1', { contentCiphertext: 'enc:v1:garbage' }));
     const { purgeMemory } = await forgetting();
 
-    await expect(purgeMemory('mem-1', USER)).resolves.toBe(1);
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 1 });
 
     expect(db.rows.size).toBe(0);
     expect(db.exclusions).toEqual([]);
@@ -301,7 +316,7 @@ describe('按来源会话删除', () => {
   it('只删这个会话产生的，别的会话、没有来源的和别人的都留着', async () => {
     const { purgeMemoriesByChat } = await forgetting();
 
-    await expect(purgeMemoriesByChat('chat-1', USER)).resolves.toBe(2);
+    await expect(purgeMemoriesByChat('chat-1', USER)).resolves.toMatchObject({ purged: 2 });
 
     expect([...db.rows.keys()].sort()).toEqual(['mem-3', 'mem-4', 'mem-5']);
   });
@@ -318,13 +333,13 @@ describe('按来源会话删除', () => {
   it('这个会话一条记忆都没有时返回 0', async () => {
     const { purgeMemoriesByChat } = await forgetting();
 
-    await expect(purgeMemoriesByChat('chat-9', USER)).resolves.toBe(0);
+    await expect(purgeMemoriesByChat('chat-9', USER)).resolves.toMatchObject({ purged: 0 });
   });
 
   it('删的是别人的会话时一行都不动', async () => {
     const { purgeMemoriesByChat } = await forgetting();
 
-    await expect(purgeMemoriesByChat('chat-1', OTHER)).resolves.toBe(1);
+    await expect(purgeMemoriesByChat('chat-1', OTHER)).resolves.toMatchObject({ purged: 1 });
 
     expect(db.rows.has('mem-1')).toBe(true);
     expect(db.rows.has('mem-2')).toBe(true);
@@ -338,7 +353,7 @@ describe('清空全部', () => {
     db.edges = [edge('edge-1', 'mem-1', null), edge('edge-2', 'mem-2', null, OTHER)];
     const { purgeAllMemories } = await forgetting();
 
-    await expect(purgeAllMemories(USER)).resolves.toBe(1);
+    await expect(purgeAllMemories(USER)).resolves.toMatchObject({ purged: 1 });
 
     expect([...db.rows.keys()]).toEqual(['mem-2']);
     expect(db.edges).toHaveLength(1);
@@ -348,6 +363,77 @@ describe('清空全部', () => {
   it('一条都没有时返回 0，不报错', async () => {
     const { purgeAllMemories } = await forgetting();
 
-    await expect(purgeAllMemories(USER)).resolves.toBe(0);
+    await expect(purgeAllMemories(USER)).resolves.toMatchObject({ purged: 0 });
+  });
+});
+
+/**
+ * 学习证据（任务书 1.3）。只有永久删除算证据，而且一次操作只算一次——
+ * 按会话删掉 5 条技术项目记忆是一次点击，不是五次表达，
+ * 按行记证据的话一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
+ */
+describe('删除时记录策略学习证据', () => {
+  it('删一条记一条，情境取自被删的那一行，返回值里带上它', async () => {
+    db.rows.set('mem-1', row('mem-1', { context: 'TECHNICAL_PROJECT' }));
+    const { purgeMemory } = await forgetting();
+
+    const result = await purgeMemory('mem-1', USER);
+
+    expect(result.contexts).toEqual(['technicalProject']);
+    expect(db.signals).toHaveLength(1);
+    expect(db.signals[0]).toMatchObject({ userId: USER, context: 'TECHNICAL_PROJECT' });
+  });
+
+  it('证据里只有情境和时间，没有正文也没有被删记忆的 id', async () => {
+    db.rows.set('mem-1', row('mem-1', {}, '我住在杭州'));
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(Object.keys(db.signals[0]!).sort()).toEqual(['context', 'createdAt', 'id', 'userId']);
+  });
+
+  it('按会话删除时每个受影响的情境各记一条，同情境的多条只算一次', async () => {
+    db.rows.set('mem-1', row('mem-1', { chatId: 'chat-1', context: 'TECHNICAL_PROJECT' }));
+    db.rows.set('mem-2', row('mem-2', { chatId: 'chat-1', context: 'TECHNICAL_PROJECT' }));
+    db.rows.set('mem-3', row('mem-3', { chatId: 'chat-1', context: 'GENERAL' }));
+    const { purgeMemoriesByChat } = await forgetting();
+
+    const result = await purgeMemoriesByChat('chat-1', USER);
+
+    expect(result).toMatchObject({ purged: 3 });
+    expect([...result.contexts].sort()).toEqual(['general', 'technicalProject']);
+    expect(db.signals).toHaveLength(2);
+  });
+
+  it('清空全部不记证据：一次重置不该被读成「七个情境都记太多了」', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-2', row('mem-2', { context: 'LEARNING' }));
+    const { purgeAllMemories } = await forgetting();
+
+    const result = await purgeAllMemories(USER);
+
+    expect(result).toMatchObject({ purged: 2 });
+    expect(result.contexts).toEqual([]);
+    expect(db.signals).toEqual([]);
+  });
+
+  it('删别人的记忆不记证据', async () => {
+    db.rows.set('mem-1', row('mem-1', { userId: OTHER }));
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.signals).toEqual([]);
+  });
+
+  it('证据和删除在同一个事务里，不会出现「删了但没记上」', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.txOps).toContain('signal');
+    expect(db.topOps).toEqual([]);
   });
 });

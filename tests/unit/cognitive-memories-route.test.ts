@@ -21,6 +21,8 @@ const db = vi.hoisted(() => ({
   purgeCalls: [] as Array<{ id: string; userId: string }>,
   purgeChatCalls: [] as Array<{ chatId: string; userId: string }>,
   purgeAllCalls: [] as string[],
+  learnCalls: [] as Array<{ userId: string; contexts: string[] }>,
+  learned: [] as string[],
   titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
@@ -102,20 +104,23 @@ vi.mock('@/lib/cognitive/forgetting', () => ({
   purgeMemory: (id: string, userId: string) => {
     db.purgeCalls.push({ id, userId });
     const key = `${userId}|${id}`;
-    if (!db.stored.has(key)) return Promise.resolve(0);
+    const row = db.stored.get(key);
+    if (!row) return Promise.resolve({ purged: 0, contexts: [] });
     db.stored.delete(key);
-    return Promise.resolve(1);
+    return Promise.resolve({ purged: 1, contexts: [row.context ?? 'general'] });
   },
   purgeMemoriesByChat: (chatId: string, userId: string) => {
     db.purgeChatCalls.push({ chatId, userId });
     let count = 0;
+    const contexts = new Set<string>();
     for (const [key, row] of [...db.stored]) {
       if (row.userId === userId && row.chatId === chatId) {
         db.stored.delete(key);
         count += 1;
+        contexts.add(String(row.context ?? 'general'));
       }
     }
-    return Promise.resolve(count);
+    return Promise.resolve({ purged: count, contexts: [...contexts] });
   },
   purgeAllMemories: (userId: string) => {
     db.purgeAllCalls.push(userId);
@@ -126,7 +131,15 @@ vi.mock('@/lib/cognitive/forgetting', () => ({
         count += 1;
       }
     }
-    return Promise.resolve(count);
+    // 清空全部不产生学习证据：一次重置不该被读成「七个情境都记太多了」。
+    return Promise.resolve({ purged: count, contexts: [] });
+  }
+}));
+
+vi.mock('@/lib/cognitive/policy-learner', () => ({
+  learnAfterPurge: (userId: string, contexts: string[]) => {
+    db.learnCalls.push({ userId, contexts });
+    return Promise.resolve(db.learned);
   }
 }));
 
@@ -200,6 +213,8 @@ beforeEach(() => {
   db.purgeCalls = [];
   db.purgeChatCalls = [];
   db.purgeAllCalls = [];
+  db.learnCalls = [];
+  db.learned = [];
   db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
@@ -425,7 +440,7 @@ describe('永久删除一条', () => {
     const { response, payload } = await call('DELETE', '/mem-1');
 
     expect(response.status).toBe(200);
-    expect(payload.data).toEqual({ purged: 1 });
+    expect(payload.data).toEqual({ purged: 1, learned: [] });
     expect(db.purgeCalls).toEqual([{ id: 'mem-1', userId: 'user-a' }]);
     expect(db.stored.size).toBe(0);
     expect(db.audits).toHaveLength(1);
@@ -502,7 +517,7 @@ describe('批量永久删除', () => {
     const { response, payload } = await call('DELETE', '', undefined, '?scope=all');
 
     expect(response.status).toBe(200);
-    expect(payload.data).toEqual({ purged: 3 });
+    expect(payload.data).toEqual({ purged: 3, learned: [] });
     expect(db.purgeAllCalls).toEqual(['user-a']);
     expect([...db.stored.keys()]).toEqual(['user-b|mem-4']);
     expect(db.audits[0]).toMatchObject({ action: 'user.memory_purge_all', targetId: 'user-a' });
@@ -511,7 +526,7 @@ describe('批量永久删除', () => {
   it('scope=chat 只删那一次对话产生的，对话本身不碰', async () => {
     const { payload } = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-1');
 
-    expect(payload.data).toEqual({ purged: 2 });
+    expect(payload.data).toEqual({ purged: 2, learned: [] });
     expect(db.purgeChatCalls).toEqual([{ chatId: 'chat-1', userId: 'user-a' }]);
     expect([...db.stored.keys()].sort()).toEqual(['user-a|mem-3', 'user-b|mem-4']);
     expect(db.audits[0]).toMatchObject({ action: 'user.memory_purge_by_chat', targetType: 'chat', targetId: 'chat-1' });
@@ -536,7 +551,7 @@ describe('批量永久删除', () => {
   it('chatId 从查询串来，但只能删到自己的行：塞别人的会话 id 也只按 session 用户过滤', async () => {
     const { payload } = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-9');
 
-    expect(payload.data).toEqual({ purged: 0 });
+    expect(payload.data).toEqual({ purged: 0, learned: [] });
     expect(db.purgeChatCalls).toEqual([{ chatId: 'chat-9', userId: 'user-a' }]);
     expect(db.stored.size).toBe(4);
   });
@@ -573,5 +588,65 @@ describe('批量永久删除', () => {
     expect(response.status).toBe(401);
     expect(db.purgeAllCalls).toEqual([]);
     expect(db.audits).toEqual([]);
+  });
+});
+
+/**
+ * ② 删除之后跑一次策略学习（任务书 1.3）。
+ * 学习必须在删除提交之后：证据要先落库才数得到；学习失败也不许让删除失败，
+ * 行已经删掉了，那是用户要的结果，不能因为附带效果报错就把 200 变成 500。
+ */
+describe('删除之后触发策略学习', () => {
+  it('单条删除把该记忆的情境交给学习层，收紧结果回给前端', async () => {
+    store(memoryDto());
+    db.learned = ['technicalProject'];
+
+    const { payload } = await call('DELETE', '/mem-1');
+
+    expect(db.learnCalls).toEqual([{ userId: 'user-a', contexts: ['technicalProject'] }]);
+    expect(payload.data).toEqual({ purged: 1, learned: ['technicalProject'] });
+  });
+
+  it('按会话删除把去重后的情境都交给学习层', async () => {
+    store(memoryDto({ id: 'mem-1', chatId: 'chat-1', context: 'technicalProject' }));
+    store(memoryDto({ id: 'mem-2', chatId: 'chat-1', context: 'general' }));
+
+    await call('DELETE', '', undefined, '?scope=chat&chatId=chat-1');
+
+    expect(db.learnCalls).toHaveLength(1);
+    expect([...(db.learnCalls[0]?.contexts ?? [])].sort()).toEqual(['general', 'technicalProject']);
+  });
+
+  it('清空全部时学习层收到空数组：一次重置不该收紧任何情境', async () => {
+    store(memoryDto({ id: 'mem-1' }));
+
+    await call('DELETE', '', undefined, '?scope=all');
+
+    expect(db.learnCalls).toEqual([{ userId: 'user-a', contexts: [] }]);
+  });
+
+  it('限流挡下时连学习都不跑', async () => {
+    store(memoryDto());
+    db.limiterOk = false;
+
+    await call('DELETE', '/mem-1');
+
+    expect(db.learnCalls).toEqual([]);
+  });
+
+  it('404 时不跑学习', async () => {
+    const { response } = await call('DELETE', '/mem-404');
+
+    expect(response.status).toBe(404);
+    expect(db.learnCalls).toEqual([]);
+  });
+
+  it('审计里记下被自动收紧的情境，方便事后查这次删除改了什么', async () => {
+    store(memoryDto());
+    db.learned = ['technicalProject'];
+
+    await call('DELETE', '/mem-1');
+
+    expect(db.audits[0].after).toMatchObject({ purged: 1, learned: ['technicalProject'] });
   });
 });
