@@ -16,12 +16,26 @@ type Row = Record<string, unknown>;
 
 const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
+  edges: [] as Row[],
   creates: [] as Row[],
   reads: [] as unknown[],
   takes: [] as Array<number | undefined>,
   tick: 0,
+  commits: 0,
+  failOn: null as null | 'create' | 'update' | 'edge',
+  // 模拟「读完之后别的事务抢先盖了戳」：库里已经 superseded，读回来的还是旧快照。
+  staleRead: false,
   updates: [] as Array<{ where: unknown; data: unknown }>
 }));
+
+/**
+ * 时间戳单调递增一毫秒：全等的时间排不出「最近一条」，take 和演化顺序都会测成假的。
+ * 事务里的写要等回调成功才落进 rows/edges，中途失败就什么都不留——真库不会允许半截状态，mock 也不行。
+ */
+function stamped(data: Row): Row {
+  const now = new Date(Date.now() + (db.tick += 1));
+  return { recordedAt: now, updatedAt: now, ...data };
+}
 
 function compare(value: unknown, other: unknown): number {
   return new Date(value as string).getTime() - new Date(other as string).getTime();
@@ -78,32 +92,84 @@ function ordered(where: unknown, orderBy: unknown, take?: number): Row[] {
   return rows.slice(0, take);
 }
 
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
+function edgeMatching(where: unknown): Row[] {
+  return db.edges.filter((edge) => matches(edge, where));
+}
+
+/**
+ * 事务里的写先攒着，回调成功才一次性生效——「旧行盖了戳但新行没进来」这种半截状态
+ * 在真库里不可能出现，mock 也不能让它出现，否则回滚那条测试就只是测了个寂寞。
+ */
+function fakeTransaction(pending: Array<() => void>) {
+  return {
     memoryItem: {
       create: ({ data }: { data: Row }) => {
-        // recordedAt / updatedAt 由 schema 的 @default(now()) 和 @updatedAt 填，mock 按数据库的样子补齐；
-        // 单调递增一个毫秒，否则同一批行时间全等，「最近 8 条」这种条件测不出真假。
-        const now = new Date(Date.now() + (db.tick += 1));
-        const row = { recordedAt: now, updatedAt: now, ...data };
+        if (db.failOn === 'create') return Promise.reject(new Error('新行插入失败'));
+        const row = stamped(data);
+        pending.push(() => db.rows.set(String(row.id), row));
+        return Promise.resolve(row);
+      },
+      updateMany: ({ where, data }: { where: unknown; data: Row }) => {
+        if (db.failOn === 'update') return Promise.reject(new Error('旧行盖戳失败'));
+        db.updates.push({ where, data });
+        const rows = matching(where);
+        pending.push(() => rows.forEach((row) => Object.assign(row, data)));
+        return Promise.resolve({ count: rows.length });
+      }
+    },
+    memoryRevision: {
+      create: ({ data }: { data: Row }) => {
+        if (db.failOn === 'edge') return Promise.reject(new Error('演化边写入失败'));
+        const row = { createdAt: new Date(Date.now() + (db.tick += 1)), ...data };
+        pending.push(() => db.edges.push(row));
+        return Promise.resolve(row);
+      }
+    }
+  };
+}
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    $transaction: (run: (tx: unknown) => Promise<unknown>) => {
+      const pending: Array<() => void> = [];
+      return run(fakeTransaction(pending)).then((result) => {
+        for (const commit of pending) commit();
+        db.commits += 1;
+        return result;
+      });
+    },
+    memoryItem: {
+      create: ({ data }: { data: Row }) => {
+        // recordedAt / updatedAt 由 schema 的 @default(now()) 和 @updatedAt 填，mock 按数据库的样子补齐。
+        const row = stamped(data);
         db.creates.push(data);
         db.rows.set(String(data.id), row);
         return Promise.resolve(row);
       },
       findFirst: ({ where }: { where: unknown }) => {
         db.reads.push(where);
-        return Promise.resolve(matching(where)[0] ?? null);
+        const row = matching(where)[0];
+        // staleRead：返回「别的事务抢先之前」的快照，库里那一行已经是取代过的。
+        return Promise.resolve(row ? { ...row, supersededAt: db.staleRead ? null : row.supersededAt } : null);
       },
       findMany: ({ where, orderBy, take }: { where: unknown; orderBy?: unknown; take?: number }) => {
         db.reads.push(where);
         db.takes.push(take);
         return Promise.resolve(ordered(where, orderBy, take));
-      },
-      updateMany: ({ where, data }: { where: unknown; data: Row }) => {
-        db.updates.push({ where, data });
-        const rows = matching(where);
-        for (const row of rows) Object.assign(row, data);
-        return Promise.resolve({ count: rows.length });
+      }
+    },
+    memoryRevision: {
+      findMany: ({ where, orderBy, take }: { where: unknown; orderBy?: unknown; take?: number }) => {
+        db.reads.push(where);
+        db.takes.push(take);
+        const direction = String((orderBy as Record<string, string> | undefined)?.createdAt ?? '');
+        const rows = edgeMatching(where);
+        if (direction) {
+          rows.sort((a, b) =>
+            direction === 'desc' ? compare(b.createdAt, a.createdAt) : compare(a.createdAt, b.createdAt)
+          );
+        }
+        return Promise.resolve(rows.slice(0, take));
       }
     }
   }
@@ -130,10 +196,14 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   db.rows.clear();
+  db.edges = [];
   db.creates = [];
   db.reads = [];
   db.takes = [];
   db.tick = 0;
+  db.commits = 0;
+  db.failOn = null;
+  db.staleRead = false;
   db.updates = [];
 });
 
@@ -232,12 +302,12 @@ describe('记忆写入的校验', () => {
 
 describe('记忆读取与时间有效性', () => {
   it('读取和更新的条件里都带上调用者自己的 userId', async () => {
-    const { createMemory, listMemories, getMemory, markMemoryRetracted } = await memories();
+    const { createMemory, listMemories, getMemory, retractMemory } = await memories();
     const memory = await createMemory(baseInput());
 
     await listMemories(USER);
     await getMemory(memory.id, USER);
-    await markMemoryRetracted(memory.id, USER);
+    await retractMemory(memory.id, USER, '用户要求忘掉这件事');
 
     expect(db.reads.length).toBeGreaterThanOrEqual(2);
     for (const where of [...db.reads, ...db.updates.map((entry) => entry.where)]) {
@@ -275,10 +345,10 @@ describe('记忆读取与时间有效性', () => {
   });
 
   it('撤回的记忆不再出现在当前有效里，但单独读仍然读得到', async () => {
-    const { createMemory, listMemories, markMemoryRetracted, getMemory } = await memories();
+    const { createMemory, listMemories, retractMemory, getMemory } = await memories();
 
     const memory = await createMemory(baseInput({ origin: 'observed', confirmedAt: undefined }));
-    await markMemoryRetracted(memory.id, USER);
+    await retractMemory(memory.id, USER, '用户要求忘掉这件事');
 
     expect(await listMemories(USER)).toEqual([]);
     const fetched = await getMemory(memory.id, USER);
@@ -356,5 +426,180 @@ describe('记忆读取与时间有效性', () => {
     expect(describeValidRange(day)).toBe('2026年3月5日');
     expect(describeValidRange(exact)).toBe('2026年3月5日 08:00');
     expect(describeValidRange(unknown)).toBe('时间未知');
+  });
+});
+
+describe('记忆演化：更新是写新行，不是覆盖', () => {
+  const REVISE = {
+    userId: USER,
+    content: '用户的澄境项目用 Next.js 15。',
+    origin: 'explicit' as const,
+    confirmedAt: new Date('2026-11-03T10:00:00.000Z'),
+    precision: 'unknown' as const,
+    reason: '用户说了新的版本号'
+  };
+
+  it('改一条记忆留下两条行：旧行只被盖上 supersededAt，密文一个字节都没动', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput({ content: '用户的澄境项目用 Next.js 14。' }));
+    const sealed = { ...db.rows.get(previous.id)! };
+
+    const next = await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    expect(next.id).not.toBe(previous.id);
+    expect(next.content).toBe('用户的澄境项目用 Next.js 15。');
+    expect(next.version).toBe(2);
+    const kept = db.rows.get(previous.id)!;
+    expect(kept.contentCiphertext).toBe(sealed.contentCiphertext);
+    expect(kept.supersededAt).toBeInstanceOf(Date);
+  });
+
+  it('旧行从当前有效里消失，但按 id 仍然读得回来——历史没被删', async () => {
+    const { createMemory, listMemories, getMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput({ content: '用户的澄境项目用 Next.js 14。' }));
+    await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    const current = await listMemories(USER);
+    const archived = await getMemory(previous.id, USER);
+
+    expect(current.map((memory) => memory.content)).toEqual(['用户的澄境项目用 Next.js 15。']);
+    expect(archived?.content).toBe('用户的澄境项目用 Next.js 14。');
+    expect(archived?.supersededAt).not.toBeNull();
+  });
+
+  it('演化边记下谁取代谁、改因，以及触发它的那句话', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+
+    const next = await reviseMemory({ ...REVISE, previousId: previous.id, sourceMessageId: 'msg-9', chatId: 'chat-1' });
+
+    expect(db.edges).toHaveLength(1);
+    expect(db.edges[0]).toMatchObject({
+      userId: USER,
+      action: 'SUPERSEDED',
+      memoryId: next.id,
+      previousId: previous.id,
+      sourceMessageId: 'msg-9'
+    });
+    // 理由里常会复述用户那句话，所以它和正文一样只能以密文躺在库里。
+    expect(JSON.stringify(db.edges[0])).not.toContain('用户说了新的版本号');
+  });
+
+  it('类型和情境不传就沿用旧行，传了才换', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput({ type: 'project', context: 'technicalProject' }));
+
+    const kept = await reviseMemory({ ...REVISE, previousId: previous.id });
+    const moved = await reviseMemory({ ...REVISE, previousId: kept.id, type: 'decision', context: 'decisionMaking' });
+
+    expect([kept.type, kept.context]).toEqual(['project', 'technicalProject']);
+    expect([moved.type, moved.context]).toEqual(['decision', 'decisionMaking']);
+  });
+
+  it('事务里任何一步失败都不留下半截演化：旧行没被盖戳，也不多出当前版本', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+
+    for (const point of ['create', 'update', 'edge'] as const) {
+      db.failOn = point;
+      await expect(reviseMemory({ ...REVISE, previousId: previous.id })).rejects.toThrow();
+      db.failOn = null;
+
+      expect(db.commits).toBe(0);
+      expect(db.rows.size).toBe(1);
+      expect(db.edges).toEqual([]);
+      expect(db.rows.get(previous.id)!.supersededAt).toBeNull();
+    }
+  });
+
+  it('撤回也留一条 retracted 边，写明理由', async () => {
+    const { createMemory, retractMemory } = await memories();
+    const memory = await createMemory(baseInput({ origin: 'observed', confirmedAt: undefined }));
+
+    await retractMemory(memory.id, USER, '用户要求忘掉这件事');
+
+    expect(db.rows.get(memory.id)!.origin).toBe('RETRACTED');
+    expect(db.edges).toHaveLength(1);
+    expect(db.edges[0]).toMatchObject({
+      userId: USER,
+      action: 'RETRACTED',
+      memoryId: memory.id,
+      previousId: null
+    });
+    expect(JSON.stringify(db.edges[0])).not.toContain('用户要求忘掉这件事');
+  });
+
+  it('理由为空就不许改：撤回和演化都得留下说得出口的原因', async () => {
+    const { createMemory, retractMemory, reviseMemory } = await memories();
+    const memory = await createMemory(baseInput());
+
+    await expect(retractMemory(memory.id, USER, '   ')).rejects.toThrow(/理由/);
+    await expect(reviseMemory({ ...REVISE, previousId: memory.id, reason: '' })).rejects.toThrow(/理由/);
+    expect(db.edges).toEqual([]);
+    expect(db.commits).toBe(0);
+  });
+
+  it('别人那条记忆改不动：按 userId 找不到旧行就报错，一行一边都不写', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const theirs = await createMemory(baseInput({ userId: 'user-b' }));
+
+    await expect(reviseMemory({ ...REVISE, previousId: theirs.id })).rejects.toThrow(/记忆/);
+
+    expect(db.commits).toBe(0);
+    expect(db.edges).toEqual([]);
+    expect(db.rows.get(theirs.id)!.supersededAt).toBeNull();
+  });
+
+  it('盖戳的条件里要求旧行还没被取代：两条并发演化不会都留下当前版本', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+
+    await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    // updateMany 命中 0 行就抛错回滚，所以「读的时候还没被取代」这件事不是安全依据。
+    expect(db.updates[db.updates.length - 1]).toMatchObject({
+      where: { id: previous.id, userId: USER, supersededAt: null }
+    });
+  });
+
+  it('已经被取代的行不能再改：报冲突，一行一边都不写', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+    await reviseMemory({ ...REVISE, previousId: previous.id });
+    db.updates = [];
+
+    await expect(reviseMemory({ ...REVISE, previousId: previous.id, content: '第三次说法。' })).rejects.toThrow(/更新过/);
+
+    expect(db.commits).toBe(1);
+    expect(db.rows.size).toBe(2);
+    expect(db.edges).toHaveLength(1);
+    expect(db.updates).toEqual([]);
+  });
+
+  it('读完之后被人抢先：靠盖戳的条件回滚，而不是靠那次读', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+    // 库里这一行已经取代过了，但读回来的还是抢先之前的快照——真库里就是这两步之间的窗口。
+    Object.assign(db.rows.get(previous.id)!, { supersededAt: new Date() });
+    db.staleRead = true;
+
+    await expect(reviseMemory({ ...REVISE, previousId: previous.id })).rejects.toThrow(/更新过/);
+
+    expect(db.commits).toBe(0);
+    expect(db.rows.size).toBe(1);
+    expect(db.edges).toEqual([]);
+  });
+
+  it('演化历史按调用者自己的 userId 取，换个用户什么都查不到', async () => {
+    const { createMemory, reviseMemory, listMemoryRevisions } = await memories();
+    const previous = await createMemory(baseInput());
+    const next = await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    const mine = await listMemoryRevisions(next.id, USER);
+
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ action: 'superseded', memoryId: next.id, previousId: previous.id });
+    expect(mine[0]!.reason).toBe('用户说了新的版本号');
+    expect(await listMemoryRevisions(next.id, 'user-b')).toEqual([]);
   });
 });

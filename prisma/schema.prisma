@@ -104,30 +104,38 @@ enum TimePrecision {
   TIMESTAMP
 }
 
-model User {
-  id             String     @id @default(uuid())
-  username       String     @unique @db.VarChar(32)
-  email          String     @unique @db.VarChar(254)
-  emailVerified  DateTime?
-  passwordHash   String
-  role           Role       @default(USER)
-  status         UserStatus @default(ACTIVE)
-  displayName    String?    @db.VarChar(64)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  lastLoginAt    DateTime?
+/// 记忆发生过的演化。不含 CREATED：一条记忆的首版本来就带 sourceMessageId 和
+/// recordedAt，再存一份只是把同一件事写两遍。
+enum MemoryRevisionAction {
+  SUPERSEDED
+  RETRACTED
+}
 
-  sessions       Session[]
-  chats          Chat[]
-  aiProviders    AiProvider[]
-  cognitive      CognitivePreference?
-  memoryPolicies MemoryPolicy[]
-  memories       MemoryItem[]
-  attachments    Attachment[]
-  loginLogs      LoginLog[]
-  auditLogs      AuditLog[]      @relation("AuditActor")
-  ipRulesCreated IpRule[]        @relation("IpRuleCreator")
-  configsUpdated SystemConfig[]  @relation("ConfigUpdater")
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique @db.VarChar(32)
+  email         String     @unique @db.VarChar(254)
+  emailVerified DateTime?
+  passwordHash  String
+  role          Role       @default(USER)
+  status        UserStatus @default(ACTIVE)
+  displayName   String?    @db.VarChar(64)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  lastLoginAt   DateTime?
+
+  sessions        Session[]
+  chats           Chat[]
+  aiProviders     AiProvider[]
+  cognitive       CognitivePreference?
+  memoryPolicies  MemoryPolicy[]
+  memories        MemoryItem[]
+  memoryRevisions MemoryRevision[]
+  attachments     Attachment[]
+  loginLogs       LoginLog[]
+  auditLogs       AuditLog[]           @relation("AuditActor")
+  ipRulesCreated  IpRule[]             @relation("IpRuleCreator")
+  configsUpdated  SystemConfig[]       @relation("ConfigUpdater")
 
   @@index([role])
   @@index([status])
@@ -152,37 +160,37 @@ model Session {
 }
 
 model Chat {
-  id               String   @id @default(uuid())
-  userId           String
-  titleCiphertext  String   @db.Text
-  modelProviderId  String?
-  modelId          String?  @db.VarChar(128)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String   @id @default(uuid())
+  userId          String
+  titleCiphertext String   @db.Text
+  modelProviderId String?
+  modelId         String?  @db.VarChar(128)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider   AiProvider?  @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
-  messages   Message[]
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    AiProvider?  @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
+  messages    Message[]
   attachments Attachment[]
-  memories   MemoryItem[]
+  memories    MemoryItem[]
 
   @@index([userId, updatedAt])
   @@index([modelProviderId])
 }
 
 model Message {
-  id                  String        @id @default(uuid())
-  chatId              String
-  role                MessageRole
-  contentCiphertext   String        @db.Text
-  modelId             String?       @db.VarChar(128)
-  providerId          String?
-  status              MessageStatus @default(COMPLETE)
-  errorCode           String?       @db.VarChar(64)
-  inputTokens         Int?
-  outputTokens        Int?
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  id                String        @id @default(uuid())
+  chatId            String
+  role              MessageRole
+  contentCiphertext String        @db.Text
+  modelId           String?       @db.VarChar(128)
+  providerId        String?
+  status            MessageStatus @default(COMPLETE)
+  errorCode         String?       @db.VarChar(64)
+  inputTokens       Int?
+  outputTokens      Int?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   chat        Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
   attachments Attachment[]
@@ -216,22 +224,22 @@ model Attachment {
 }
 
 model AiProvider {
-  id                String        @id @default(uuid())
-  ownerType         ProviderOwner
-  userId            String?
-  name              String        @db.VarChar(64)
-  baseUrl           String        @db.VarChar(512)
-  apiKeyCiphertext  String        @db.Text
-  modelId           String        @db.VarChar(128)
-  capabilities      Json
-  params            Json?
-  enabled           Boolean       @default(true)
-  isDefault         Boolean       @default(false)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  id               String        @id @default(uuid())
+  ownerType        ProviderOwner
+  userId           String?
+  name             String        @db.VarChar(64)
+  baseUrl          String        @db.VarChar(512)
+  apiKeyCiphertext String        @db.Text
+  modelId          String        @db.VarChar(128)
+  capabilities     Json
+  params           Json?
+  enabled          Boolean       @default(true)
+  isDefault        Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  user   User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chats  Chat[]
+  user  User?  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chats Chat[]
 
   @@index([ownerType, enabled])
   @@index([userId])
@@ -287,11 +295,11 @@ model LoginLog {
 }
 
 model LoginLock {
-  ip          String   @id @db.VarChar(64)
-  fails       Int      @default(0)
-  firstFailAt DateTime @default(now())
+  ip          String    @id @db.VarChar(64)
+  fails       Int       @default(0)
+  firstFailAt DateTime  @default(now())
   lockedUntil DateTime?
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime  @updatedAt
 
   @@index([lockedUntil])
 }
@@ -369,15 +377,15 @@ model CognitivePreference {
 model MemoryPolicy {
   userId              String
   context             MemoryContext
-  allowPersistence    Boolean          @default(false)
-  allowedMemoryTypes  MemoryType[]     @default([])
-  requireConfirmation Boolean          @default(true)
-  retention           MemoryRetention  @default(SESSION_ONLY)
-  allowUserProfile    Boolean          @default(false)
-  allowReflection     Boolean          @default(false)
-  allowAssociation    Boolean          @default(false)
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  allowPersistence    Boolean         @default(false)
+  allowedMemoryTypes  MemoryType[]    @default([])
+  requireConfirmation Boolean         @default(true)
+  retention           MemoryRetention @default(SESSION_ONLY)
+  allowUserProfile    Boolean         @default(false)
+  allowReflection     Boolean         @default(false)
+  allowAssociation    Boolean         @default(false)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -410,6 +418,31 @@ model MemoryItem {
   chat          Chat?    @relation(fields: [chatId], references: [id], onDelete: Cascade)
   sourceMessage Message? @relation("MemorySource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
 
+  /// 这条行作为「新版本」产生的演化边，和作为「被取代的旧版本」产生的边。
+  revisions       MemoryRevision[] @relation("MemoryRevisionNew")
+  replacedByEdges MemoryRevision[] @relation("MemoryRevisionPrevious")
+
   @@index([userId, supersededAt])
   @@index([userId, type])
+}
+
+/// 一次演化的边（任务书 2.3、3.6）。正文不复制到这里：旧版本仍是原本那条 MemoryItem，
+/// 更新时只给它盖 supersededAt 并新写一行，所以历史能逐条读回，谁都不会被覆盖掉。
+model MemoryRevision {
+  id               String               @id @default(uuid())
+  userId           String
+  action           MemoryRevisionAction
+  memoryId         String
+  previousId       String?
+  reasonCiphertext String               @db.Text
+  sourceMessageId  String?
+  createdAt        DateTime             @default(now())
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memory   MemoryItem  @relation("MemoryRevisionNew", fields: [memoryId], references: [id], onDelete: Cascade)
+  previous MemoryItem? @relation("MemoryRevisionPrevious", fields: [previousId], references: [id], onDelete: Cascade)
+
+  @@index([memoryId])
+  @@index([previousId])
+  @@index([userId, createdAt])
 }

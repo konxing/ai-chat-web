@@ -12,11 +12,12 @@ import {
 } from './policy';
 
 export const MEMORY_CONTENT_MAX_CHARS = 1000;
+export const MEMORY_REASON_MAX_CHARS = 500;
 
 /** 一次最多捞多少行：每行都要 AES-256-GCM 解密，捞回来就是真开销，调用方不能自己放开。 */
 const MEMORY_LIST_MAX_ROWS = 200;
 
-/// 一条记忆能被信任到什么程度（任务书 2.2）。推断和假设永远不等于用户说过或确认过。
+/** 一条记忆能被信任到什么程度（任务书 2.2）。推断和假设永远不等于用户说过或确认过。 */
 const ORIGIN_PAIRS = [
   ['explicit', 'EXPLICIT'],
   ['userConfirmed', 'USER_CONFIRMED'],
@@ -26,7 +27,7 @@ const ORIGIN_PAIRS = [
   ['retracted', 'RETRACTED']
 ] as const;
 
-/// 时间信息的精度（任务书 2.1）。用户说「16 岁」就不能存成某个具体的生日。
+/** 时间信息的精度（任务书 2.1）。用户说「16 岁」就不能存成某个具体的生日。 */
 const PRECISION_PAIRS = [
   ['unknown', 'UNKNOWN'],
   ['year', 'YEAR'],
@@ -37,6 +38,15 @@ const PRECISION_PAIRS = [
 
 export type MemoryOrigin = (typeof ORIGIN_PAIRS)[number][0];
 export type TimePrecision = (typeof PRECISION_PAIRS)[number][0];
+
+/** 记忆被改过一次就留下一条边（任务书 2.3）。没有 CREATED：首版本行自带 sourceMessageId
+ * 和 recordedAt，再记一遍只是把同一件事写两遍。 */
+const REVISION_PAIRS = [
+  ['superseded', 'SUPERSEDED'],
+  ['retracted', 'RETRACTED']
+] as const;
+
+export type MemoryRevisionAction = (typeof REVISION_PAIRS)[number][0];
 export const MEMORY_ORIGINS = ORIGIN_PAIRS.map(([app]) => app) as MemoryOrigin[];
 export const TIME_PRECISIONS = PRECISION_PAIRS.map(([app]) => app) as TimePrecision[];
 
@@ -97,6 +107,45 @@ export interface MemoryListFilters {
   take?: number;
 }
 
+/** 更新一条记忆（任务书 2.3）：新写一行、旧行盖 supersededAt，绝不原地改正文。
+ * type/context/chatId 不传就沿用旧行——「用户换了个说法」不该顺手把情境也换了。 */
+export interface MemoryReviseInput {
+  previousId: string;
+  userId: string;
+  content: string;
+  origin: MemoryOrigin;
+  reason: string;
+  confirmedAt?: Date | null;
+  precision?: TimePrecision;
+  validFrom?: Date | null;
+  validTo?: Date | null;
+  type?: MemoryType;
+  context?: MemoryContext;
+  chatId?: string | null;
+  sourceMessageId?: string | null;
+}
+
+interface MemoryRevisionRow {
+  id: string;
+  userId: string;
+  action: string;
+  memoryId: string;
+  previousId: string | null;
+  reasonCiphertext: string;
+  sourceMessageId: string | null;
+  createdAt: Date;
+}
+
+export interface MemoryRevisionDto {
+  id: string;
+  action: MemoryRevisionAction;
+  memoryId: string;
+  previousId: string | null;
+  reason: string;
+  sourceMessageId: string | null;
+  createdAt: string;
+}
+
 function toStoredEnum<K extends string, V extends string>(
   pairs: ReadonlyArray<readonly [K, V]>,
   value: K,
@@ -115,12 +164,18 @@ function fromStoredEnum(pairs: readonly (readonly [string, string])[], value: st
 
 const toStoredOrigin = (origin: MemoryOrigin) => toStoredEnum(ORIGIN_PAIRS, origin, '记忆来源');
 const toStoredPrecision = (precision: TimePrecision) => toStoredEnum(PRECISION_PAIRS, precision, '时间精度');
+const toStoredAction = (action: MemoryRevisionAction) => toStoredEnum(REVISION_PAIRS, action, '记忆演化动作');
+const fromStoredAction = (value: string): MemoryRevisionAction =>
+  fromStoredEnum(REVISION_PAIRS, value, '记忆演化动作') as MemoryRevisionAction;
 const fromStoredOrigin = (value: string): MemoryOrigin => fromStoredEnum(ORIGIN_PAIRS, value, '记忆来源') as MemoryOrigin;
 const fromStoredPrecision = (value: string): TimePrecision =>
   fromStoredEnum(PRECISION_PAIRS, value, '时间精度') as TimePrecision;
 
 // AAD 里带上 userId 和 schemaVersion：别人的行即使密文到手也解不开，日后换密钥也能按版本迁移。
 const aadFor = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
+
+// 演化的理由常会复述用户那句话，所以跟正文同等对待——绑住这条边自己的 userId 和 id。
+const revisionAadFor = (userId: string, id: string) => `memory-revision:v1:${userId}:${id}`;
 
 export function decryptMemoryContent(
   memory: Pick<MemoryRow, 'id' | 'userId' | 'contentCiphertext'>,
@@ -135,6 +190,16 @@ function validateContent(content: string): string {
   if (!text) throw new ApiError(400, 'VALIDATION_ERROR', '记忆正文不能为空');
   if (text.length > MEMORY_CONTENT_MAX_CHARS) {
     throw new ApiError(400, 'VALIDATION_ERROR', `记忆正文不能超过 ${MEMORY_CONTENT_MAX_CHARS} 字，请拆成多条`);
+  }
+  return text;
+}
+
+/** 改记忆必须说得出为什么：一条没有原因的演化，事后既不能解释也不能回滚。 */
+function validateReason(reason: string): string {
+  const text = reason.trim();
+  if (!text) throw new ApiError(400, 'VALIDATION_ERROR', '更新或撤回记忆必须写明理由');
+  if (text.length > MEMORY_REASON_MAX_CHARS) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `理由不能超过 ${MEMORY_REASON_MAX_CHARS} 字`);
   }
   return text;
 }
@@ -199,7 +264,8 @@ function toDto(row: MemoryRow, viewerUserId: string): MemoryDto {
   };
 }
 
-export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
+/** 校验加组装待写行：新建和演化共用一份，免得两处各自放宽校验。 */
+function prepareMemory(input: MemoryInput, version: number) {
   const content = validateContent(input.content);
   validateConfirmation(input.origin, input.confirmedAt);
   const precision = input.precision ?? 'unknown';
@@ -208,7 +274,8 @@ export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
   validateTimes(precision, validFrom, validTo);
 
   const id = randomUUID();
-  const row = await prisma.memoryItem.create({
+  return {
+    id,
     data: {
       id,
       userId: input.userId,
@@ -222,10 +289,15 @@ export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
       validPrecision: toStoredPrecision(precision),
       validFrom,
       validTo,
-      version: 1,
+      version,
       supersededAt: null
     }
-  });
+  };
+}
+
+export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
+  const memory = prepareMemory(input, 1);
+  const row = await prisma.memoryItem.create({ data: memory.data });
   return toDto(row as unknown as MemoryRow, input.userId);
 }
 
@@ -256,13 +328,112 @@ export async function getMemory(id: string, userId: string): Promise<MemoryDto |
   return row ? toDto(row as unknown as MemoryRow, userId) : null;
 }
 
-/** 撤回只改来源标记，行和正文都留着——任务书要求可逆遗忘，删除是 Phase 6 的独立动作。 */
-export async function markMemoryRetracted(id: string, userId: string): Promise<boolean> {
-  const result = await prisma.memoryItem.updateMany({
-    where: { id, userId },
-    data: { origin: toStoredOrigin('retracted') }
+/**
+ * 更新记忆（任务书 2.3）：新写一行、给旧行盖 supersededAt、留下一条说明原因的边。
+ * 旧行的正文一个字节都不改——「覆盖着写」等于把用户说过什么销毁了，也再没法回滚。
+ * 三步必须在同一个事务里，否则中途失败会同时留下两条当前版本。
+ */
+export async function reviseMemory(input: MemoryReviseInput): Promise<MemoryDto> {
+  const reason = validateReason(input.reason);
+  const found = await prisma.memoryItem.findFirst({ where: { id: input.previousId, userId: input.userId } });
+  if (!found) throw new ApiError(404, 'MEMORY_NOT_FOUND', '要更新的记忆不属于当前用户，或者已经不存在');
+  const previous = found as unknown as MemoryRow;
+  if (previous.supersededAt) {
+    throw new ApiError(409, 'MEMORY_SUPERSEDED', '这条记忆已经被更新过，请对最新版本做修改');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // 先抢旧行：条件里带上「还没被取代」，命中 0 行说明有人在读完之后抢先更新了。
+    // 上面的 findFirst 只是给出更友好的报错，并发安全靠的是这条 UPDATE 自身的行锁。
+    const stamp = await tx.memoryItem.updateMany({
+      where: { id: previous.id, userId: input.userId, supersededAt: null },
+      data: { supersededAt: new Date() }
+    });
+    if (stamp.count === 0) {
+      throw new ApiError(409, 'MEMORY_SUPERSEDED', '这条记忆已经被更新过，请对最新版本做修改');
+    }
+    const next = prepareMemory(
+      {
+        userId: input.userId,
+        type: input.type ?? fromDbMemoryType(previous.type),
+        context: input.context ?? fromDbMemoryContext(previous.context),
+        content: input.content,
+        origin: input.origin,
+        confirmedAt: input.confirmedAt ?? null,
+        precision: input.precision,
+        validFrom: input.validFrom,
+        validTo: input.validTo,
+        chatId: input.chatId ?? previous.chatId,
+        sourceMessageId: input.sourceMessageId ?? null
+      },
+      previous.version + 1
+    );
+    const row = await tx.memoryItem.create({ data: next.data });
+    const edgeId = randomUUID();
+    await tx.memoryRevision.create({
+      data: {
+        id: edgeId,
+        userId: input.userId,
+        action: toStoredAction('superseded'),
+        memoryId: next.id,
+        previousId: previous.id,
+        reasonCiphertext: encryptString(reason, revisionAadFor(input.userId, edgeId)),
+        sourceMessageId: input.sourceMessageId ?? null
+      }
+    });
+    return toDto(row as unknown as MemoryRow, input.userId);
   });
-  return result.count > 0;
+}
+
+/** 撤回只改来源标记并留一条边，行和正文都留着——关掉模块和永久删除是两个不同动作。 */
+export async function retractMemory(memoryId: string, userId: string, reason: string): Promise<boolean> {
+  const note = validateReason(reason);
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.memoryItem.updateMany({
+      where: { id: memoryId, userId },
+      data: { origin: toStoredOrigin('retracted') }
+    });
+    if (result.count === 0) return false;
+    const edgeId = randomUUID();
+    await tx.memoryRevision.create({
+      data: {
+        id: edgeId,
+        userId,
+        action: toStoredAction('retracted'),
+        memoryId,
+        previousId: null,
+        reasonCiphertext: encryptString(note, revisionAadFor(userId, edgeId)),
+        sourceMessageId: null
+      }
+    });
+    return true;
+  });
+}
+
+/** 这条记忆是被谁取代的、还是被谁撤回的：按调用者自己的 userId 取，别人的边一条也不给。 */
+export async function listMemoryRevisions(memoryId: string, userId: string): Promise<MemoryRevisionDto[]> {
+  const rows = await prisma.memoryRevision.findMany({
+    where: { memoryId, userId },
+    orderBy: { createdAt: 'desc' },
+    take: MEMORY_LIST_MAX_ROWS
+  });
+  return (rows as unknown as MemoryRevisionRow[]).map((row) => {
+    let reason: string;
+    try {
+      reason = decryptString(row.reasonCiphertext, revisionAadFor(row.userId, row.id));
+    } catch {
+      reason = '（理由解密失败）';
+    }
+    return {
+      id: row.id,
+      action: fromStoredAction(row.action),
+      memoryId: row.memoryId,
+      previousId: row.previousId,
+      reason,
+      sourceMessageId: row.sourceMessageId,
+      createdAt: row.createdAt.toISOString()
+    };
+  });
 }
 
 function formatDate(value: string, precision: TimePrecision): string {
