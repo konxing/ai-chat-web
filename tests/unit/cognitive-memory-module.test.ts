@@ -14,7 +14,9 @@ const db = vi.hoisted(() => ({
   creates: [] as Array<Record<string, unknown>>,
   revises: [] as Array<Record<string, unknown>>,
   readRows: [] as Array<Record<string, unknown>>,
-  listFilters: [] as unknown[]
+  listFilters: [] as unknown[],
+  policies: null as unknown,
+  policyCalls: 0
 }));
 
 vi.mock('@/lib/cognitive/preferences', () => ({
@@ -37,7 +39,11 @@ vi.mock('@/lib/cognitive/policy', async (importOriginal) => {
   return {
     ...actual,
     // 库里一行都没配过 → 用内置默认，测试直接断言默认策略下的行为。
-    getMemoryPolicies: () => Promise.resolve(actual.DEFAULT_MEMORY_POLICIES)
+    // db.policies 有值时用它：保留期那几条要能单独把某个情境改成 days30。
+    getMemoryPolicies: () => {
+      db.policyCalls += 1;
+      return Promise.resolve(db.policies ?? actual.DEFAULT_MEMORY_POLICIES);
+    }
   };
 });
 
@@ -72,6 +78,7 @@ import {
   ensureCognitiveModules,
   memoryModule,
   MEMORY_READ_MAX_CHARS,
+  MEMORY_READ_MAX_FETCH,
   MEMORY_READ_MAX_ITEMS,
   MEMORY_WRITE_MAX_PER_TURN
 } from '@/lib/cognitive/memory-module';
@@ -79,6 +86,19 @@ import { runCognitiveReads } from '@/lib/cognitive/manager';
 
 const TURN = { userId: 'user-a', chatId: 'chat-1', content: '', sourceMessageId: 'msg-1' };
 const OCCURRED = new Date('2026-11-02T10:00:00.000Z');
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** 保留期是按「服务器现在」算的，所以这些用例的时间戳必须相对真实当下，不能用固定的 OCCURRED。 */
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * DAY_MS).toISOString();
+}
+
+function withRetention(retention: 'days30' | 'sessionOnly') {
+  return {
+    ...DEFAULT_MEMORY_POLICIES,
+    technicalProject: { ...DEFAULT_MEMORY_POLICIES.technicalProject, retention }
+  };
+}
 
 function memoryRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -111,6 +131,8 @@ beforeEach(() => {
   db.revises = [];
   db.readRows = [];
   db.listFilters = [];
+  db.policies = null;
+  db.policyCalls = 0;
 });
 
 describe('写侧：策略在服务端真的生效', () => {
@@ -306,7 +328,7 @@ describe('读侧：记忆作为数据进提示词', () => {
 
     expect(db.listFilters[0]).toMatchObject({
       userId: 'user-a',
-      filters: { asOf: expect.any(Date), take: MEMORY_READ_MAX_ITEMS }
+      filters: { asOf: expect.any(Date), take: MEMORY_READ_MAX_FETCH }
     });
   });
 
@@ -358,5 +380,118 @@ describe('读侧：记忆作为数据进提示词', () => {
   it('内置默认策略和读侧渲染用的是同一套情境与类型名称', () => {
     expect(DEFAULT_MEMORY_POLICIES.technicalProject.allowPersistence).toBe(true);
     expect(DEFAULT_MEMORY_POLICIES.emotionalSupport.allowPersistence).toBe(false);
+  });
+});
+
+/**
+ * ① 保留期在读侧真正生效。
+ *
+ * 这一组钉的是「策略里的保留期不是装饰」：过了期限的记忆不再进入对话，
+ * 但读侧过滤≠删除——行还在库里，管理界面照样能看到并撤回。
+ * 反面同样要钉住：不能因为前面几条过期就把还在保留期内的记忆一起丢掉。
+ */
+describe('读侧：保留期决定还能不能被用', () => {
+  it('保留期 30 天时，40 天前的记忆不再注入，10 天前的照旧注入', async () => {
+    db.memoryEnabled = true;
+    db.policies = withRetention('days30');
+    db.readRows = [
+      memoryRow({ id: 'mem-new', content: '我在用 Next.js 15', recordedAt: isoDaysAgo(10) }),
+      memoryRow({ id: 'mem-old', content: '我在用 Next.js 14', recordedAt: isoDaysAgo(40) })
+    ];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('我在用 Next.js 15');
+    expect(block?.text).not.toContain('我在用 Next.js 14');
+  });
+
+  it('长期保留时几年前的记忆仍然注入', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我在用 Prisma', recordedAt: isoDaysAgo(900) })];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('我在用 Prisma');
+  });
+
+  it('只在当次对话的记忆，换一次对话就不注入', async () => {
+    db.memoryEnabled = true;
+    db.policies = withRetention('sessionOnly');
+    db.readRows = [memoryRow({ content: '这段只属于那次对话', chatId: 'chat-1', recordedAt: isoDaysAgo(0) })];
+
+    const here = await memoryModule.read({ ...TURN, content: '在吗' });
+    const elsewhere = await memoryModule.read({ ...TURN, chatId: 'chat-2', content: '在吗' });
+
+    expect(here[0]?.text).toContain('这段只属于那次对话');
+    expect(elsewhere).toEqual([]);
+  });
+
+  it('默认策略下敏感情境就是只在当次对话：默认值本身就守得住', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      memoryRow({
+        id: 'mem-s',
+        content: '我最近很焦虑',
+        type: 'emotion',
+        context: 'emotionalSupport',
+        chatId: 'chat-1',
+        recordedAt: isoDaysAgo(3)
+      })
+    ];
+
+    const here = await memoryModule.read({ ...TURN, content: '在吗' });
+    const elsewhere = await memoryModule.read({ ...TURN, chatId: 'chat-2', content: '在吗' });
+
+    expect(here[0]?.text).toContain('我最近很焦虑');
+    expect(elsewhere).toEqual([]);
+  });
+
+  it('前面的记忆都过期时，后面还在保留期内的仍能被顶上来', async () => {
+    db.memoryEnabled = true;
+    db.policies = withRetention('days30');
+    // 只用 9 条过期行：够证明「过期行不再占掉可用行的名额」（旧行为按 take=8 会把这条切掉），
+    // 又不假装查询窗口是无限的——MEMORY_READ_MAX_FETCH 条过期行排在前面时，再往后的确实捞不到。
+    const expired = Array.from({ length: MEMORY_READ_MAX_ITEMS + 1 }, (_, index) =>
+      memoryRow({ id: `old-${index}`, content: `过期记忆 ${index}`, recordedAt: isoDaysAgo(60) })
+    );
+    db.readRows = [...expired, memoryRow({ id: 'fresh', content: '还在保留期内', recordedAt: isoDaysAgo(1) })];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('还在保留期内');
+    expect(block?.text).not.toContain('过期记忆');
+  });
+
+  it('注入条数仍按 MEMORY_READ_MAX_ITEMS 截断，过滤不放大上限', async () => {
+    db.memoryEnabled = true;
+    db.readRows = Array.from({ length: MEMORY_READ_MAX_FETCH }, (_, index) =>
+      memoryRow({ id: `mem-${index}`, content: `第 ${index} 条`, recordedAt: isoDaysAgo(1) })
+    );
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+    const lines = (block?.text ?? '').split('\n').filter((line) => line.startsWith('- '));
+
+    expect(lines).toHaveLength(MEMORY_READ_MAX_ITEMS);
+  });
+
+  it('一条记忆都没有时不去查策略表', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [];
+
+    await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(db.policyCalls).toBe(0);
+  });
+
+  it('保留期只影响读侧：过期的旧说法仍然是改口的落点，不会再落一条重复的', async () => {
+    db.memoryEnabled = true;
+    db.policies = withRetention('days30');
+    db.readRows = [memoryRow({ content: '我在用 Next.js 14', recordedAt: isoDaysAgo(40) })];
+
+    await write('我在用 Next.js 15。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toHaveLength(1);
+    expect(db.revises[0]).toMatchObject({ previousId: 'mem-1' });
   });
 });

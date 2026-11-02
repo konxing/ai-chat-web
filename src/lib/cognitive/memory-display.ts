@@ -1,5 +1,5 @@
 import type { MemoryDto, MemoryOrigin, MemoryRevisionAction, TimePrecision } from './memories';
-import type { MemoryContext, MemoryType } from './policy';
+import type { MemoryContext, MemoryRetention, MemoryType } from './policy';
 
 /**
  * 记忆的前端展示词汇：枚举的中文标签 + 有效区间回显。
@@ -43,6 +43,53 @@ export const REVISION_ACTION_LABELS: Record<MemoryRevisionAction, string> = {
   superseded: '更新为新说法',
   retracted: '撤回'
 };
+
+export const RETENTION_LABELS: Record<MemoryRetention, string> = {
+  forever: '长期保留',
+  untilSuperseded: '直到有新说法',
+  days90: '90 天',
+  days30: '30 天',
+  sessionOnly: '只在当次对话'
+};
+
+/**
+ * 渲染顺序。policy.ts 里也有同一份顺序，但那个文件 import 了 prisma，
+ * 客户端组件不能运行时引用，所以这里各写一份，漂移由 cognitive-memory-policy.test.ts 钉住。
+ */
+export const CONTEXT_ORDER: readonly MemoryContext[] = [
+  'general',
+  'technicalProject',
+  'learning',
+  'personalGoal',
+  'personalReflection',
+  'emotionalSupport',
+  'decisionMaking'
+];
+
+export const TYPE_ORDER: readonly MemoryType[] = ['fact', 'preference', 'goal', 'project', 'decision', 'emotion'];
+
+export const RETENTION_ORDER: readonly MemoryRetention[] = [
+  'forever',
+  'untilSuperseded',
+  'days90',
+  'days30',
+  'sessionOnly'
+];
+
+export interface PolicySummaryInput {
+  allowPersistence: boolean;
+  allowedMemoryTypes: readonly MemoryType[];
+  requireConfirmation: boolean;
+  retention: MemoryRetention;
+}
+
+/** 收起态的一行摘要。多种限制同时成立时只说最紧的那一条，避免摘要变成一串自相矛盾的并列。 */
+export function describePolicySummary(policy: PolicySummaryInput): string {
+  if (!policy.allowPersistence) return '不保存';
+  if (policy.requireConfirmation) return '先问再记';
+  if (policy.allowedMemoryTypes.length === 0) return '允许保存 · 不记任何类型';
+  return `允许保存 · 记 ${policy.allowedMemoryTypes.length} 种类型 · ${RETENTION_LABELS[policy.retention]}`;
+}
 
 function formatDate(value: string, precision: TimePrecision): string {
   const date = new Date(value);

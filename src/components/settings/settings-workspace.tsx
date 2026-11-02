@@ -16,6 +16,7 @@ import {
   Plus,
   Shield,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   UserRound,
   X
@@ -36,6 +37,7 @@ import {
 } from '@/components/ui';
 import type { ProviderDto } from '@/lib/chat-types';
 import { MemoryPanel } from './memory-panel';
+import { MemoryPolicyPanel } from './memory-policy-panel';
 
 interface AccountUser {
   id: string;
@@ -66,7 +68,7 @@ const CAPS: Array<{ key: ProviderDto['capabilities'][number]; label: string }> =
   { key: 'audio', label: '语音' }
 ];
 
-type Tab = 'profile' | 'security' | 'models' | 'memory' | 'about';
+type Tab = 'profile' | 'security' | 'models' | 'memory' | 'policy' | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
   return (
@@ -301,7 +303,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
             <BrandMark className="h-8 w-8" />
             <div>
               <div className="text-[15px] font-semibold text-white">设置</div>
-              <div className="text-[11px] text-white/35">账户 · 安全 · 模型 · 记忆</div>
+              <div className="text-[11px] text-white/35">账户 · 安全 · 模型 · 记忆 · 策略</div>
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -325,6 +327,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['security', '安全与登录', ShieldCheck],
               ['models', '我的模型', Bot],
               ['memory', '记忆', Brain],
+              ['policy', '记忆策略', SlidersHorizontal],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -724,6 +727,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           ) : null}
 
           {tab === 'memory' ? <MemoryPanel /> : null}
+
+          {tab === 'policy' ? <MemoryPolicyPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

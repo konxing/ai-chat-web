@@ -9,13 +9,14 @@ import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from '
 import { createMemory, listMemories, reviseMemory } from './memories';
 import { getMemoryPolicies } from './policy';
 import { getCognitivePreferences } from './preferences';
+import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import type { MemoryOrigin } from './memories';
 
 /**
  * 记忆模块本体（③：让策略真正跑在对话链路上）。
  *
- * 读：把此刻有效的记忆渲染成一段「数据不是指令」的文本，交给上下文构建。
+ * 读：把此刻有效、且还在保留期内的记忆渲染成一段「数据不是指令」的文本，交给上下文构建。
  * 写：抽候选 → 分类情境 → 按该情境的策略决定留不留，WRITE 落新行、UPDATE 走演化。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
  *
@@ -26,6 +27,16 @@ import type { MemoryOrigin } from './memories';
 export const MEMORY_READ_MAX_ITEMS = 8;
 export const MEMORY_READ_MAX_CHARS = 1500;
 export const MEMORY_WRITE_MAX_PER_TURN = 2;
+
+/**
+ * 一次捞多少行来做保留期过滤。必须大于 MEMORY_READ_MAX_ITEMS：
+ * 只捞 8 条的话，这 8 条恰好都过了保留期就会一条都用不上，而库里其实还有能用的。
+ * 每行都要 AES-256-GCM 解密，所以这个倍数也不能随便放大。
+ *
+ * 这是个有意的浅窗口：比它更多的过期行排在前面时，更旧的可用行这一轮就捞不到。
+ * 真正解决要靠按相关性召回而不是按时间取前 N 条（Phase 3）。
+ */
+export const MEMORY_READ_MAX_FETCH = 32;
 
 /** 演化原因里不放正文：新旧正文各自在自己的行上，这里只回答「为什么改」。 */
 const SUPERSEDE_REASON = '用户在后续对话中再次提到这件事，按新版本处理';
@@ -41,13 +52,19 @@ function dedupeKey(text: string): string {
 }
 
 async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
-  // 只要最近这几条：listMemories 按 recordedAt 倒序，捞多了全是白解密。
-  const memories = await listMemories(turn.userId, { asOf: new Date(), take: MEMORY_READ_MAX_ITEMS });
-  if (memories.length === 0) return [];
+  const now = new Date();
+  // 捞回来的行按 recordedAt 倒序，多捞的部分是给保留期过滤留的余量。
+  const rows = await listMemories(turn.userId, { asOf: now, take: MEMORY_READ_MAX_FETCH });
+  if (rows.length === 0) return [];
+
+  // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
+  // 读不到保留期就注入，等于把用户设成「30 天」的记忆又端回模型面前，宁可这一轮不带记忆。
+  const policies = await getMemoryPolicies(turn.userId);
+  const memories = rows.filter((memory) => isMemoryUsable(memory, { policies, chatId: turn.chatId, now }));
 
   const lines: string[] = [];
   let size = BLOCK_HEADER.length;
-  for (const memory of memories) {
+  for (const memory of memories.slice(0, MEMORY_READ_MAX_ITEMS)) {
     const range = describeValidRange(memory);
     const suffix = range === '时间未知' ? '' : `（${range}）`;
     const line =
@@ -70,6 +87,8 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
 
   const policies = await getMemoryPolicies(turn.userId);
   // listMemories 只给当前有效版本、按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。
+  // 这里不按保留期过滤：过期只是「不再进对话」，行还在库里，用户改口就该落在那一行上；
+  // 把过期行剔出匹配池只会让同一件事多存一条。
   const existing = await listMemories(turn.userId);
   const known = new Set(existing.map((memory) => dedupeKey(memory.content)));
   const superseded = new Set<string>();

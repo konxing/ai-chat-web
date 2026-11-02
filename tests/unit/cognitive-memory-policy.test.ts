@@ -176,3 +176,33 @@ describe('用户改策略', () => {
     expect(db.writes[0]).toMatchObject({ userId: USER, context: 'GENERAL', requireConfirmation: true });
   });
 });
+
+/**
+ * memory-display.ts 里另写了一份渲染顺序：那个文件必须保持纯（客户端组件要引用它），
+ * 不能运行时 import 这里的 policy.ts，所以同一份枚举顺序存在两处。
+ * 两处一旦漂移，策略界面就会少渲染一个情境，而类型检查看不出来（Record 的键仍然齐全）。
+ */
+describe('展示层的枚举顺序与服务端一致', () => {
+  it('情境、类型、保留期三份表成员齐全（顺序各自服务于自己的用途，不要求一致）', async () => {
+    const { MEMORY_CONTEXTS, MEMORY_RETENTIONS, MEMORY_TYPES } = await policy();
+    const display = await import('@/lib/cognitive/memory-display');
+
+    // 界面上的顺序是「保留期从长到短」，服务端成对表是历史顺序；要防的是漏项，不是次序。
+    expect([...display.CONTEXT_ORDER].sort()).toEqual([...MEMORY_CONTEXTS].sort());
+    expect([...display.TYPE_ORDER].sort()).toEqual([...MEMORY_TYPES].sort());
+    expect([...display.RETENTION_ORDER].sort()).toEqual([...MEMORY_RETENTIONS].sort());
+    expect(display.CONTEXT_ORDER).toHaveLength(MEMORY_CONTEXTS.length);
+    expect(display.RETENTION_ORDER).toEqual(['forever', 'untilSuperseded', 'days90', 'days30', 'sessionOnly']);
+  });
+
+  it('七个情境都有内置默认，收起态摘要不会渲染出 undefined', async () => {
+    const { DEFAULT_MEMORY_POLICIES } = await policy();
+    const display = await import('@/lib/cognitive/memory-display');
+
+    for (const context of display.CONTEXT_ORDER) {
+      const defaults = DEFAULT_MEMORY_POLICIES[context];
+      expect(defaults).toBeTruthy();
+      expect(display.describePolicySummary(defaults)).toBeTruthy();
+    }
+  });
+});
