@@ -21,6 +21,8 @@ vi.mock('@/lib/prisma', () => ({
     chat: {
       findFirst: () => Promise.resolve({ id: 'chat-1' })
     },
+    // 认知开关读不到行＝全关，这两条用例只关心历史窗口，不该被认知层牵动。
+    cognitivePreference: { findUnique: () => Promise.resolve(null) },
     message: {
       findMany: (args: Record<string, any>) => {
         ctx.queries.push(args);

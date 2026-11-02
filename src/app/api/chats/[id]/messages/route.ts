@@ -22,6 +22,8 @@ import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/li
 import { streamChatCompletion } from '@/lib/ai';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
+import { queueCognitiveWrites } from '@/lib/cognitive/manager';
+import { ensureCognitiveModules } from '@/lib/cognitive/memory-module';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -147,6 +149,16 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           imagesSkipped: imageSummary.skipped
         });
         controller.close();
+        // 字节已经全部交给客户端，才做这一轮的记忆抽取和写入：认知模块不在关键路径上，
+        // 慢或者坏都不影响这轮回答。只有成功回答的轮次才写，失败和取消的轮次不留记忆。
+        ensureCognitiveModules();
+        void queueCognitiveWrites({
+          userId: user.id,
+          chatId,
+          content: body.content,
+          sourceMessageId: userMessage.id,
+          occurredAt: userMessage.createdAt
+        });
       } catch (err) {
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';
         const code = err instanceof ApiError ? err.code : 'AI_ERROR';

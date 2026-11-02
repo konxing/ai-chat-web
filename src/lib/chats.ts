@@ -15,6 +15,8 @@ import {
 } from './files';
 import { capabilitiesOf } from './providers';
 import type { AiMessage, ChatContentPart } from './ai';
+import { runCognitiveReads } from './cognitive/manager';
+import { ensureCognitiveModules } from './cognitive/memory-module';
 
 export interface ChatSummary {
   id: string;
@@ -364,6 +366,16 @@ export async function buildConversation(input: {
         '不要声称自己看到了未提供的图片或文件。'
     }
   ];
+
+  // 认知块排在历史之前：它是「关于这位用户的资料」，不是某一轮的发言。
+  // 模块内部有截止时间和错误隔离，认知读不出来就等于这段没加上，对话照旧。
+  ensureCognitiveModules();
+  const cognitive = await runCognitiveReads({
+    userId: input.userId,
+    chatId: chat.id,
+    content: input.currentContent
+  });
+  for (const block of cognitive.blocks) messages.push({ role: 'system', content: block.text });
 
   let charBudget = 40_000;
   for (const message of trimmed) {

@@ -175,6 +175,35 @@ describe('认知模块的写侧', () => {
     expect(emotionWrites).toBe(0);
     expect(JSON.stringify(db.warns)).not.toContain('画像写挂了');
   });
+
+  it('fire-and-forget 的那一层即使整条写链路挂了也不会 reject', async () => {
+    const manager = await loadManager();
+    db.row = { memoryEnabled: true };
+    manager.registerCognitiveModule({
+      key: 'memory',
+      read: () => Promise.resolve([]),
+      // 同步抛错（而不是返回 rejected promise）才能穿过 runCognitiveWrites 的兜底：
+      // settle 那层还没挂上 rejection 处理器，调用方又是 void，没人接住就会变 unhandledRejection。
+      write: () => {
+        throw new Error('写入失败，原文：我今天不太想聊工作');
+      }
+    });
+
+    await expect(manager.queueCognitiveWrites(turnFixture())).resolves.toBeUndefined();
+    expect(db.warns.map((entry) => entry[0])).toContain('cognitive.write_harness_failed');
+    const serialized = JSON.stringify(db.warns);
+    expect(serialized).not.toContain('我今天不太想聊工作');
+  });
+
+  it('写成功时不打失败日志', async () => {
+    const manager = await loadManager();
+    db.row = { memoryEnabled: true };
+    manager.registerCognitiveModule({ key: 'memory', read: () => Promise.resolve([]), write: () => Promise.resolve() });
+
+    await expect(manager.queueCognitiveWrites(turnFixture())).resolves.toBeUndefined();
+
+    expect(db.warns).toEqual([]);
+  });
 });
 
 describe('开关本身读不出来时', () => {

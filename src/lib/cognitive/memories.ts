@@ -13,6 +13,9 @@ import {
 
 export const MEMORY_CONTENT_MAX_CHARS = 1000;
 
+/** 一次最多捞多少行：每行都要 AES-256-GCM 解密，捞回来就是真开销，调用方不能自己放开。 */
+const MEMORY_LIST_MAX_ROWS = 200;
+
 /// 一条记忆能被信任到什么程度（任务书 2.2）。推断和假设永远不等于用户说过或确认过。
 const ORIGIN_PAIRS = [
   ['explicit', 'EXPLICIT'],
@@ -90,6 +93,8 @@ export interface MemoryListFilters {
   asOf?: Date;
   types?: MemoryType[];
   contexts?: MemoryContext[];
+  /** 只要最近这几条：正文是密文，捞多少行就要解密多少行，不能白搬。 */
+  take?: number;
 }
 
 function toStoredEnum<K extends string, V extends string>(
@@ -238,7 +243,11 @@ export async function listMemories(userId: string, filters: MemoryListFilters = 
       { OR: [{ validFrom: null }, { validFrom: { lte: filters.asOf } }] }
     ];
   }
-  const rows = await prisma.memoryItem.findMany({ where, orderBy: { recordedAt: 'desc' }, take: 200 });
+  const rows = await prisma.memoryItem.findMany({
+    where,
+    orderBy: { recordedAt: 'desc' },
+    take: Math.min(filters.take ?? MEMORY_LIST_MAX_ROWS, MEMORY_LIST_MAX_ROWS)
+  });
   return (rows as unknown as MemoryRow[]).map((row) => toDto(row, userId));
 }
 

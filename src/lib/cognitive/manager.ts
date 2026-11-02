@@ -15,6 +15,10 @@ export interface CognitiveTurn {
   userId: string;
   chatId: string;
   content: string;
+  /** 这一轮的用户消息 id：记忆要能追溯到是哪句话产生的（任务书 3.6）。 */
+  sourceMessageId?: string;
+  /** 用户说话的时刻，比「服务器现在处理到这一条」更接近事实发生的时间。 */
+  occurredAt?: Date;
 }
 
 /** 模块产出的一段可注入提示词的文本。label 是给前端分组用的中文名。 */
@@ -74,6 +78,22 @@ export async function runCognitiveReads(turn: CognitiveTurn): Promise<CognitiveR
 
 export interface CognitiveWriteResult {
   failed: CognitiveModuleKey[];
+}
+
+/**
+ * 请求收尾后异步跑写侧的入口，契约只有一条：返回的 promise 永不 reject。
+ * 调用方 `void` 丢在身后，模块再怎么坏也不会变成 unhandledRejection 把进程带下去。
+ * 代价和同一条路由里既有的 fire-and-forget 审计一样——进程在这中间被杀掉，这一轮的记忆就丢了。
+ */
+export function queueCognitiveWrites(turn: CognitiveTurn): Promise<void> {
+  return runCognitiveWrites(turn).then(
+    () => undefined,
+    () => {
+      // 只记 id：模块的报错原文里常常带着记忆正文。
+      log.warn('cognitive.write_harness_failed', { userId: turn.userId, chatId: turn.chatId });
+      return undefined;
+    }
+  );
 }
 
 export async function runCognitiveWrites(turn: CognitiveTurn): Promise<CognitiveWriteResult> {

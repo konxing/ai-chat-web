@@ -18,6 +18,8 @@ const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   creates: [] as Row[],
   reads: [] as unknown[],
+  takes: [] as Array<number | undefined>,
+  tick: 0,
   updates: [] as Array<{ where: unknown; data: unknown }>
 }));
 
@@ -62,12 +64,28 @@ function matching(where: unknown): Row[] {
   return [...db.rows.values()].filter((row) => matches(row, where));
 }
 
+/** 按 orderBy 真的排序：take 截的是「最近几条」，顺序错了截到的就是最早那批。 */
+function ordered(where: unknown, orderBy: unknown, take?: number): Row[] {
+  const direction = String((orderBy as Record<string, string> | undefined)?.recordedAt ?? '');
+  const rows = matching(where);
+  if (direction) {
+    rows.sort((a, b) =>
+      direction === 'desc'
+        ? compare(b.recordedAt, a.recordedAt)
+        : compare(a.recordedAt, b.recordedAt)
+    );
+  }
+  return rows.slice(0, take);
+}
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     memoryItem: {
       create: ({ data }: { data: Row }) => {
-        // recordedAt / updatedAt 由 schema 的 @default(now()) 和 @updatedAt 填，mock 按数据库的样子补齐。
-        const row = { recordedAt: new Date(), updatedAt: new Date(), ...data };
+        // recordedAt / updatedAt 由 schema 的 @default(now()) 和 @updatedAt 填，mock 按数据库的样子补齐；
+        // 单调递增一个毫秒，否则同一批行时间全等，「最近 8 条」这种条件测不出真假。
+        const now = new Date(Date.now() + (db.tick += 1));
+        const row = { recordedAt: now, updatedAt: now, ...data };
         db.creates.push(data);
         db.rows.set(String(data.id), row);
         return Promise.resolve(row);
@@ -76,9 +94,10 @@ vi.mock('@/lib/prisma', () => ({
         db.reads.push(where);
         return Promise.resolve(matching(where)[0] ?? null);
       },
-      findMany: ({ where }: { where: unknown }) => {
+      findMany: ({ where, orderBy, take }: { where: unknown; orderBy?: unknown; take?: number }) => {
         db.reads.push(where);
-        return Promise.resolve(matching(where));
+        db.takes.push(take);
+        return Promise.resolve(ordered(where, orderBy, take));
       },
       updateMany: ({ where, data }: { where: unknown; data: Row }) => {
         db.updates.push({ where, data });
@@ -113,6 +132,8 @@ beforeEach(() => {
   db.rows.clear();
   db.creates = [];
   db.reads = [];
+  db.takes = [];
+  db.tick = 0;
   db.updates = [];
 });
 
@@ -273,6 +294,44 @@ describe('记忆读取与时间有效性', () => {
     expect(await listMemories('user-b')).toEqual([]);
     expect(await listMemories(USER, { contexts: ['emotionalSupport'] })).toEqual([]);
     expect(await listMemories(USER, { types: ['fact'] })).toHaveLength(1);
+  });
+
+  it('take 只捞要的那几行，而且捞的是最近那几条：给 8 条上限就不会把 200 条密文全搬回来解密', async () => {
+    const { createMemory, listMemories } = await memories();
+    for (let index = 0; index < 20; index += 1) {
+      await createMemory(baseInput({ content: `第 ${index} 条记忆。` }));
+    }
+
+    const rows = await listMemories(USER, { take: 8 });
+
+    expect(rows).toHaveLength(8);
+    expect(db.takes[db.takes.length - 1]).toBe(8);
+    expect(rows.map((memory) => memory.content)).toEqual([
+      '第 19 条记忆。',
+      '第 18 条记忆。',
+      '第 17 条记忆。',
+      '第 16 条记忆。',
+      '第 15 条记忆。',
+      '第 14 条记忆。',
+      '第 13 条记忆。',
+      '第 12 条记忆。'
+    ]);
+  });
+
+  it('不给 take 时仍然有 200 行的硬上限', async () => {
+    const { listMemories } = await memories();
+
+    await listMemories(USER);
+
+    expect(db.takes[0]).toBe(200);
+  });
+
+  it('take 超过上限时被压回 200：调用方不能把它当成放开闸门', async () => {
+    const { listMemories } = await memories();
+
+    await listMemories(USER, { take: 50_000 });
+
+    expect(db.takes[0]).toBe(200);
   });
 
   it('有效区间按精度回显，不显示成比实际更精确的日期', async () => {

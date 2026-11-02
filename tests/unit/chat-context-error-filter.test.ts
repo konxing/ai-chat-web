@@ -17,6 +17,8 @@ vi.mock('@/lib/prisma', () => ({
     chat: {
       findFirst: () => Promise.resolve({ id: 'chat-1' })
     },
+    // 认知开关读不到行＝全关，这条用例只关心 ERROR 行的过滤。
+    cognitivePreference: { findUnique: () => Promise.resolve(null) },
     message: {
       findMany: (args: Record<string, any>) => {
         ctx.queries.push(args);
