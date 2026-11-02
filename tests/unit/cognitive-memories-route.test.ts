@@ -18,6 +18,9 @@ const db = vi.hoisted(() => ({
   revisionCalls: [] as Array<{ id: string; userId: string }>,
   reviseCalls: [] as Array<Record<string, unknown>>,
   retractCalls: [] as Array<{ id: string; userId: string; reason: string }>,
+  purgeCalls: [] as Array<{ id: string; userId: string }>,
+  purgeChatCalls: [] as Array<{ chatId: string; userId: string }>,
+  purgeAllCalls: [] as string[],
   titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
@@ -95,6 +98,38 @@ vi.mock('@/lib/cognitive/memories', () => ({
   }
 }));
 
+vi.mock('@/lib/cognitive/forgetting', () => ({
+  purgeMemory: (id: string, userId: string) => {
+    db.purgeCalls.push({ id, userId });
+    const key = `${userId}|${id}`;
+    if (!db.stored.has(key)) return Promise.resolve(0);
+    db.stored.delete(key);
+    return Promise.resolve(1);
+  },
+  purgeMemoriesByChat: (chatId: string, userId: string) => {
+    db.purgeChatCalls.push({ chatId, userId });
+    let count = 0;
+    for (const [key, row] of [...db.stored]) {
+      if (row.userId === userId && row.chatId === chatId) {
+        db.stored.delete(key);
+        count += 1;
+      }
+    }
+    return Promise.resolve(count);
+  },
+  purgeAllMemories: (userId: string) => {
+    db.purgeAllCalls.push(userId);
+    let count = 0;
+    for (const [key, row] of [...db.stored]) {
+      if (row.userId === userId) {
+        db.stored.delete(key);
+        count += 1;
+      }
+    }
+    return Promise.resolve(count);
+  }
+}));
+
 vi.mock('@/lib/chats', () => ({
   listChatTitles: (userId: string, chatIds: Array<string | null>) => {
     db.titleCalls.push({ userId, chatIds });
@@ -134,7 +169,7 @@ function store(row: Record<string, unknown>) {
 }
 
 /** path 是 URL 上 BASE 后面的那截：'' 列表、'/mem-1' 单条、'/mem-1/retract' 撤回。 */
-async function call(method: 'GET' | 'PATCH' | 'POST', path = '', body?: unknown, query = '') {
+async function call(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path = '', body?: unknown, query = '') {
   const request = new Request(`${BASE}${path}${query}`, {
     method,
     headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:3000' },
@@ -162,6 +197,9 @@ beforeEach(() => {
   db.revisionCalls = [];
   db.reviseCalls = [];
   db.retractCalls = [];
+  db.purgeCalls = [];
+  db.purgeChatCalls = [];
+  db.purgeAllCalls = [];
   db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
@@ -371,5 +409,169 @@ describe('限流：账号被盗后不能无限造版本', () => {
     await call('PATCH', '/mem-1', { content: '我在用 Next.js 15', reason: '改一下', userId: 'user-b' });
 
     expect(db.limiterCalls[0].key).toBe('memory-revise:user-a');
+  });
+});
+
+/**
+ * ④a 永久删除（任务书 7.2 DELETE、7.3 用户遗忘功能、7.4 门槛 2）。
+ *
+ * 服务层的删行与摘边在 cognitive-forgetting.test.ts 里测过，这里钉的是路由这一层：
+ * 身份只能来自 session、限流挡在删之前、审计答得出「删了什么 kinds、几条」却一个字的正文都没有。
+ */
+describe('永久删除一条', () => {
+  it('删掉自己的记忆，返回条数并写审计', async () => {
+    store(memoryDto());
+
+    const { response, payload } = await call('DELETE', '/mem-1');
+
+    expect(response.status).toBe(200);
+    expect(payload.data).toEqual({ purged: 1 });
+    expect(db.purgeCalls).toEqual([{ id: 'mem-1', userId: 'user-a' }]);
+    expect(db.stored.size).toBe(0);
+    expect(db.audits).toHaveLength(1);
+    expect(db.audits[0]).toMatchObject({
+      action: 'user.memory_purge',
+      targetType: 'memory',
+      targetId: 'mem-1',
+      actorId: 'user-a'
+    });
+  });
+
+  it('审计里记下类型、情境和版本，但没有任何正文', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+
+    await call('DELETE', '/mem-1');
+
+    const written = JSON.stringify(db.audits[0]);
+    expect(written).not.toContain('我在用 Prisma');
+    expect(db.audits[0].before).toMatchObject({ type: 'project', context: 'technicalProject', version: 1 });
+  });
+
+  it('别人的记忆删不动：404，且一次删除都不发', async () => {
+    store(memoryDto({ userId: 'user-b' }));
+
+    const { response, payload } = await call('DELETE', '/mem-1');
+
+    expect(response.status).toBe(404);
+    expect(payload.error.code).toBe('MEMORY_NOT_FOUND');
+    expect(db.purgeCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
+  });
+
+  it('未登录时 401，不查也不删', async () => {
+    db.authThrows = true;
+    store(memoryDto());
+
+    const { response } = await call('DELETE', '/mem-1');
+
+    expect(response.status).toBe(401);
+    expect(db.getCalls).toEqual([]);
+    expect(db.purgeCalls).toEqual([]);
+  });
+
+  it('触发限流时 429，删除和审计都不发', async () => {
+    store(memoryDto());
+    db.limiterOk = false;
+
+    const { response, payload } = await call('DELETE', '/mem-1');
+
+    expect(response.status).toBe(429);
+    expect(payload.error.code).toBe('RATE_LIMITED');
+    expect(db.purgeCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
+  });
+
+  it('限流桶按 session 用户分，且和改口、撤回各自独立', async () => {
+    store(memoryDto());
+
+    await call('DELETE', '/mem-1');
+
+    expect(db.limiterCalls[0].key).toBe('memory-purge:user-a');
+  });
+});
+
+describe('批量永久删除', () => {
+  beforeEach(() => {
+    store(memoryDto({ id: 'mem-1', chatId: 'chat-1' }));
+    store(memoryDto({ id: 'mem-2', chatId: 'chat-1' }));
+    store(memoryDto({ id: 'mem-3', chatId: 'chat-2' }));
+    store(memoryDto({ id: 'mem-4', userId: 'user-b', chatId: 'chat-1' }));
+  });
+
+  it('scope=all 清空自己的全部记忆，别人的不动', async () => {
+    const { response, payload } = await call('DELETE', '', undefined, '?scope=all');
+
+    expect(response.status).toBe(200);
+    expect(payload.data).toEqual({ purged: 3 });
+    expect(db.purgeAllCalls).toEqual(['user-a']);
+    expect([...db.stored.keys()]).toEqual(['user-b|mem-4']);
+    expect(db.audits[0]).toMatchObject({ action: 'user.memory_purge_all', targetId: 'user-a' });
+  });
+
+  it('scope=chat 只删那一次对话产生的，对话本身不碰', async () => {
+    const { payload } = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-1');
+
+    expect(payload.data).toEqual({ purged: 2 });
+    expect(db.purgeChatCalls).toEqual([{ chatId: 'chat-1', userId: 'user-a' }]);
+    expect([...db.stored.keys()].sort()).toEqual(['user-a|mem-3', 'user-b|mem-4']);
+    expect(db.audits[0]).toMatchObject({ action: 'user.memory_purge_by_chat', targetType: 'chat', targetId: 'chat-1' });
+  });
+
+  it('scope=chat 缺 chatId 时 400，一次删除都不发', async () => {
+    const { response, payload } = await call('DELETE', '', undefined, '?scope=chat');
+
+    expect(response.status).toBe(400);
+    expect(payload.error.code).toBe('VALIDATION_ERROR');
+    expect(db.purgeChatCalls).toEqual([]);
+    expect(db.purgeAllCalls).toEqual([]);
+  });
+
+  it('scope 取值非法时 400', async () => {
+    const { response } = await call('DELETE', '', undefined, '?scope=everything');
+
+    expect(response.status).toBe(400);
+    expect(db.purgeAllCalls).toEqual([]);
+  });
+
+  it('chatId 从查询串来，但只能删到自己的行：塞别人的会话 id 也只按 session 用户过滤', async () => {
+    const { payload } = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-9');
+
+    expect(payload.data).toEqual({ purged: 0 });
+    expect(db.purgeChatCalls).toEqual([{ chatId: 'chat-9', userId: 'user-a' }]);
+    expect(db.stored.size).toBe(4);
+  });
+
+  it('清空和按会话各自一个限流桶，触发限流时一条都不删', async () => {
+    db.limiterOk = false;
+
+    const all = await call('DELETE', '', undefined, '?scope=all');
+    const byChat = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-1');
+
+    expect(all.response.status).toBe(429);
+    expect(byChat.response.status).toBe(429);
+    expect(db.purgeAllCalls).toEqual([]);
+    expect(db.purgeChatCalls).toEqual([]);
+    expect(db.stored.size).toBe(4);
+  });
+
+  it('两个批量口子的限流桶互不干扰', async () => {
+    await call('DELETE', '', undefined, '?scope=all');
+    db.purgeAllCalls = [];
+    await call('DELETE', '', undefined, '?scope=chat&chatId=chat-2');
+
+    expect(db.limiterCalls.map((entry) => entry.key)).toEqual([
+      'memory-purge-all:user-a',
+      'memory-purge-chat:user-a'
+    ]);
+  });
+
+  it('未登录时 401，不删也不写审计', async () => {
+    db.authThrows = true;
+
+    const { response } = await call('DELETE', '', undefined, '?scope=all');
+
+    expect(response.status).toBe(401);
+    expect(db.purgeAllCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
   });
 });

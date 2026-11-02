@@ -4,12 +4,17 @@ import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import { memoryReviseSchema } from '@/lib/validation';
 import { getMemory, listMemoryRevisions, reviseMemory, type MemoryDto } from '@/lib/cognitive/memories';
+import { purgeMemory } from '@/lib/cognitive/forgetting';
 
 export const runtime = 'nodejs';
 
 /** 一小时 30 次：账号被盗后不能无限造版本，每个版本都要加密一次并留一条边。 */
 const REVISE_LIMIT = 30;
 const REVISE_WINDOW_MS = 60 * 60 * 1000;
+
+/** 一小时 20 次：永久删除不可逆，但用户逐条清理一屏记忆是正常行为，不能卡得太死。 */
+const PURGE_LIMIT = 20;
+const PURGE_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * 单条记忆和它的演化边（任务书 2.3 的「保留历史版本」要能被用户自己看到）。
@@ -64,6 +69,40 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       userAgent: getUserAgent(req)
     });
     return { memory };
+  });
+}
+
+/**
+ * 永久删除一条记忆（任务书 7.2 的 DELETE、7.3 的「忘记某条记忆」）。
+ * 和撤回不是一回事：行和正文一起消失，不可恢复。原对话记录不动——
+ * 7.3 明确要求区分「忘记记忆」和「删除聊天」，用户只说了前者时不许碰后者。
+ */
+export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  return api(async () => {
+    const { user } = await requireUser(req);
+    const limit = rateLimit(`memory-purge:${user.id}`, PURGE_LIMIT, PURGE_WINDOW_MS);
+    if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `删除过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
+    const { id } = await ctx.params;
+
+    // 先查一次不是为了校验归属（删除语句自带 userId 条件），是为了审计能答出
+    // 「删掉的是哪一类、第几版」。代价是多解密一行正文，换一条查得懂的审计。
+    const before = await getMemory(id, user.id);
+    if (!before) throw new ApiError(404, 'MEMORY_NOT_FOUND', '记忆不存在');
+    const purged = await purgeMemory(id, user.id);
+
+    await writeAudit({
+      actorId: user.id,
+      actorLabel: user.username,
+      action: 'user.memory_purge',
+      targetType: 'memory',
+      targetId: id,
+      before: auditTrace(before),
+      // 只记条数：审计里不能出现正文（任务书 5.5）。
+      after: { purged },
+      ip: getRequestIp(req),
+      userAgent: getUserAgent(req)
+    });
+    return { purged };
   });
 }
 

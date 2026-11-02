@@ -168,3 +168,16 @@ export const memoryReviseSchema = z.object({
 export const memoryRetractSchema = z.object({
   reason: z.string().trim().min(1, '撤回记忆要写明理由').max(500, '理由不能超过 500 字')
 });
+
+/**
+ * 批量永久删除的范围。用可辨识联合而不是「chatId 可选」：
+ * scope=chat 时 chatId 必须存在，这条约束由类型系统兜住，路由里就不用再补一次判断。
+ * 两个值都来自查询串，所以 chatId 只当作不透明字符串收——归属由服务层的 userId 条件决定。
+ */
+export const memoryPurgeSchema = z.discriminatedUnion('scope', [
+  z.object({ scope: z.literal('all'), chatId: z.null().optional() }),
+  z.object({
+    scope: z.literal('chat'),
+    chatId: z.string().trim().min(1, '按会话删除必须指明是哪一次对话').max(64, '会话 id 不合法')
+  })
+]);

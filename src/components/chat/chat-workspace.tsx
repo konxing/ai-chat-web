@@ -1241,7 +1241,7 @@ export function ChatWorkspace({
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         title="删除这段对话？"
-        description="对话内容与其附件将被永久删除，此操作无法撤销。"
+        description="对话内容与其附件将被永久删除，此操作无法撤销。这段对话产生的长期记忆也会一并删除。"
         width="420px"
         footer={
           <>

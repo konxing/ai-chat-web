@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Brain, History, Pencil, X } from 'lucide-react';
+import { Brain, History, Pencil, Trash2, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
-import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
+import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
 import {
   CONTEXT_LABELS,
   ORIGIN_LABELS,
@@ -15,14 +15,15 @@ import {
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
 
 /**
- * 记忆管理那一屏：看到系统记住了什么，并逐条更正、撤回。
+ * 记忆管理那一屏：看到系统记住了什么，并逐条更正、撤回、永久删除。
  *
  * 三条约束决定了这里的形状：
- * 一、一屏只有一个展开区。列表行上三个按钮——更正 / 撤回 / 版本——各自打开自己的表单，
+ * 一、一屏只有一个展开区。列表行上四个按钮——更正 / 撤回 / 版本 / 永久删除——各自打开自己的表单，
  *    同时只开一个，否则页面上会堆出好几套输入框，谁也说不清哪套是当前要提交的。
  * 二、版本链点一次往前取一版。服务端的边只回答「这一版是怎么来的」，
  *    所以全链要一格一格走，不该在这里假设链很短就一次拉完。
- * 三、撤回必须写理由，按钮写「撤回」而不是「删除」——数据没有消失，只是不再被使用。
+ * 三、撤回和永久删除是两个动作，都留着：撤回是可逆的「不再使用」，正文仍在库里；
+ *    永久删除是不可逆的「这条从来没存在过」。界面上必须能看出这两者的区别。
  */
 
 interface ChainEntry {
@@ -30,13 +31,14 @@ interface ChainEntry {
   revisions: MemoryRevisionDto[];
 }
 
-type Panel = { kind: 'edit' | 'retract' | 'history'; id: string } | null;
+type Panel = { kind: 'edit' | 'retract' | 'history' | 'purge'; id: string } | null;
 
 const CONTENT_MAX = 1000;
 const REASON_MAX = 500;
 
 export function MemoryPanel() {
   const { push } = useToast();
+  const { confirm } = useConfirm();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
 
@@ -53,6 +55,8 @@ export function MemoryPanel() {
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState('');
   const [busyId, setBusyId] = useState('');
+  /** 批量删除的忙碌标记：'all' 或 'chat:<id>'，和单条用的 busyId 分开，免得互相禁用。 */
+  const [bulkBusy, setBulkBusy] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -107,7 +111,7 @@ export function MemoryPanel() {
   }
 
   /** 再点同一个按钮收起；点别的按钮就换到那一栏——同时只有一个展开区。 */
-  function reopen(kind: 'edit' | 'retract' | 'history', memory: MemoryDto) {
+  function reopen(kind: 'edit' | 'retract' | 'history' | 'purge', memory: MemoryDto) {
     if (panel && panel.kind === kind && panel.id === memory.id) {
       close();
       return false;
@@ -198,6 +202,76 @@ export function MemoryPanel() {
     }
   }
 
+  /** 永久删除一条。不可逆，所以走的是行内展开区 + 明说不可恢复，不给「一键删掉」的顺手路径。 */
+  async function submitPurge(memory: MemoryDto) {
+    setBusyId(memory.id);
+    try {
+      await apiFetch(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}`, { method: 'DELETE' });
+      push('已永久删除');
+      close();
+      await load();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /**
+   * 忘记某次对话产生的全部记忆，对话本身保留。
+   * 确认框里不报条数：列表只有当前有效的那些，被取代过的和已撤回的行也在删除范围内，
+   * 客户端数出来的数字会偏小——不可逆的操作宁可少说，等删完再报服务端返回的真实条数。
+   */
+  async function purgeByChat(memory: MemoryDto) {
+    const chatId = memory.chatId;
+    if (!chatId || bulkBusy) return;
+    const ok = await confirm({
+      title: '忘记这次对话产生的记忆？',
+      description: '这次对话产生的记忆会一起删掉，不可恢复。对话本身保留。',
+      confirmText: '删除记忆',
+      tone: 'danger'
+    });
+    if (!ok) return;
+    setBulkBusy(`chat:${chatId}`);
+    try {
+      const data = await apiFetch<{ purged: number }>(
+        `/api/account/cognitive/memories?scope=chat&chatId=${encodeURIComponent(chatId)}`,
+        { method: 'DELETE' }
+      );
+      push(`已删除 ${data.purged} 条记忆`);
+      close();
+      await load();
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBulkBusy('');
+    }
+  }
+
+  async function purgeAll() {
+    if (bulkBusy) return;
+    const ok = await confirm({
+      title: '清空全部长期记忆？',
+      description: '删掉系统记住的所有内容，不可恢复。对话记录、附件和账号都不动。',
+      confirmText: '清空',
+      tone: 'danger'
+    });
+    if (!ok) return;
+    setBulkBusy('all');
+    try {
+      const data = await apiFetch<{ purged: number }>('/api/account/cognitive/memories?scope=all', {
+        method: 'DELETE'
+      });
+      push(`已清空 ${data.purged} 条记忆`);
+      close();
+      await load();
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBulkBusy('');
+    }
+  }
+
   return (
     <section className="panel p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -239,6 +313,8 @@ export function MemoryPanel() {
             const isEdit = panel?.kind === 'edit' && panel.id === memory.id;
             const isRetract = panel?.kind === 'retract' && panel.id === memory.id;
             const isHistory = panel?.kind === 'history' && panel.id === memory.id;
+            const isPurge = panel?.kind === 'purge' && panel.id === memory.id;
+            const chatPurgeBusy = bulkBusy === `chat:${memory.chatId}`;
             return (
               <div key={memory.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
                 <div className="flex flex-wrap items-start gap-3">
@@ -280,6 +356,17 @@ export function MemoryPanel() {
                           <span>来自：原对话已删除</span>
                         )
                       ) : null}
+                      {/* 原对话已经不在了就不给这个入口：确认文案说「对话本身保留」，那时会是假话。 */}
+                      {memory.chatId && chats[memory.chatId] ? (
+                        <button
+                          type="button"
+                          className="text-white/35 underline-offset-2 hover:text-red-300 hover:underline disabled:cursor-not-allowed disabled:opacity-45"
+                          disabled={Boolean(bulkBusy)}
+                          onClick={() => void purgeByChat(memory)}
+                        >
+                          {chatPurgeBusy ? '删除中…' : '忘记这次对话产生的记忆'}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -303,6 +390,13 @@ export function MemoryPanel() {
                       onClick={() => void openHistory(memory)}
                     >
                       <History className="h-3.5 w-3.5" /> 版本
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost !px-2.5 !py-1.5 !text-[12px] hover:text-red-300"
+                      onClick={() => reopen('purge', memory)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> 永久删除
                     </button>
                   </div>
                 </div>
@@ -410,11 +504,51 @@ export function MemoryPanel() {
                     })}
                   </div>
                 ) : null}
+
+                {isPurge ? (
+                  <div className="mt-3 space-y-2.5 border-t border-white/[0.06] pt-3">
+                    <p className="text-[12.5px] leading-relaxed text-white/60">
+                      这条记忆和它的历史版本会一起从数据库里删掉，不可恢复。原对话记录不动。
+                    </p>
+                    {formError ? <Alert tone="error">{formError}</Alert> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn-danger !px-3 !py-1.5 !text-[12px]"
+                        disabled={busyId === memory.id}
+                        onClick={() => void submitPurge(memory)}
+                      >
+                        {busyId === memory.id ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />} 确认永久删除
+                      </button>
+                      <button type="button" className="btn-ghost !px-3 !py-1.5 !text-[12px]" onClick={close}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })
         )}
       </div>
+
+      {/* 一条记忆都没有时不放这个按钮：一个「清空全部」的空控件只会让人怀疑它到底删了什么。 */}
+      {memories.length > 0 ? (
+        <div className="mt-6 rounded-xl border border-red-400/20 bg-red-400/[0.04] p-4">
+          <h3 className="text-[13.5px] font-medium text-red-200">清空全部长期记忆</h3>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-white/40">
+            删掉系统记住的所有内容，不可恢复。对话记录、附件和账号都不动。
+          </p>
+          <button
+            type="button"
+            className="btn-danger !mt-3 !px-3 !py-1.5 !text-[12px]"
+            disabled={Boolean(bulkBusy)}
+            onClick={() => void purgeAll()}
+          >
+            {bulkBusy === 'all' ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />} 清空全部长期记忆
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
