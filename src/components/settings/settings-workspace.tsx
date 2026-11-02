@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   Bot,
+  Brain,
   Check,
   KeyRound,
   Laptop,
@@ -34,6 +35,7 @@ import {
   useToast
 } from '@/components/ui';
 import type { ProviderDto } from '@/lib/chat-types';
+import { MemoryPanel } from './memory-panel';
 
 interface AccountUser {
   id: string;
@@ -64,7 +66,7 @@ const CAPS: Array<{ key: ProviderDto['capabilities'][number]; label: string }> =
   { key: 'audio', label: '语音' }
 ];
 
-type Tab = 'profile' | 'security' | 'models' | 'about';
+type Tab = 'profile' | 'security' | 'models' | 'memory' | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
   return (
@@ -322,6 +324,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['profile', '个人资料', UserRound],
               ['security', '安全与登录', ShieldCheck],
               ['models', '我的模型', Bot],
+              ['memory', '记忆', Brain],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -719,6 +722,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               </div>
             </section>
           ) : null}
+
+          {tab === 'memory' ? <MemoryPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">
