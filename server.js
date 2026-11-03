@@ -7,6 +7,9 @@
  */
 require('dotenv').config();
 
+// Next 选 dev/prod runtime 包只看 NODE_ENV（自定义服务器路径上没人补它），--dev 时钉死，否则终端残留值会让 dev 构建树配上 prod 包而全站 500。
+if (process.argv.includes('--dev')) process.env.NODE_ENV = 'development';
+
 const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
