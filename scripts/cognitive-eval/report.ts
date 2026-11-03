@@ -59,6 +59,48 @@ function goldTable(scores: ProbeScore[]): string {
   return lines.join('\n');
 }
 
+/**
+ * 每个故事一行的分表。铺量时唯一要看的东西：池子从几十行长到一两百行，
+ * 老故事的 Recall 会不会被挤下去——总分看不出来，只有分表能看出来。
+ */
+function perStoryTable(scores: ProbeScore[]): string {
+  const rows = new Map<string, { a2: (number | null)[]; current: (number | null)[]; missed: Set<string>; probes: number }>();
+  for (const score of scores) {
+    let bucket = rows.get(score.story);
+    if (!bucket) {
+      bucket = { a2: [], current: [], missed: new Set<string>(), probes: 0 };
+      rows.set(score.story, bucket);
+    }
+    bucket.probes += 1;
+    if (score.arm === 'A2') bucket.a2.push(score.recall);
+    else {
+      bucket.current.push(score.recall);
+      for (const id of score.gold) if (!score.hits.includes(id)) bucket.missed.add(id);
+    }
+  }
+  const lines = [
+    '| 故事 | 主题 | 提问数 | A2 平均命中 | 现状平均命中 | 现状捞不回的条目 |',
+    '|---|---|---|---|---|---|'
+  ];
+  for (const story of STORIES) {
+    const bucket = rows.get(story.id);
+    if (!bucket) continue;
+    lines.push(
+      `| ${story.id} ${story.title} | ${story.themes.join('/')} | ${bucket.probes / 2} | ${avgRecall(bucket.a2)} | ${avgRecall(bucket.current)} | ${
+        [...bucket.missed].sort().join(', ') || '—'
+      } |`
+    );
+  }
+  return lines.join('\n');
+}
+
+/** gold 为空的提问（「这一轮就该什么都不注入」）不参与平均值，否则会把地板当成失败。 */
+function avgRecall(values: (number | null)[]): string {
+  const usable = values.filter((value): value is number => value !== null);
+  if (usable.length === 0) return '—';
+  return `${((usable.reduce((sum, value) => sum + value, 0) / usable.length) * 100).toFixed(1)}%`;
+}
+
 export function renderReport(input: ReportInput): string {
   const { arms, scores } = input;
   const current = arms.current;
@@ -66,7 +108,7 @@ export function renderReport(input: ReportInput): string {
   const currentScores = scores.filter((score) => score.arm === 'current');
   const missed = currentScores.filter((score) => score.recall !== null && score.recall < 1);
 
-  return `# 认知评测报告（切片 3b：8 个故事）
+  return `# 认知评测报告（${STORIES.length} 个故事）
 
 标注来源：**Agent 起草，用户复核口径**（任务书 7.1 要的是「人工制定的标准答案」，
 这一版还不是人工标注，复核结论见文末）。所有故事、会话、记忆全部虚构，
@@ -114,6 +156,13 @@ ${categoryTable(arms)}
 mirror = 靠 harness 里那份 visibleAt 复刻池子规则，真实来源是 listMemories 的 where 条件
 （另由 tests/unit/cognitive-memories.test.ts 守住，不在这里重复计分）。
 把两类混成一个总分报出去，等于拿复刻的数字冒充线上行为。
+
+## 每个故事一行的对照
+
+${perStoryTable(scores)}
+
+铺量时要盯的是「现状平均命中」这一列：新故事进了池子以后，老故事的数字往下走，
+说明 8 个名额在更大的池子里不够分，那是要动参数或者要上向量的信号，不是故事写得不好。
 
 ## 这份基线读出来的四件事
 
@@ -167,8 +216,8 @@ harness 测不到，也不假装测得到。
 1. fixture 是 Agent 编的，池子也是编的。它能证明「相对 A2 有收益且不退化」，
    **不能证明线上真实用户的召回质量**。
 2. 标准答案由 Agent 起草，尚未逐条人工复核；复核完成前，上面所有分类别通过率都算「待确认」。
-3. 8 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的第一批，样本量不足以定正式阈值；
-   7.4 末段要求「先运行基线，再根据结果设定正式阈值」，这份报告就是那个基线的第一版。
+3. ${STORIES.length} 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的铺量过程；样本量还不足以定正式阈值，
+   7.4 末段要求「先运行基线，再根据结果设定正式阈值」，这份报告就是那条基线。
 `;
 }
 
