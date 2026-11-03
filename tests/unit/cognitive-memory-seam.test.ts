@@ -98,6 +98,95 @@ describe('selectMemoryCandidates', () => {
   it('空池子返回空数组', () => {
     expect(selectMemoryCandidates({ ...base, query: 'Prisma', rows: [] })).toEqual([]);
   });
+
+  describe('带上查询向量时走混合排序', () => {
+    /** 三行：gold 和查询「汇报」一个 token 都不重合，只有向量能把它捞回来。 */
+    function vectorPool() {
+      return [
+        row({ id: 'noise', content: '今天天气不错', recordedAt: isoDaysAgo(1) }),
+        row({ id: 'mid', content: '项目用 Next.js 15', recordedAt: isoDaysAgo(2) }),
+        row({ id: 'gold', content: '周末和现主管聊了转岗的事', recordedAt: isoDaysAgo(3) })
+      ];
+    }
+
+    const vectors = () =>
+      new Map<string, Float32Array>([
+        ['gold', new Float32Array([1, 0.9, 0.1])],
+        ['noise', new Float32Array([0, 0, 1])],
+        ['mid', new Float32Array([0.1, 0, 1])]
+      ]);
+
+    it('零共享 token 的那条靠向量进前 8，位置由余弦那一路决定', () => {
+      const picked = selectMemoryCandidates({
+        ...base,
+        query: '汇报',
+        rows: vectorPool(),
+        queryVector: new Float32Array([0.99, 0.9, 0.05]),
+        vectors: vectors()
+      });
+
+      expect(picked[0]?.id).toBe('gold');
+      // 不给向量时它排在最后：这一条差异只可能来自余弦那一路。
+      expect(selectMemoryCandidates({ ...base, query: '汇报', rows: vectorPool() }).map((m) => m.id)).toEqual([
+        'noise',
+        'mid',
+        'gold'
+      ]);
+    });
+
+    it('不传查询向量就一字不差退回关键词那一路', () => {
+      const rows = vectorPool();
+      const keywordOnly = selectMemoryCandidates({ ...base, query: '天气', rows });
+
+      const picked = selectMemoryCandidates({ ...base, query: '天气', rows, vectors: vectors() });
+
+      expect(picked).toEqual(keywordOnly);
+    });
+
+    it('一行向量都没有时混合等于关键词：向量缺席不许改变顺序', () => {
+      const rows = vectorPool();
+
+      const picked = selectMemoryCandidates({
+        ...base,
+        query: '天气',
+        rows,
+        queryVector: new Float32Array([1, 0, 0]),
+        vectors: new Map()
+      });
+
+      expect(picked).toEqual(selectMemoryCandidates({ ...base, query: '天气', rows }));
+    });
+
+    it('返回的还是传进来的那几行对象，向量不跟着流行进渲染和置信度', () => {
+      const rows = vectorPool();
+      const picked = selectMemoryCandidates({
+        ...base,
+        query: '汇报',
+        rows,
+        queryVector: new Float32Array([0.99, 0.9, 0.05]),
+        vectors: vectors()
+      });
+
+      expect(picked[0]).toBe(rows[2]);
+      expect(Object.keys(picked[0]!)).not.toContain('vector');
+    });
+
+    it('没算过向量的行不丢：只有它进得来，名额照样给它', () => {
+      const rows = vectorPool();
+      const partial = new Map<string, Float32Array>([['gold', new Float32Array([1, 0, 0])]]);
+
+      const picked = selectMemoryCandidates({
+        ...base,
+        query: '汇报',
+        rows,
+        queryVector: new Float32Array([1, 0, 0]),
+        vectors: partial
+      });
+
+      expect(picked).toHaveLength(3);
+      expect(picked.map((memory) => memory.id)).toEqual(['gold', 'noise', 'mid']);
+    });
+  });
 });
 
 describe('renderMemoryBlock', () => {

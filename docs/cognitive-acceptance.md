@@ -581,12 +581,25 @@
 **44 条标准答案一次都没被关键词召回捞回**（core 7 / batch1 17 / batch2 20），
 共同形态是词面零重合的语义改写（「我还钓鱼吗」vs「我不钓了，装备挂在闲鱼了」；
 「我雅思哪一项最弱」vs「写作一直是我的短板」；「为什么不当面试官了」vs「HC 冻结了」）。
-上不上向量 Embedding 这个决定，现在有一手的标注语料可以据以做了——**已经做了，结论是 no-go**：
+上不上向量 Embedding 这个决定，现在有一手的标注语料可以据以做了——**做过一次，结论是 no-go；11-04 被推翻重来**：
 这 44 条逐条分类后 **44/44 都是「与查询零共同词」**（0 条被池子/保留期挡掉，0 条被名额挤掉），
 更便宜的松匹配改法实测能捞回 11 条（Recall@8 0.7274 → 0.7975）但会打破 `update` 守卫（违禁 0 → 1）；
-剩下的靶子只有 33 条，而本机没有 pgvector、没有 embedding 端点、Prisma 6.11 的 `Unsupported("vector")` 列
-对 client 不可见。分类判据、成本实测、未决红线和再评估触发条件全部写在
+当时的拦路石是本机没有 pgvector、没有 embedding 端点、Prisma 6.11 的 `Unsupported("vector")` 列
+对 client 不可见。**Owner 的裁决是「把这个向量做完」并选择自己提供一个 `/v1/embeddings` 端点**，
+所以拦路石按「等一个端点」处理，而不是按「做不到」处理。分类判据、成本实测、未决红线和再评估触发条件仍在
 **[docs/vector-retrieval-go-no-go.md](vector-retrieval-go-no-go.md)**。
+
+11-04 落地的四片（5a–5d，**一个字节也没出过站**，因为端点还没到）：
+`embedding` 进了能力清单（`src/lib/providers.ts:10`），向量以 **AES-256-GCM 密文**存进
+`MemoryItem.embeddingCiphertext`（`bytea`，AAD 绑定 `userId + memoryId + 字段名`；pgvector 已实测排除），
+后台写记忆时顺手补算（`associationEnabled` 闸门，5c），读侧的余弦与 RRF 混合排序已接进那条唯一的纯函数接缝
+`selectMemoryCandidates`（`src/lib/cognitive/memory-module.ts:116`，5d）。
+**5d 之后线上读侧的行为逐字节没变**：`readMemory` 不传查询向量，混合排序就没有入口——
+一次查询 embedding 是每轮对话关键路径上的一个出站请求，付不付它由 5e 的实测增益决定。
+关键词基线在 5d 之后重跑仍是 Recall@8 **0.7274** / MRR **0.5828** / 违禁 **0**（`npm run eval:cognitive`，
+与 `tests/unit/cognitive-eval-snapshot.test.ts` 那份 snapshot 一致）。
+**5e（缺端点，无法验收）**：302 次出站 + 缓存，量出向量臂的 Recall@8 / MRR / 违禁泄漏；
+判词规则写死在这里——增益量不出来、或违禁从 0 变成 ≥1，就报「不值」，模块继续默认关。
 
 ## 下一步（按性价比排序）
 

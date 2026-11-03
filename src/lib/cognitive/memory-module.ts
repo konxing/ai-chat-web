@@ -15,7 +15,7 @@ import { getMemoryPolicies } from './policy';
 import type { MemoryContext, MemoryPolicy } from './policy';
 import type { Confidence } from './confidence';
 import { getCognitivePreferences } from './preferences';
-import { rankMemories } from './retrieval';
+import { rankMemories, rankMemoriesHybrid, type NumericVector } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import { resolveTemporalFrame } from './temporal';
@@ -94,20 +94,40 @@ export interface MemorySelectionInput {
   policies: Record<MemoryContext, MemoryPolicy>;
   chatId: string;
   now: Date;
+  /**
+   * 查询串的向量。给了才走混合排序，不给就还是纯关键词。
+   * 这里刻意不自己去算：那是一次出站请求，落在每轮对话的关键路径上。
+   */
+  queryVector?: NumericVector | null;
+  /** 记忆 id → 已解密的向量；没算过向量的行不出现在这里，也不会在排序里被丢掉。 */
+  vectors?: ReadonlyMap<string, NumericVector>;
 }
 
 /**
- * 保留期过滤 + 关键词召回 + 条数截断——纯函数，不碰数据库。
+ * 保留期过滤 + 召回 + 条数截断——纯函数，不碰数据库。
  *
  * 拆出来是为了认知评测 Harness：它喂 fixture 行走的是这同一个函数，
  * 测到的就是线上那条路径，而不是一份会各自漂移的复刻。
  * 一个相关项都匹配不上时 rankMemories 会退回 recordedAt 倒序，也就是改造前的行为。
+ * 向量那一路（5d）只在调用方同时给了 queryVector 和该行的向量时才启用；
+ * 线上的 readMemory 两样都不给，所以今天的读侧行为逐字节没变，
+ * 等 5e 用真端点量出增益再决定要不要为它付一次出站。
  */
 export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[] {
   const usable = input.rows.filter((memory) =>
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
-  return rankMemories(input.query, usable, { limit: MEMORY_READ_MAX_ITEMS });
+  if (input.queryVector == null) {
+    return rankMemories(input.query, usable, { limit: MEMORY_READ_MAX_ITEMS });
+  }
+
+  // 排序用的是带了 vector 字段的临时对象，返回的必须还是调用方给的那几行：
+  // 向量流进渲染和置信度那段，等于把 3072 个浮点数挂在每条记忆上一路带着走。
+  const originals = new Map(usable.map((memory) => [memory.id, memory]));
+  const candidates = usable.map((memory) => ({ ...memory, vector: input.vectors?.get(memory.id) ?? null }));
+  const ranked = rankMemoriesHybrid(input.query, input.queryVector, candidates, { limit: MEMORY_READ_MAX_ITEMS });
+
+  return ranked.map((candidate) => originals.get(candidate.id)!);
 }
 
 /**
