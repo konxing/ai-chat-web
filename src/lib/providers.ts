@@ -7,7 +7,7 @@ import { ApiError } from './http';
 import { resolveProviderTarget, safeFetch, joinApiPath } from './ssrf';
 import { log } from './logger';
 
-export const CAPABILITIES = ['text', 'vision', 'files', 'audio'] as const;
+export const CAPABILITIES = ['text', 'vision', 'files', 'audio', 'embedding'] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 export const providerInputSchema = z.object({
@@ -15,7 +15,7 @@ export const providerInputSchema = z.object({
   baseUrl: z.string().trim().min(1).max(512),
   apiKey: z.string().trim().min(1).max(500).optional(),
   modelId: z.string().trim().min(1).max(128),
-  capabilities: z.array(z.enum(CAPABILITIES)).min(1).max(4),
+  capabilities: z.array(z.enum(CAPABILITIES)).min(1).max(5),
   params: z
     .object({
       temperature: z.number().min(0).max(2).optional(),
@@ -246,6 +246,19 @@ export async function resolveDefaultProvider(userId: string): Promise<AiProvider
 
 export function capabilitiesOf(provider: AiProvider): Capability[] {
   return normalizeCapabilities(provider.capabilities);
+}
+
+/**
+ * 从候选里挑第一条勾了这项能力的，挑不到返回 null。
+ *
+ * 只管能力，不管归属和启停——那两样属于 SQL 的 where（谁私有、谁能用、有没有停用），
+ * 把顺序传进来就是挑法，和语音转写那条（`src/app/api/stt/route.ts:41`）同一个口径。
+ */
+export function pickCapableProvider<T extends { capabilities: unknown }>(
+  rows: readonly T[],
+  capability: Capability
+): T | null {
+  return rows.find((row) => normalizeCapabilities(row.capabilities).includes(capability)) ?? null;
 }
 
 export async function testProvider(provider: AiProvider): Promise<{ ok: boolean; detail: string }> {

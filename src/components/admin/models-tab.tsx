@@ -20,7 +20,8 @@ const CAPS: Array<{ key: ProviderDto['capabilities'][number]; label: string }> =
   { key: 'text', label: '文本' },
   { key: 'vision', label: '图像理解' },
   { key: 'files', label: '文件' },
-  { key: 'audio', label: '语音' }
+  { key: 'audio', label: '语音' },
+  { key: 'embedding', label: '语义向量' }
 ];
 
 export function ModelsTab() {

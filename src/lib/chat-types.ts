@@ -49,7 +49,7 @@ export interface ProviderDto {
   name: string;
   baseUrl: string;
   modelId: string;
-  capabilities: Array<'text' | 'vision' | 'files' | 'audio'>;
+  capabilities: Array<'text' | 'vision' | 'files' | 'audio' | 'embedding'>;
   params: { temperature?: number; maxTokens?: number } | null;
   enabled: boolean;
   isDefault: boolean;
