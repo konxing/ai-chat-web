@@ -53,4 +53,14 @@ describe('认知评测基线', () => {
     expect(latency.poolSize).toBe(200);
     expect(latency.medianMicros).toBeLessThan(2000);
   });
+
+  it('稀释那一栏是在两个真池子之间比出来的，不是拿空池子凑的', () => {
+    // 老批次池子按 id 前缀切出来。切错的话 olderPoolSize 会是 0，
+    // 于是「命中数变化 0 个」这种漂亮结论会由一个空对照悄悄成立。
+    const { dilution, visibleSize } = evaluate();
+
+    expect(dilution.olderPoolSize).toBeGreaterThan(0);
+    expect(dilution.olderPoolSize).toBeLessThan(visibleSize);
+    expect(dilution.compared).toBeGreaterThan(0);
+  });
 });

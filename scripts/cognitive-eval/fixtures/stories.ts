@@ -1,19 +1,27 @@
 import type { EvalMemory, EvalProbe, EvalStory } from '../fixture-types';
 import { memory } from './memory-factory';
 import { BATCH1_STORIES } from './stories-batch1';
+import { BATCH2_STORIES } from './stories-batch2';
 
 /**
  * 认知评测的语料入口。第一批 s1–s8 在本文件里，后续批次各占一个文件，在这里拼接。
  *
- * 覆盖面对照任务书点名的主题面：工作（s1 / s8 / s9 / s16）、学习（s2 / s10 / s17）、兴趣（s3 / s11 / s18）、
- * 目标（s4 / s12）、项目（s5 / s13 / s19）、决策（s6 / s14）、情绪交互（s7 / s15）；
- * 五种情形各有至少一次：事实变化 s1·s3·s5·s9·s16、时间冲突 s2·s4·s14·s18·s19、
- * 反例 s1·s4·s6·s9·s11·s12·s17·s18、遗忘 s7·s15、用户纠正 s3·s11·s13·s17。
+ * 覆盖面对照任务书点名的主题面（30 个故事，每面至少 3 个）：
+ * 工作 s1·s8·s9·s16·s20·s24·s27、学习 s2·s10·s17·s21·s28、兴趣 s3·s11·s18·s22·s29、
+ * 目标 s4·s12·s23、项目 s5·s13·s19·s24·s28·s30、决策 s6·s14·s25、情绪交互 s7·s15·s26。
+ * 五种情形按提问的 category 逐条落在故事上：
+ * 事实变化 s1·s3·s5·s8·s9·s10·s12·s13·s16·s18·s20·s22—s25·s27—s30、
+ * 时间冲突 s2·s4·s14·s18·s19·s21、反例 s1·s4·s6·s9·s11·s14·s17·s18·s22·s24·s25·s30、
+ * 遗忘 s7·s15·s26、用户明确改口 s3·s11·s13·s17·s21·s23·s29。
  *
  * 每个故事的会话都是 6 个（7.1 要求 6~10 个）。day 是相对评测时刻的天数，负数是过去。
  *
- * 两条能被机器查的规矩写在 harness.ts 的 selfCheck 里：
- * 记忆正文必须逐字出自它声明的那个会话；supports 不许超过这句话出现过的会话数。
+ * 能被机器查的规矩都写在 harness.ts 的 selfCheck 里（会话数、正文逐字出自声明会话、
+ * supports 不许超过这句话出现过的会话数、敏感情境的标准答案不许跨会话要求……）。
+ * 铺 s20–s30 时新增两条：标准答案不许和禁项撞在同一条上；每条标准答案必须真的可达——
+ * 既在候选池里，又在这一问所在会话的保留期内。
+ * 后者是这一批踩出来的：有一条禁项写着「已经被新说法覆盖」，可 fixture 里并没给它盖版本链，
+ * 于是它既进池子又被召回，报出来像读侧漏了一个违禁项，实际是标注自己没写完。
  * 剩下查不了的（contradicts 凭什么、gold 凭哪条判）一律要求写 note／why，
  * 复核的时候是逐条摊开看的，不是看一个总分。
  */
@@ -571,7 +579,7 @@ const CORE_STORIES: EvalStory[] = [
 ];
 
 /** 全部批次拼成一个池子：harness、报告和 snapshot 都只认这一个入口。 */
-export const STORIES: EvalStory[] = [...CORE_STORIES, ...BATCH1_STORIES];
+export const STORIES: EvalStory[] = [...CORE_STORIES, ...BATCH1_STORIES, ...BATCH2_STORIES];
 
 /** 一个用户的全部记忆行——线上 listMemories 给的就是「这个人的所有」，不是按故事切开的。 */
 export function allMemories(): EvalMemory[] {

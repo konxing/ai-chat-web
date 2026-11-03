@@ -1,3 +1,4 @@
+import { MEMORY_RETRIEVAL_POOL } from '@/lib/cognitive/memory-module';
 import { STORIES, allMemories } from './fixtures/stories';
 import type { ProbeScore, ArmSummary } from './metrics';
 
@@ -13,6 +14,8 @@ export interface ReportInput {
   visibleSize: number;
   /** 语料池只有百来行，线上一条查询面对的是整个候选池；两个量级要分开报。 */
   poolSize: number;
+  /** 老批次同一批提问，在「只有老故事行的池子」和「全量池子」上各跑一遍的差值。 */
+  dilution: { previousThrough: number; olderPoolSize: number; compared: number; changed: number; worse: number };
 }
 
 function percent(value: number): string {
@@ -101,6 +104,48 @@ function avgRecall(values: (number | null)[]): string {
   return `${((usable.reduce((sum, value) => sum + value, 0) / usable.length) * 100).toFixed(1)}%`;
 }
 
+/**
+ * 铺量的三批各算一列小计。分表按故事看太细、总分又会被新故事稀释，
+ * 「这一批到底比上一批难在哪」只有按批算才答得出来。
+ */
+export const BATCHES: Array<{ label: string; through: number }> = [
+  { label: 's1–s8（3b 定口径）', through: 8 },
+  { label: 's9–s19（3c 第一批）', through: 19 },
+  { label: 's20–s30（3c 第二批）', through: 30 }
+];
+
+/** 故事号和行号都混在同一个 id 里（'s12' 是故事、's12-m3' 是行），只认开头那一段数字。 */
+export function storyNumber(id: string): number {
+  return Number(/^s(\d+)/.exec(id)?.[1] ?? NaN);
+}
+
+function batchTable(scores: ProbeScore[]): string {
+  const current = scores.filter((score) => score.arm === 'current');
+  const lines = [
+    '| 批次 | 故事 | 有标准答案的提问 | 现状平均命中 | 完全落空的提问 | 捞不回的条目 |',
+    '|---|---|---|---|---|---|'
+  ];
+  let previous = 0;
+  for (const batch of BATCHES) {
+    const inBatch = current.filter((score) => {
+      const n = storyNumber(score.story);
+      return n > previous && n <= batch.through;
+    });
+    previous = batch.through;
+    const withGold = inBatch.filter((score) => score.recall !== null);
+    const missedIds = new Set<string>();
+    for (const score of withGold) {
+      for (const id of score.gold) if (!score.hits.includes(id)) missedIds.add(id);
+    }
+    lines.push(
+      `| ${batch.label} | ${new Set(inBatch.map((score) => score.story)).size} | ${withGold.length} | ` +
+        `${avgRecall(withGold.map((score) => score.recall))} | ` +
+        `${withGold.filter((score) => score.hits.length === 0).length} | ${missedIds.size} |`
+    );
+  }
+  return lines.join('\n');
+}
+
 export function renderReport(input: ReportInput): string {
   const { arms, scores } = input;
   const current = arms.current;
@@ -166,6 +211,16 @@ ${perStoryTable(scores)}
 铺量时要盯的是「现状平均命中」这一列：新故事进了池子以后，老故事的数字往下走，
 说明 8 个名额在更大的池子里不够分，那是要动参数或者要上向量的信号，不是故事写得不好。
 
+## 按铺量的三批各算一列
+
+${batchTable(scores)}
+
+这张表下面是「老故事被新故事挤出名额没有」的实测，不是对着两版报告目测：
+把 s1–s${input.dilution.previousThrough} 的 ${input.dilution.compared} 个有标准答案的提问，
+在只含这 ${input.dilution.olderPoolSize} 行的老池子和 ${input.visibleSize} 行的全量池子上各跑一遍现状臂，
+命中数发生变化的 ${input.dilution.changed} 个，其中变差 ${input.dilution.worse} 个。
+总分从上一批到这一批掉的量全部来自新批次更难，而不是名额被抢。
+
 ## 这份基线读出来的五件事
 
 1. **每轮平均注入 ${current.avgInjectedItems} 条（上限 8，最少的一轮也注入了 ${minInjected} 条），
@@ -173,7 +228,8 @@ ${perStoryTable(scores)}
    名额是实实在在被填满的，不是照设计推出来的。补位逻辑（相关项不够就用最近的凑）
    宁可多给也不让这一轮完全没有记忆可用。
    但它意味着 Precision@8 只有 ${current.precisionAt8}，而这是这一版里最便宜的收益点：
-   补位改成「只补分数大于 0 的」就能把噪声砍掉一大截，代价是有些轮会一条都不注入。要不要换，等 30 个故事铺完再定。
+   补位改成「只补分数大于 0 的」就能把噪声砍掉一大截，代价是有些轮会一条都不注入。
+   30 个故事已经铺完，这个取舍现在可以定了——但它不属于这一片，改完要重跑基线再对比。
 2. **有 ${current.unreachableGold.length} 条标准答案关键词一次都没捞回**：${current.unreachableGold.join(', ') || '无'}。
    这一栏是下一次要不要上向量、要不要重开 RELATED_TO 的第一手依据，也是 3c 铺量时唯一值得盯的增长。
 3. **「该标低可信却没标」两臂都是 ${baseline.unmarkedLowConfidence} / ${current.unmarkedLowConfidence}，但这两个 0 不是一回事**：
@@ -226,8 +282,10 @@ harness 测不到，也不假装测得到。
    恰好是家务和琐事（s8 的四条「我把 X 做了一遍」、s3 的重新开始拉琴），于是它们几乎出现在每一个兜底列表里。
    换一个真实用户，垫底的会是他的日常闲聊——「兜底捞到的是最近的琐事」这个结论成立，
    但 ${current.precisionAt8} 这个具体数字不能当成线上期望值。
-4. ${STORIES.length} 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的铺量过程；样本量还不足以定正式阈值，
-   7.4 末段要求「先运行基线，再根据结果设定正式阈值」，这份报告就是那条基线。
+4. 语料已到 ${STORIES.length} 个故事 / ${current.probes} 个提问，规模上满足了 7.1；但此刻可见的 ${input.visibleSize} 行
+   已经贴着线上取数上限 ${MEMORY_RETRIEVAL_POOL} 行——再多铺故事就开始截断，
+   那时候这份基线测的不再是「全部记忆里的召回」，而是「最近 ${MEMORY_RETRIEVAL_POOL} 行里的召回」，这条差异要在解读时说明。
+   样本量够了，但 7.4 末段要的「根据结果设定正式阈值」还没做，这份报告就是设阈值用的那份基线。
 `;
 }
 
@@ -242,6 +300,7 @@ export function renderSummary(input: ReportInput): string {
       probes: input.arms.current.probes
     },
     arms: { A2: input.arms.A2, current: input.arms.current },
+    dilution: input.dilution,
     scores: input.scores
   };
   return `${JSON.stringify(payload, null, 2)}\n`;

@@ -1,56 +1,56 @@
 {
   "schema": 1,
   "counts": {
-    "stories": 19,
-    "sessions": 116,
-    "memories": 139,
-    "visibleMemories": 114,
-    "probes": 72
+    "stories": 30,
+    "sessions": 182,
+    "memories": 231,
+    "visibleMemories": 186,
+    "probes": 116
   },
   "arms": {
     "A2": {
-      "probes": 72,
-      "recallAt8": 0.0606,
-      "precisionAt8": 0.0069,
-      "mrr": 0.0249,
-      "hitRate": 0.0606,
+      "probes": 116,
+      "recallAt8": 0.0374,
+      "precisionAt8": 0.0043,
+      "mrr": 0.0154,
+      "hitRate": 0.0374,
       "forbiddenInjections": 1,
       "byCategory": {
         "update": {
-          "probes": 14,
-          "passed": 1,
-          "accuracy": 0.0714,
+          "probes": 30,
+          "passed": 2,
+          "accuracy": 0.0667,
           "guard": "mirror"
         },
         "conflict": {
-          "probes": 9,
-          "passed": 9,
+          "probes": 13,
+          "passed": 13,
           "accuracy": 1,
           "guard": "seam"
         },
         "recall": {
-          "probes": 40,
-          "passed": 3,
-          "accuracy": 0.075,
+          "probes": 60,
+          "passed": 1,
+          "accuracy": 0.0167,
           "guard": "seam"
         },
         "temporal": {
-          "probes": 5,
-          "passed": 5,
+          "probes": 7,
+          "passed": 7,
           "accuracy": 1,
           "guard": "mirror"
         },
         "forgetting": {
-          "probes": 4,
-          "passed": 3,
-          "accuracy": 0.75,
+          "probes": 6,
+          "passed": 5,
+          "accuracy": 0.8333,
           "guard": "seam"
         }
       },
       "unmarkedLowConfidence": 0,
-      "avgInjectedChars": 297,
+      "avgInjectedChars": 301,
       "avgInjectedItems": 8,
-      "avgNonGoldSlots": 7.9444,
+      "avgNonGoldSlots": 7.9655,
       "unreachableGold": [
         "s1-m3",
         "s1-m4",
@@ -105,8 +105,57 @@
         "s2-m4",
         "s2-m5",
         "s2-m6",
+        "s20-m1",
+        "s20-m2",
+        "s20-m5",
+        "s20-m6",
+        "s20-m7",
+        "s20-m8",
+        "s21-m6",
+        "s21-m7",
+        "s22-m1",
+        "s22-m3",
+        "s22-m4",
+        "s22-m6",
+        "s22-m7",
+        "s23-m5",
+        "s23-m6",
+        "s23-m7",
+        "s23-m8",
+        "s24-m3",
+        "s24-m5",
+        "s24-m6",
+        "s24-m7",
+        "s24-m8",
+        "s25-m1",
+        "s25-m2",
+        "s25-m4",
+        "s25-m7",
+        "s25-m8",
+        "s26-m3",
+        "s26-m4",
+        "s26-m5",
+        "s26-m6",
+        "s27-m3",
+        "s27-m5",
+        "s27-m8",
+        "s27-m9",
+        "s28-m3",
+        "s28-m4",
+        "s28-m5",
+        "s28-m9",
+        "s29-m4",
+        "s29-m6",
+        "s29-m7",
+        "s29-m9",
         "s3-m4",
         "s3-m5",
+        "s30-m1",
+        "s30-m3",
+        "s30-m4",
+        "s30-m5",
+        "s30-m7",
+        "s30-m8",
         "s4-m1",
         "s4-m2",
         "s4-m3",
@@ -119,11 +168,13 @@
         "s6-m1",
         "s6-m2",
         "s6-m3",
+        "s6-m5",
         "s6-m6",
         "s7-m3",
         "s8-m2",
         "s8-m3",
         "s8-m4",
+        "s8-m6",
         "s9-m2",
         "s9-m3",
         "s9-m5",
@@ -132,48 +183,48 @@
       ]
     },
     "current": {
-      "probes": 72,
-      "recallAt8": 0.7727,
-      "precisionAt8": 0.1007,
-      "mrr": 0.6396,
-      "hitRate": 0.8485,
+      "probes": 116,
+      "recallAt8": 0.7274,
+      "precisionAt8": 0.097,
+      "mrr": 0.5828,
+      "hitRate": 0.8037,
       "forbiddenInjections": 0,
       "byCategory": {
         "update": {
-          "probes": 14,
-          "passed": 8,
-          "accuracy": 0.5714,
+          "probes": 30,
+          "passed": 17,
+          "accuracy": 0.5667,
           "guard": "mirror"
         },
         "conflict": {
-          "probes": 9,
-          "passed": 9,
+          "probes": 13,
+          "passed": 13,
           "accuracy": 1,
           "guard": "seam"
         },
         "recall": {
-          "probes": 40,
-          "passed": 30,
-          "accuracy": 0.75,
+          "probes": 60,
+          "passed": 41,
+          "accuracy": 0.6833,
           "guard": "seam"
         },
         "temporal": {
-          "probes": 5,
-          "passed": 5,
+          "probes": 7,
+          "passed": 7,
           "accuracy": 1,
           "guard": "mirror"
         },
         "forgetting": {
-          "probes": 4,
-          "passed": 4,
+          "probes": 6,
+          "passed": 6,
           "accuracy": 1,
           "guard": "seam"
         }
       },
       "unmarkedLowConfidence": 0,
-      "avgInjectedChars": 314.75,
+      "avgInjectedChars": 315.5862,
       "avgInjectedItems": 8,
-      "avgNonGoldSlots": 7.1944,
+      "avgNonGoldSlots": 7.2241,
       "unreachableGold": [
         "s10-m4",
         "s10-m5",
@@ -192,6 +243,26 @@
         "s19-m5",
         "s2-m3",
         "s2-m6",
+        "s20-m2",
+        "s20-m7",
+        "s21-m6",
+        "s22-m4",
+        "s22-m6",
+        "s22-m7",
+        "s24-m8",
+        "s25-m1",
+        "s25-m2",
+        "s25-m7",
+        "s26-m6",
+        "s27-m5",
+        "s27-m9",
+        "s28-m3",
+        "s28-m4",
+        "s28-m5",
+        "s29-m6",
+        "s29-m7",
+        "s29-m9",
+        "s30-m3",
         "s4-m1",
         "s4-m3",
         "s4-m4",
@@ -201,6 +272,13 @@
         "s9-m6"
       ]
     }
+  },
+  "dilution": {
+    "previousThrough": 19,
+    "olderPoolSize": 114,
+    "compared": 66,
+    "changed": 0,
+    "worse": 0
   },
   "scores": [
     {
@@ -218,9 +296,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -228,7 +306,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s1-p1",
@@ -243,11 +321,11 @@
         "s1-m3",
         "s1-m6",
         "s1-m1",
+        "s23-m9",
         "s10-m2",
         "s17-m7",
         "s6-m2",
-        "s10-m4",
-        "s1-m5"
+        "s10-m4"
       ],
       "hits": [
         "s1-m3"
@@ -257,7 +335,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 402
+      "injectedChars": 382
     },
     {
       "id": "s1-p2",
@@ -274,9 +352,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -284,7 +362,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s1-p2",
@@ -330,9 +408,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -340,7 +418,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s1-p3",
@@ -356,10 +434,10 @@
         "s1-m3",
         "s1-m1",
         "s10-m6",
+        "s24-m1",
         "s1-m5",
         "s3-m3",
-        "s7-m6",
-        "s8-m7"
+        "s7-m6"
       ],
       "hits": [
         "s1-m6"
@@ -369,7 +447,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 368
+      "injectedChars": 374
     },
     {
       "id": "s1-p4",
@@ -386,9 +464,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -396,7 +474,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s1-p4",
@@ -409,13 +487,13 @@
       ],
       "injected": [
         "s1-m4",
+        "s24-m7",
+        "s24-m4",
+        "s24-m1",
         "s3-m3",
         "s7-m6",
         "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s8-m8"
       ],
       "hits": [
         "s1-m4"
@@ -425,7 +503,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 308
+      "injectedChars": 346
     },
     {
       "id": "s2-p1",
@@ -443,9 +521,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -453,7 +531,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s2-p1",
@@ -469,11 +547,11 @@
         "s3-m3",
         "s10-m8",
         "s15-m7",
+        "s23-m9",
         "s17-m1",
         "s2-m1",
         "s18-m1",
-        "s10-m1",
-        "s7-m6"
+        "s10-m1"
       ],
       "hits": [
         "s2-m1"
@@ -481,9 +559,9 @@
       "violations": [],
       "recall": 0.5,
       "precision": 0.125,
-      "reciprocalRank": 0.2,
+      "reciprocalRank": 0.16666666666666666,
       "missingLowMark": [],
-      "injectedChars": 329
+      "injectedChars": 325
     },
     {
       "id": "s2-p2",
@@ -498,9 +576,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -508,7 +586,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s2-p2",
@@ -522,10 +600,10 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6",
-        "s18-m8"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8",
+        "s28-m9"
       ],
       "hits": [],
       "violations": [],
@@ -533,7 +611,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 296
     },
     {
       "id": "s2-p3",
@@ -551,9 +629,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -561,7 +639,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s2-p3",
@@ -575,13 +653,13 @@
       ],
       "injected": [
         "s2-m4",
-        "s11-m2",
-        "s17-m6",
-        "s11-m7",
+        "s21-m8",
+        "s21-m6",
         "s10-m6",
         "s4-m4",
-        "s3-m3",
-        "s7-m6"
+        "s21-m2",
+        "s11-m2",
+        "s28-m9"
       ],
       "hits": [
         "s2-m4"
@@ -591,7 +669,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 307
+      "injectedChars": 301
     },
     {
       "id": "s2-p4",
@@ -608,9 +686,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -618,7 +696,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s2-p4",
@@ -631,13 +709,13 @@
       ],
       "injected": [
         "s2-m5",
+        "s21-m1",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s2-m5"
@@ -647,7 +725,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 294
+      "injectedChars": 290
     },
     {
       "id": "s3-p1",
@@ -664,9 +742,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s3-m3"
@@ -676,7 +754,7 @@
       "precision": 0.125,
       "reciprocalRank": 0.5,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s3-p1",
@@ -690,12 +768,12 @@
       "injected": [
         "s3-m4",
         "s17-m7",
+        "s20-m1",
         "s6-m2",
         "s10-m4",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s8-m7"
       ],
       "hits": [
         "s3-m3"
@@ -703,9 +781,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.2,
+      "reciprocalRank": 0.16666666666666666,
       "missingLowMark": [],
-      "injectedChars": 335
+      "injectedChars": 334
     },
     {
       "id": "s3-p2",
@@ -722,9 +800,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -732,7 +810,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s3-p2",
@@ -745,13 +823,13 @@
       ],
       "injected": [
         "s3-m4",
+        "s21-m7",
+        "s21-m8",
+        "s21-m6",
         "s11-m2",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s8-m7"
       ],
       "hits": [
         "s3-m4"
@@ -761,7 +839,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 300
+      "injectedChars": 308
     },
     {
       "id": "s3-p3",
@@ -778,9 +856,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -788,7 +866,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s3-p3",
@@ -800,14 +878,14 @@
         "s3-m5"
       ],
       "injected": [
+        "s27-m3",
         "s16-m3",
+        "s23-m9",
         "s3-m5",
+        "s22-m3",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s8-m7"
       ],
       "hits": [
         "s3-m5"
@@ -815,9 +893,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.5,
+      "reciprocalRank": 0.25,
       "missingLowMark": [],
-      "injectedChars": 300
+      "injectedChars": 326
     },
     {
       "id": "s4-p1",
@@ -835,9 +913,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -845,7 +923,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s4-p1",
@@ -860,12 +938,12 @@
       "injected": [
         "s17-m7",
         "s6-m2",
+        "s20-m1",
+        "s23-m9",
         "s10-m4",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5"
+        "s8-m7"
       ],
       "hits": [],
       "violations": [],
@@ -873,7 +951,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 328
+      "injectedChars": 329
     },
     {
       "id": "s4-p2",
@@ -891,9 +969,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -901,7 +979,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s4-p2",
@@ -915,13 +993,13 @@
       ],
       "injected": [
         "s4-m2",
+        "s23-m9",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s4-m2"
@@ -948,9 +1026,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -958,7 +1036,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s4-p3",
@@ -971,13 +1049,13 @@
       ],
       "injected": [
         "s4-m5",
+        "s25-m7",
         "s10-m7",
         "s17-m6",
         "s17-m3",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s8-m7"
       ],
       "hits": [
         "s4-m5"
@@ -1004,9 +1082,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1014,7 +1092,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s5-p1",
@@ -1026,14 +1104,14 @@
         "s5-m6"
       ],
       "injected": [
+        "s23-m9",
         "s5-m1",
         "s5-m2",
         "s17-m7",
         "s6-m2",
         "s10-m4",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7"
+        "s20-m1",
+        "s3-m3"
       ],
       "hits": [],
       "violations": [],
@@ -1041,7 +1119,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 333
+      "injectedChars": 328
     },
     {
       "id": "s5-p2",
@@ -1058,9 +1136,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1068,7 +1146,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s5-p2",
@@ -1080,14 +1158,14 @@
         "s5-m5"
       ],
       "injected": [
+        "s22-m8",
         "s5-m6",
         "s5-m5",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [
         "s5-m5"
@@ -1095,9 +1173,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.5,
+      "reciprocalRank": 0.3333333333333333,
       "missingLowMark": [],
-      "injectedChars": 296
+      "injectedChars": 297
     },
     {
       "id": "s5-p3",
@@ -1114,9 +1192,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1124,7 +1202,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s5-p3",
@@ -1142,8 +1220,8 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s5-m2"
@@ -1153,7 +1231,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 292
     },
     {
       "id": "s5-p4",
@@ -1170,9 +1248,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1180,7 +1258,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s5-p4",
@@ -1193,13 +1271,13 @@
       ],
       "injected": [
         "s5-m3",
+        "s28-m4",
         "s13-m1",
+        "s24-m1",
         "s1-m1",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5"
+        "s8-m7"
       ],
       "hits": [
         "s5-m3"
@@ -1209,7 +1287,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 301
     },
     {
       "id": "s6-p1",
@@ -1227,9 +1305,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1237,7 +1315,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s6-p1",
@@ -1251,13 +1329,13 @@
       ],
       "injected": [
         "s6-m1",
+        "s28-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s6-m1"
@@ -1284,19 +1362,17 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
-      "hits": [
-        "s6-m5"
-      ],
+      "hits": [],
       "violations": [],
-      "recall": 1,
-      "precision": 0.125,
-      "reciprocalRank": 0.16666666666666666,
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s6-p2",
@@ -1314,8 +1390,8 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s6-m5"
@@ -1325,7 +1401,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 291
     },
     {
       "id": "s6-p3",
@@ -1342,9 +1418,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1352,7 +1428,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s6-p3",
@@ -1366,12 +1442,12 @@
       "injected": [
         "s6-m2",
         "s14-m1",
+        "s25-m1",
         "s17-m3",
         "s11-m9",
         "s19-m8",
-        "s10-m7",
-        "s17-m6",
-        "s3-m3"
+        "s25-m7",
+        "s10-m7"
       ],
       "hits": [
         "s6-m2"
@@ -1381,7 +1457,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 327
+      "injectedChars": 331
     },
     {
       "id": "s6-p4",
@@ -1398,9 +1474,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1408,7 +1484,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s6-p4",
@@ -1421,13 +1497,13 @@
       ],
       "injected": [
         "s6-m6",
+        "s21-m8",
+        "s21-m6",
         "s11-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s8-m8"
       ],
       "hits": [
         "s6-m6"
@@ -1437,7 +1513,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 310
+      "injectedChars": 312
     },
     {
       "id": "s7-p1",
@@ -1454,9 +1530,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s7-m7"
@@ -1466,7 +1542,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s7-p1",
@@ -1485,7 +1561,7 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5"
+        "s21-m4"
       ],
       "hits": [
         "s7-m7"
@@ -1495,7 +1571,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 306
+      "injectedChars": 304
     },
     {
       "id": "s7-p2",
@@ -1510,9 +1586,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [
@@ -1522,7 +1598,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s7-p2",
@@ -1564,9 +1640,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1574,7 +1650,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s7-p3",
@@ -1591,9 +1667,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s7-m3"
@@ -1603,7 +1679,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 291
+      "injectedChars": 295
     },
     {
       "id": "s7-p4",
@@ -1618,9 +1694,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1628,7 +1704,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s7-p4",
@@ -1638,14 +1714,14 @@
       "arm": "current",
       "gold": [],
       "injected": [
+        "s23-m8",
         "s3-m6",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1653,7 +1729,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 299
     },
     {
       "id": "s8-p1",
@@ -1670,9 +1746,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1680,7 +1756,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s8-p1",
@@ -1692,14 +1768,14 @@
         "s8-m2"
       ],
       "injected": [
+        "s23-m9",
         "s8-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s8-m2"
@@ -1707,7 +1783,7 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 1,
+      "reciprocalRank": 0.5,
       "missingLowMark": [],
       "injectedChars": 294
     },
@@ -1726,9 +1802,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1736,7 +1812,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s8-p2",
@@ -1749,13 +1825,13 @@
       ],
       "injected": [
         "s8-m3",
+        "s20-m7",
         "s13-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [
         "s8-m3"
@@ -1765,7 +1841,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 307
+      "injectedChars": 317
     },
     {
       "id": "s8-p3",
@@ -1782,19 +1858,17 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
-      "hits": [
-        "s8-m6"
-      ],
+      "hits": [],
       "violations": [],
-      "recall": 1,
-      "precision": 0.125,
-      "reciprocalRank": 0.125,
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s8-p3",
@@ -1812,8 +1886,8 @@
         "s8-m5",
         "s19-m5",
         "s7-m6",
-        "s4-m5",
-        "s8-m2"
+        "s28-m8",
+        "s4-m5"
       ],
       "hits": [
         "s8-m6"
@@ -1823,7 +1897,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 312
+      "injectedChars": 313
     },
     {
       "id": "s8-p4",
@@ -1840,9 +1914,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1850,7 +1924,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s8-p4",
@@ -1863,13 +1937,13 @@
       ],
       "injected": [
         "s8-m4",
+        "s20-m7",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s8-m4"
@@ -1879,7 +1953,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 292
+      "injectedChars": 302
     },
     {
       "id": "s9-p1",
@@ -1897,9 +1971,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -1907,7 +1981,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s9-p1",
@@ -1921,68 +1995,68 @@
       ],
       "injected": [
         "s17-m7",
+        "s20-m1",
+        "s23-m9",
         "s6-m2",
         "s10-m4",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5"
-      ],
-      "hits": [],
-      "violations": [],
-      "recall": 0,
-      "precision": 0,
-      "reciprocalRank": 0,
-      "missingLowMark": [],
-      "injectedChars": 328
-    },
-    {
-      "id": "s9-p2",
-      "story": "s9",
-      "category": "conflict",
-      "guard": "seam",
-      "arm": "A2",
-      "gold": [
-        "s9-m7"
-      ],
-      "injected": [
-        "s7-m7",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
-      ],
-      "hits": [],
-      "violations": [],
-      "recall": 0,
-      "precision": 0,
-      "reciprocalRank": 0,
-      "missingLowMark": [],
-      "injectedChars": 297
-    },
-    {
-      "id": "s9-p2",
-      "story": "s9",
-      "category": "conflict",
-      "guard": "seam",
-      "arm": "current",
-      "gold": [
-        "s9-m7"
-      ],
-      "injected": [
-        "s9-m7",
-        "s16-m6",
-        "s9-m4",
-        "s2-m3",
-        "s9-m3",
-        "s3-m3",
-        "s7-m6",
         "s8-m7"
       ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 329
+    },
+    {
+      "id": "s9-p2",
+      "story": "s9",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s9-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s9-p2",
+      "story": "s9",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s9-m7"
+      ],
+      "injected": [
+        "s9-m7",
+        "s9-m4",
+        "s9-m3",
+        "s16-m6",
+        "s27-m3",
+        "s2-m3",
+        "s3-m3",
+        "s7-m6"
+      ],
       "hits": [
         "s9-m7"
       ],
@@ -1991,7 +2065,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 343
+      "injectedChars": 347
     },
     {
       "id": "s9-p3",
@@ -2008,9 +2082,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2018,7 +2092,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s9-p3",
@@ -2032,12 +2106,12 @@
       "injected": [
         "s9-m3",
         "s9-m4",
+        "s23-m9",
         "s9-m7",
         "s3-m3",
         "s7-m6",
         "s8-m7",
-        "s8-m8",
-        "s6-m5"
+        "s8-m8"
       ],
       "hits": [
         "s9-m3"
@@ -2047,7 +2121,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 343
+      "injectedChars": 345
     },
     {
       "id": "s9-p4",
@@ -2064,9 +2138,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2074,7 +2148,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s9-p4",
@@ -2091,9 +2165,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s9-m2"
@@ -2103,7 +2177,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 290
+      "injectedChars": 294
     },
     {
       "id": "s10-p1",
@@ -2121,9 +2195,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2131,7 +2205,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s10-p1",
@@ -2144,14 +2218,14 @@
         "s10-m1"
       ],
       "injected": [
-        "s11-m2",
         "s10-m6",
         "s10-m1",
+        "s21-m8",
+        "s21-m6",
+        "s11-m2",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5"
+        "s8-m7"
       ],
       "hits": [
         "s10-m1"
@@ -2159,9 +2233,9 @@
       "violations": [],
       "recall": 0.5,
       "precision": 0.125,
-      "reciprocalRank": 0.3333333333333333,
+      "reciprocalRank": 0.5,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 295
     },
     {
       "id": "s10-p2",
@@ -2178,9 +2252,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2188,7 +2262,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s10-p2",
@@ -2206,8 +2280,8 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s10-m6"
@@ -2217,7 +2291,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 288
+      "injectedChars": 287
     },
     {
       "id": "s10-p3",
@@ -2234,9 +2308,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2244,7 +2318,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s10-p3",
@@ -2260,10 +2334,10 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6",
-        "s18-m8"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8",
+        "s28-m9"
       ],
       "hits": [],
       "violations": [],
@@ -2271,7 +2345,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 296
     },
     {
       "id": "s10-p4",
@@ -2289,9 +2363,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2299,7 +2373,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s10-p4",
@@ -2314,12 +2388,12 @@
       "injected": [
         "s10-m2",
         "s12-m2",
+        "s29-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [
         "s10-m2"
@@ -2329,7 +2403,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 300
+      "injectedChars": 298
     },
     {
       "id": "s11-p1",
@@ -2347,9 +2421,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2357,7 +2431,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s11-p1",
@@ -2373,11 +2447,11 @@
         "s3-m3",
         "s10-m8",
         "s15-m7",
+        "s23-m9",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [],
       "violations": [],
@@ -2402,9 +2476,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2412,7 +2486,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s11-p2",
@@ -2425,13 +2499,13 @@
       ],
       "injected": [
         "s11-m2",
+        "s23-m9",
+        "s21-m8",
+        "s21-m6",
         "s3-m3",
         "s7-m6",
         "s8-m7",
-        "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s8-m8"
       ],
       "hits": [
         "s11-m2"
@@ -2441,7 +2515,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 294
+      "injectedChars": 297
     },
     {
       "id": "s11-p3",
@@ -2458,9 +2532,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2468,7 +2542,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s11-p3",
@@ -2481,13 +2555,13 @@
       ],
       "injected": [
         "s17-m7",
+        "s20-m1",
+        "s23-m9",
         "s1-m6",
         "s6-m2",
         "s10-m4",
         "s3-m3",
-        "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s7-m6"
       ],
       "hits": [],
       "violations": [],
@@ -2495,7 +2569,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 357
+      "injectedChars": 358
     },
     {
       "id": "s11-p4",
@@ -2512,9 +2586,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2522,7 +2596,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s11-p4",
@@ -2536,12 +2610,12 @@
       "injected": [
         "s11-m7",
         "s10-m2",
+        "s28-m9",
+        "s25-m7",
         "s17-m6",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8",
-        "s6-m5"
+        "s8-m7"
       ],
       "hits": [
         "s11-m7"
@@ -2551,7 +2625,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 296
+      "injectedChars": 299
     },
     {
       "id": "s12-p1",
@@ -2568,9 +2642,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2578,7 +2652,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s12-p1",
@@ -2592,12 +2666,12 @@
       "injected": [
         "s13-m2",
         "s12-m6",
-        "s11-m2",
+        "s21-m8",
+        "s23-m8",
+        "s21-m6",
         "s12-m4",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s11-m2",
+        "s3-m3"
       ],
       "hits": [
         "s12-m4"
@@ -2605,9 +2679,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.25,
+      "reciprocalRank": 0.16666666666666666,
       "missingLowMark": [],
-      "injectedChars": 330
+      "injectedChars": 334
     },
     {
       "id": "s12-p2",
@@ -2625,9 +2699,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2635,7 +2709,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s12-p2",
@@ -2651,11 +2725,11 @@
         "s12-m5",
         "s12-m6",
         "s12-m2",
+        "s25-m8",
         "s6-m4",
         "s4-m4",
         "s1-m7",
-        "s8-m4",
-        "s3-m3"
+        "s8-m4"
       ],
       "hits": [
         "s12-m2",
@@ -2666,7 +2740,7 @@
       "precision": 0.25,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 329
+      "injectedChars": 328
     },
     {
       "id": "s12-p3",
@@ -2683,9 +2757,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2693,7 +2767,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s12-p3",
@@ -2707,12 +2781,12 @@
       "injected": [
         "s12-m6",
         "s2-m5",
+        "s25-m8",
         "s12-m5",
         "s6-m4",
         "s1-m6",
         "s14-m1",
-        "s18-m4",
-        "s19-m1"
+        "s18-m4"
       ],
       "hits": [
         "s12-m6"
@@ -2722,7 +2796,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 355
+      "injectedChars": 354
     },
     {
       "id": "s13-p1",
@@ -2739,9 +2813,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2749,7 +2823,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s13-p1",
@@ -2762,13 +2836,13 @@
       ],
       "injected": [
         "s13-m1",
-        "s1-m1",
         "s17-m7",
         "s6-m2",
+        "s28-m4",
         "s10-m4",
-        "s14-m8",
-        "s13-m5",
-        "s13-m3"
+        "s24-m1",
+        "s1-m1",
+        "s20-m1"
       ],
       "hits": [],
       "violations": [],
@@ -2776,7 +2850,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 347
+      "injectedChars": 328
     },
     {
       "id": "s13-p2",
@@ -2794,9 +2868,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2804,7 +2878,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s13-p2",
@@ -2818,13 +2892,13 @@
       ],
       "injected": [
         "s10-m2",
+        "s23-m9",
+        "s24-m3",
         "s13-m5",
         "s13-m2",
         "s12-m2",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s29-m2",
+        "s3-m3"
       ],
       "hits": [
         "s13-m5"
@@ -2832,9 +2906,9 @@
       "violations": [],
       "recall": 0.5,
       "precision": 0.125,
-      "reciprocalRank": 0.5,
+      "reciprocalRank": 0.25,
       "missingLowMark": [],
-      "injectedChars": 318
+      "injectedChars": 333
     },
     {
       "id": "s13-p3",
@@ -2851,9 +2925,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2861,7 +2935,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s13-p3",
@@ -2907,9 +2981,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2917,7 +2991,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s13-p4",
@@ -2931,12 +3005,12 @@
       "injected": [
         "s13-m1",
         "s13-m3",
+        "s23-m9",
         "s14-m8",
         "s13-m5",
         "s13-m2",
         "s3-m3",
-        "s7-m6",
-        "s8-m7"
+        "s7-m6"
       ],
       "hits": [
         "s13-m2"
@@ -2944,9 +3018,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.2,
+      "reciprocalRank": 0.16666666666666666,
       "missingLowMark": [],
-      "injectedChars": 327
+      "injectedChars": 329
     },
     {
       "id": "s14-p1",
@@ -2963,9 +3037,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -2973,7 +3047,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s14-p1",
@@ -2987,12 +3061,12 @@
       "injected": [
         "s3-m6",
         "s14-m4",
+        "s30-m2",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [],
       "violations": [],
@@ -3000,7 +3074,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 310
+      "injectedChars": 336
     },
     {
       "id": "s14-p2",
@@ -3017,9 +3091,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3027,7 +3101,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s14-p2",
@@ -3071,9 +3145,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3081,7 +3155,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s14-p3",
@@ -3098,7 +3172,7 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [],
       "violations": [],
@@ -3106,7 +3180,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 295
     },
     {
       "id": "s14-p4",
@@ -3124,9 +3198,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3134,7 +3208,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s14-p4",
@@ -3147,14 +3221,14 @@
         "s14-m5"
       ],
       "injected": [
+        "s23-m9",
         "s14-m4",
         "s3-m3",
         "s11-m8",
         "s15-m7",
         "s14-m5",
         "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s8-m7"
       ],
       "hits": [
         "s14-m5"
@@ -3162,9 +3236,9 @@
       "violations": [],
       "recall": 0.5,
       "precision": 0.125,
-      "reciprocalRank": 0.2,
+      "reciprocalRank": 0.16666666666666666,
       "missingLowMark": [],
-      "injectedChars": 336
+      "injectedChars": 338
     },
     {
       "id": "s15-p1",
@@ -3181,9 +3255,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3191,7 +3265,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s15-p1",
@@ -3235,9 +3309,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3245,7 +3319,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s15-p2",
@@ -3259,10 +3333,10 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6",
-        "s18-m8"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8",
+        "s28-m9"
       ],
       "hits": [],
       "violations": [],
@@ -3270,7 +3344,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 296
     },
     {
       "id": "s15-p3",
@@ -3287,9 +3361,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3297,7 +3371,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s15-p3",
@@ -3312,11 +3386,11 @@
         "s3-m3",
         "s10-m8",
         "s15-m7",
+        "s23-m9",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4"
       ],
       "hits": [
         "s15-m7"
@@ -3343,9 +3417,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3353,7 +3427,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s16-p1",
@@ -3371,8 +3445,8 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s16-m7"
@@ -3382,7 +3456,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 303
+      "injectedChars": 302
     },
     {
       "id": "s16-p2",
@@ -3399,9 +3473,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3409,7 +3483,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s16-p2",
@@ -3421,14 +3495,14 @@
         "s16-m5"
       ],
       "injected": [
+        "s28-m4",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6",
-        "s18-m8"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3436,7 +3510,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 295
     },
     {
       "id": "s16-p3",
@@ -3453,9 +3527,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3463,7 +3537,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s16-p3",
@@ -3480,9 +3554,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s16-m6"
@@ -3492,7 +3566,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 290
+      "injectedChars": 294
     },
     {
       "id": "s16-p4",
@@ -3509,9 +3583,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3519,7 +3593,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s16-p4",
@@ -3537,8 +3611,8 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s16-m3"
@@ -3548,7 +3622,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 303
+      "injectedChars": 302
     },
     {
       "id": "s17-p1",
@@ -3566,9 +3640,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3576,7 +3650,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s17-p1",
@@ -3589,14 +3663,14 @@
         "s17-m6"
       ],
       "injected": [
-        "s17-m7",
         "s10-m4",
+        "s17-m7",
+        "s20-m1",
         "s6-m2",
         "s17-m1",
         "s2-m1",
         "s18-m1",
-        "s10-m1",
-        "s3-m3"
+        "s10-m1"
       ],
       "hits": [
         "s17-m1"
@@ -3604,9 +3678,9 @@
       "violations": [],
       "recall": 0.5,
       "precision": 0.125,
-      "reciprocalRank": 0.25,
+      "reciprocalRank": 0.2,
       "missingLowMark": [],
-      "injectedChars": 353
+      "injectedChars": 349
     },
     {
       "id": "s17-p2",
@@ -3623,9 +3697,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3633,7 +3707,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s17-p2",
@@ -3647,12 +3721,12 @@
       "injected": [
         "s17-m2",
         "s6-m3",
+        "s23-m9",
         "s18-m9",
         "s13-m8",
         "s2-m6",
         "s5-m5",
-        "s10-m5",
-        "s4-m1"
+        "s10-m5"
       ],
       "hits": [
         "s17-m2"
@@ -3662,7 +3736,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 320
+      "injectedChars": 317
     },
     {
       "id": "s17-p3",
@@ -3679,9 +3753,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3689,7 +3763,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s17-p3",
@@ -3704,11 +3778,11 @@
         "s10-m7",
         "s17-m6",
         "s17-m3",
+        "s28-m3",
+        "s24-m8",
         "s9-m8",
-        "s17-m5",
-        "s17-m1",
-        "s3-m3",
-        "s7-m6"
+        "s25-m7",
+        "s17-m5"
       ],
       "hits": [
         "s17-m3"
@@ -3718,7 +3792,7 @@
       "precision": 0.125,
       "reciprocalRank": 0.3333333333333333,
       "missingLowMark": [],
-      "injectedChars": 324
+      "injectedChars": 304
     },
     {
       "id": "s17-p4",
@@ -3735,9 +3809,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3745,7 +3819,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s17-p4",
@@ -3757,14 +3831,14 @@
         "s17-m7"
       ],
       "injected": [
+        "s23-m9",
         "s17-m7",
         "s3-m3",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8"
       ],
       "hits": [
         "s17-m7"
@@ -3772,7 +3846,7 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 1,
+      "reciprocalRank": 0.5,
       "missingLowMark": [],
       "injectedChars": 299
     },
@@ -3792,9 +3866,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3802,7 +3876,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s18-p1",
@@ -3815,14 +3889,14 @@
         "s18-m5"
       ],
       "injected": [
-        "s17-m7",
         "s10-m4",
-        "s13-m1",
-        "s1-m1",
+        "s17-m7",
+        "s20-m1",
+        "s23-m9",
         "s6-m2",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7"
+        "s28-m4",
+        "s13-m1",
+        "s24-m1"
       ],
       "hits": [],
       "violations": [],
@@ -3830,7 +3904,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 330
+      "injectedChars": 329
     },
     {
       "id": "s18-p2",
@@ -3847,9 +3921,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3857,7 +3931,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s18-p2",
@@ -3874,9 +3948,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [
         "s18-m8"
@@ -3886,7 +3960,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 297
     },
     {
       "id": "s18-p3",
@@ -3901,9 +3975,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3911,7 +3985,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s18-p3",
@@ -3925,10 +3999,10 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6",
-        "s18-m8"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8",
+        "s28-m9"
       ],
       "hits": [],
       "violations": [],
@@ -3936,7 +4010,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 293
+      "injectedChars": 296
     },
     {
       "id": "s18-p4",
@@ -3953,9 +4027,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -3963,7 +4037,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s18-p4",
@@ -3976,11 +4050,11 @@
       ],
       "injected": [
         "s17-m3",
+        "s23-m8",
         "s18-m4",
-        "s13-m1",
-        "s1-m1",
         "s11-m9",
         "s19-m8",
+        "s25-m7",
         "s10-m7",
         "s17-m6"
       ],
@@ -3990,9 +4064,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.5,
+      "reciprocalRank": 0.3333333333333333,
       "missingLowMark": [],
-      "injectedChars": 300
+      "injectedChars": 306
     },
     {
       "id": "s19-p1",
@@ -4010,9 +4084,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -4020,7 +4094,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s19-p1",
@@ -4035,12 +4109,12 @@
       "injected": [
         "s19-m7",
         "s19-m1",
-        "s19-m4",
         "s19-m6",
         "s19-m2",
-        "s3-m3",
-        "s7-m6",
-        "s8-m7"
+        "s30-m5",
+        "s19-m4",
+        "s30-m1",
+        "s3-m3"
       ],
       "hits": [
         "s19-m7"
@@ -4050,7 +4124,7 @@
       "precision": 0.125,
       "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 332
+      "injectedChars": 348
     },
     {
       "id": "s19-p2",
@@ -4068,9 +4142,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -4078,7 +4152,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s19-p2",
@@ -4091,14 +4165,14 @@
         "s19-m5"
       ],
       "injected": [
-        "s14-m2",
+        "s23-m9",
         "s19-m8",
         "s19-m5",
+        "s14-m2",
+        "s30-m2",
+        "s20-m8",
         "s17-m7",
-        "s6-m2",
-        "s10-m4",
-        "s3-m3",
-        "s7-m6"
+        "s6-m2"
       ],
       "hits": [
         "s19-m8",
@@ -4109,7 +4183,7 @@
       "precision": 0.25,
       "reciprocalRank": 0.5,
       "missingLowMark": [],
-      "injectedChars": 342
+      "injectedChars": 373
     },
     {
       "id": "s19-p3",
@@ -4126,9 +4200,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -4136,7 +4210,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s19-p3",
@@ -4148,14 +4222,14 @@
         "s19-m2"
       ],
       "injected": [
+        "s23-m9",
         "s19-m7",
         "s19-m6",
         "s19-m1",
         "s19-m2",
         "s3-m3",
         "s7-m6",
-        "s8-m7",
-        "s8-m8"
+        "s8-m7"
       ],
       "hits": [
         "s19-m2"
@@ -4163,9 +4237,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.25,
+      "reciprocalRank": 0.2,
       "missingLowMark": [],
-      "injectedChars": 313
+      "injectedChars": 315
     },
     {
       "id": "s19-p4",
@@ -4182,9 +4256,9 @@
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s6-m5",
-        "s8-m5",
-        "s8-m6"
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
       ],
       "hits": [],
       "violations": [],
@@ -4192,7 +4266,7 @@
       "precision": 0,
       "reciprocalRank": 0,
       "missingLowMark": [],
-      "injectedChars": 297
+      "injectedChars": 301
     },
     {
       "id": "s19-p4",
@@ -4222,6 +4296,2458 @@
       "reciprocalRank": 1,
       "missingLowMark": [],
       "injectedChars": 335
+    },
+    {
+      "id": "s20-p1",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s20-m1",
+        "s20-m2",
+        "s20-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s20-p1",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s20-m1",
+        "s20-m2",
+        "s20-m7"
+      ],
+      "injected": [
+        "s20-m1",
+        "s17-m7",
+        "s6-m2",
+        "s10-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8"
+      ],
+      "hits": [
+        "s20-m1"
+      ],
+      "violations": [],
+      "recall": 0.3333333333333333,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 327
+    },
+    {
+      "id": "s20-p2",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s20-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s20-p2",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s20-m5"
+      ],
+      "injected": [
+        "s20-m5",
+        "s12-m2",
+        "s10-m2",
+        "s29-m2",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8"
+      ],
+      "hits": [
+        "s20-m5"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 303
+    },
+    {
+      "id": "s20-p3",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s20-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s20-p3",
+      "story": "s20",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s20-m6"
+      ],
+      "injected": [
+        "s20-m6",
+        "s21-m8",
+        "s21-m6",
+        "s11-m2",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8"
+      ],
+      "hits": [
+        "s20-m6"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 298
+    },
+    {
+      "id": "s20-p4",
+      "story": "s20",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s20-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s20-p4",
+      "story": "s20",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s20-m8"
+      ],
+      "injected": [
+        "s20-m7",
+        "s20-m8",
+        "s23-m9",
+        "s1-m6",
+        "s2-m5",
+        "s14-m1",
+        "s18-m4",
+        "s30-m1"
+      ],
+      "hits": [
+        "s20-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.5,
+      "missingLowMark": [],
+      "injectedChars": 370
+    },
+    {
+      "id": "s21-p1",
+      "story": "s21",
+      "category": "temporal",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s21-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [
+        "s21-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.16666666666666666,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s21-p1",
+      "story": "s21",
+      "category": "temporal",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s21-m4"
+      ],
+      "injected": [
+        "s23-m9",
+        "s21-m8",
+        "s21-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s21-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.125,
+      "missingLowMark": [],
+      "injectedChars": 287
+    },
+    {
+      "id": "s21-p2",
+      "story": "s21",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s21-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s21-p2",
+      "story": "s21",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s21-m6"
+      ],
+      "injected": [
+        "s21-m8",
+        "s21-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 291
+    },
+    {
+      "id": "s21-p3",
+      "story": "s21",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s21-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s21-p3",
+      "story": "s21",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s21-m7"
+      ],
+      "injected": [
+        "s21-m7",
+        "s22-m7",
+        "s10-m6",
+        "s28-m4",
+        "s20-m6",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7"
+      ],
+      "hits": [
+        "s21-m7"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 306
+    },
+    {
+      "id": "s21-p4",
+      "story": "s21",
+      "category": "temporal",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s21-p4",
+      "story": "s21",
+      "category": "temporal",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [],
+      "injected": [
+        "s23-m9",
+        "s17-m2",
+        "s21-m8",
+        "s21-m6",
+        "s11-m2",
+        "s25-m8",
+        "s12-m5",
+        "s12-m6"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 327
+    },
+    {
+      "id": "s22-p1",
+      "story": "s22",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s22-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s22-p1",
+      "story": "s22",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s22-m4"
+      ],
+      "injected": [
+        "s17-m7",
+        "s20-m1",
+        "s23-m9",
+        "s6-m2",
+        "s10-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 329
+    },
+    {
+      "id": "s22-p2",
+      "story": "s22",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s22-m3",
+        "s22-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s22-p2",
+      "story": "s22",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s22-m3",
+        "s22-m7"
+      ],
+      "injected": [
+        "s22-m3",
+        "s27-m3",
+        "s16-m3",
+        "s24-m4",
+        "s4-m1",
+        "s14-m2",
+        "s25-m2",
+        "s3-m3"
+      ],
+      "hits": [
+        "s22-m3"
+      ],
+      "violations": [],
+      "recall": 0.5,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 354
+    },
+    {
+      "id": "s22-p3",
+      "story": "s22",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s22-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s22-p3",
+      "story": "s22",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s22-m6"
+      ],
+      "injected": [
+        "s22-m8",
+        "s23-m9",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 292
+    },
+    {
+      "id": "s22-p4",
+      "story": "s22",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s22-m1"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s22-p4",
+      "story": "s22",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s22-m1"
+      ],
+      "injected": [
+        "s12-m6",
+        "s2-m4",
+        "s18-m1",
+        "s22-m1",
+        "s27-m3",
+        "s16-m3",
+        "s3-m5",
+        "s3-m3"
+      ],
+      "hits": [
+        "s22-m1"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.25,
+      "missingLowMark": [],
+      "injectedChars": 348
+    },
+    {
+      "id": "s23-p1",
+      "story": "s23",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s23-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s23-p1",
+      "story": "s23",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s23-m8"
+      ],
+      "injected": [
+        "s23-m8",
+        "s13-m2",
+        "s12-m6",
+        "s21-m8",
+        "s21-m6",
+        "s12-m4",
+        "s11-m2",
+        "s3-m3"
+      ],
+      "hits": [
+        "s23-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 334
+    },
+    {
+      "id": "s23-p2",
+      "story": "s23",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s23-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s23-p2",
+      "story": "s23",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s23-m6"
+      ],
+      "injected": [
+        "s23-m6",
+        "s23-m7",
+        "s23-m5",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s23-m6"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 299
+    },
+    {
+      "id": "s23-p3",
+      "story": "s23",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s23-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s23-p3",
+      "story": "s23",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s23-m5"
+      ],
+      "injected": [
+        "s23-m9",
+        "s23-m6",
+        "s23-m7",
+        "s23-m5",
+        "s10-m2",
+        "s12-m2",
+        "s29-m2",
+        "s3-m3"
+      ],
+      "hits": [
+        "s23-m5"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.25,
+      "missingLowMark": [],
+      "injectedChars": 309
+    },
+    {
+      "id": "s23-p4",
+      "story": "s23",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s23-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s23-p4",
+      "story": "s23",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s23-m7"
+      ],
+      "injected": [
+        "s23-m7",
+        "s23-m6",
+        "s23-m5",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s23-m7"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 299
+    },
+    {
+      "id": "s24-p1",
+      "story": "s24",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s24-m7",
+        "s24-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s24-p1",
+      "story": "s24",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s24-m7",
+        "s24-m8"
+      ],
+      "injected": [
+        "s24-m1",
+        "s23-m9",
+        "s24-m6",
+        "s24-m7",
+        "s24-m4",
+        "s17-m7",
+        "s6-m2",
+        "s10-m4"
+      ],
+      "hits": [
+        "s24-m7"
+      ],
+      "violations": [],
+      "recall": 0.5,
+      "precision": 0.125,
+      "reciprocalRank": 0.25,
+      "missingLowMark": [],
+      "injectedChars": 364
+    },
+    {
+      "id": "s24-p2",
+      "story": "s24",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s24-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s24-p2",
+      "story": "s24",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s24-m6"
+      ],
+      "injected": [
+        "s24-m6",
+        "s24-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s24-m6"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 297
+    },
+    {
+      "id": "s24-p3",
+      "story": "s24",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s24-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s24-p3",
+      "story": "s24",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s24-m5"
+      ],
+      "injected": [
+        "s24-m5",
+        "s24-m6",
+        "s24-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s24-m5"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 300
+    },
+    {
+      "id": "s24-p4",
+      "story": "s24",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s24-m3"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s24-p4",
+      "story": "s24",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s24-m3"
+      ],
+      "injected": [
+        "s24-m3",
+        "s25-m6",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s24-m3"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 306
+    },
+    {
+      "id": "s25-p1",
+      "story": "s25",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s25-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s25-p1",
+      "story": "s25",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s25-m7"
+      ],
+      "injected": [
+        "s23-m8",
+        "s3-m6",
+        "s30-m2",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 326
+    },
+    {
+      "id": "s25-p2",
+      "story": "s25",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s25-m2",
+        "s25-m1"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s25-p2",
+      "story": "s25",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s25-m2",
+        "s25-m1"
+      ],
+      "injected": [
+        "s23-m9",
+        "s14-m5",
+        "s25-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 308
+    },
+    {
+      "id": "s25-p3",
+      "story": "s25",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s25-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s25-p3",
+      "story": "s25",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s25-m8"
+      ],
+      "injected": [
+        "s25-m8",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [
+        "s25-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 295
+    },
+    {
+      "id": "s25-p4",
+      "story": "s25",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s25-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s25-p4",
+      "story": "s25",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s25-m4"
+      ],
+      "injected": [
+        "s25-m4",
+        "s5-m5",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s25-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 306
+    },
+    {
+      "id": "s26-p1",
+      "story": "s26",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s26-m3",
+        "s26-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s26-p1",
+      "story": "s26",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s26-m3",
+        "s26-m4"
+      ],
+      "injected": [
+        "s26-m3",
+        "s26-m4",
+        "s23-m9",
+        "s21-m8",
+        "s21-m6",
+        "s11-m2",
+        "s3-m3",
+        "s7-m6"
+      ],
+      "hits": [
+        "s26-m3",
+        "s26-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.25,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 312
+    },
+    {
+      "id": "s26-p2",
+      "story": "s26",
+      "category": "forgetting",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s26-p2",
+      "story": "s26",
+      "category": "forgetting",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [],
+      "injected": [
+        "s3-m3",
+        "s10-m8",
+        "s15-m7",
+        "s23-m9",
+        "s28-m4",
+        "s13-m1",
+        "s24-m1",
+        "s1-m1"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 304
+    },
+    {
+      "id": "s26-p3",
+      "story": "s26",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s26-m5",
+        "s26-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s26-p3",
+      "story": "s26",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s26-m5",
+        "s26-m6"
+      ],
+      "injected": [
+        "s23-m9",
+        "s26-m5",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s26-m5"
+      ],
+      "violations": [],
+      "recall": 0.5,
+      "precision": 0.125,
+      "reciprocalRank": 0.5,
+      "missingLowMark": [],
+      "injectedChars": 295
+    },
+    {
+      "id": "s26-p4",
+      "story": "s26",
+      "category": "forgetting",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s26-p4",
+      "story": "s26",
+      "category": "forgetting",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [],
+      "injected": [
+        "s30-m2",
+        "s21-m8",
+        "s21-m6",
+        "s11-m2",
+        "s24-m4",
+        "s4-m1",
+        "s14-m2",
+        "s22-m3"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": null,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 373
+    },
+    {
+      "id": "s27-p1",
+      "story": "s27",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s27-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s27-p1",
+      "story": "s27",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s27-m8"
+      ],
+      "injected": [
+        "s17-m7",
+        "s20-m1",
+        "s27-m8",
+        "s6-m2",
+        "s10-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7"
+      ],
+      "hits": [
+        "s27-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.3333333333333333,
+      "missingLowMark": [],
+      "injectedChars": 329
+    },
+    {
+      "id": "s27-p2",
+      "story": "s27",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s27-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s27-p2",
+      "story": "s27",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s27-m5"
+      ],
+      "injected": [
+        "s27-m8",
+        "s23-m9",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 291
+    },
+    {
+      "id": "s27-p3",
+      "story": "s27",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s27-m3"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s27-p3",
+      "story": "s27",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s27-m3"
+      ],
+      "injected": [
+        "s27-m3",
+        "s18-m7",
+        "s2-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s27-m3"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 299
+    },
+    {
+      "id": "s27-p4",
+      "story": "s27",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s27-m9"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s27-p4",
+      "story": "s27",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s27-m9"
+      ],
+      "injected": [
+        "s27-m8",
+        "s23-m9",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 291
+    },
+    {
+      "id": "s28-p1",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s28-m4",
+        "s28-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s28-p1",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s28-m4",
+        "s28-m5"
+      ],
+      "injected": [
+        "s3-m3",
+        "s10-m8",
+        "s15-m7",
+        "s23-m9",
+        "s17-m1",
+        "s2-m1",
+        "s18-m1",
+        "s10-m1"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 325
+    },
+    {
+      "id": "s28-p2",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s28-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [
+        "s28-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.125,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s28-p2",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s28-m8"
+      ],
+      "injected": [
+        "s28-m8",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m9"
+      ],
+      "hits": [
+        "s28-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 296
+    },
+    {
+      "id": "s28-p3",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s28-m9"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s28-p3",
+      "story": "s28",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s28-m9"
+      ],
+      "injected": [
+        "s28-m9",
+        "s28-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s28-m9"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 292
+    },
+    {
+      "id": "s28-p4",
+      "story": "s28",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s28-m3",
+        "s28-m5"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s28-p4",
+      "story": "s28",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s28-m3",
+        "s28-m5"
+      ],
+      "injected": [
+        "s23-m9",
+        "s28-m5",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s28-m5"
+      ],
+      "violations": [],
+      "recall": 0.5,
+      "precision": 0.125,
+      "reciprocalRank": 0.5,
+      "missingLowMark": [],
+      "injectedChars": 293
+    },
+    {
+      "id": "s29-p1",
+      "story": "s29",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s29-m9"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s29-p1",
+      "story": "s29",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s29-m9"
+      ],
+      "injected": [
+        "s25-m7",
+        "s10-m7",
+        "s17-m6",
+        "s17-m3",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 299
+    },
+    {
+      "id": "s29-p2",
+      "story": "s29",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s29-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s29-p2",
+      "story": "s29",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s29-m7"
+      ],
+      "injected": [
+        "s10-m2",
+        "s23-m9",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 295
+    },
+    {
+      "id": "s29-p3",
+      "story": "s29",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s29-m6"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s29-p3",
+      "story": "s29",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s29-m6"
+      ],
+      "injected": [
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8",
+        "s28-m9"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 296
+    },
+    {
+      "id": "s29-p4",
+      "story": "s29",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s29-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s29-p4",
+      "story": "s29",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s29-m4"
+      ],
+      "injected": [
+        "s23-m8",
+        "s12-m6",
+        "s29-m4",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s29-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 0.3333333333333333,
+      "missingLowMark": [],
+      "injectedChars": 332
+    },
+    {
+      "id": "s30-p1",
+      "story": "s30",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s30-m1",
+        "s30-m7"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s30-p1",
+      "story": "s30",
+      "category": "conflict",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s30-m1",
+        "s30-m7"
+      ],
+      "injected": [
+        "s30-m7",
+        "s30-m5",
+        "s30-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4"
+      ],
+      "hits": [
+        "s30-m1",
+        "s30-m7"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.25,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 334
+    },
+    {
+      "id": "s30-p2",
+      "story": "s30",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s30-m5",
+        "s30-m3"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s30-p2",
+      "story": "s30",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s30-m5",
+        "s30-m3"
+      ],
+      "injected": [
+        "s30-m7",
+        "s30-m5",
+        "s30-m1",
+        "s24-m6",
+        "s24-m1",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7"
+      ],
+      "hits": [
+        "s30-m5"
+      ],
+      "violations": [],
+      "recall": 0.5,
+      "precision": 0.125,
+      "reciprocalRank": 0.5,
+      "missingLowMark": [],
+      "injectedChars": 346
+    },
+    {
+      "id": "s30-p3",
+      "story": "s30",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "A2",
+      "gold": [
+        "s30-m8"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s30-p3",
+      "story": "s30",
+      "category": "update",
+      "guard": "mirror",
+      "arm": "current",
+      "gold": [
+        "s30-m8"
+      ],
+      "injected": [
+        "s30-m8",
+        "s23-m9",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s30-m8"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 293
+    },
+    {
+      "id": "s30-p4",
+      "story": "s30",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "A2",
+      "gold": [
+        "s30-m4"
+      ],
+      "injected": [
+        "s7-m7",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8",
+        "s28-m8"
+      ],
+      "hits": [],
+      "violations": [],
+      "recall": 0,
+      "precision": 0,
+      "reciprocalRank": 0,
+      "missingLowMark": [],
+      "injectedChars": 301
+    },
+    {
+      "id": "s30-p4",
+      "story": "s30",
+      "category": "recall",
+      "guard": "seam",
+      "arm": "current",
+      "gold": [
+        "s30-m4"
+      ],
+      "injected": [
+        "s30-m4",
+        "s13-m6",
+        "s3-m3",
+        "s7-m6",
+        "s8-m7",
+        "s8-m8",
+        "s21-m4",
+        "s21-m8"
+      ],
+      "hits": [
+        "s30-m4"
+      ],
+      "violations": [],
+      "recall": 1,
+      "precision": 0.125,
+      "reciprocalRank": 1,
+      "missingLowMark": [],
+      "injectedChars": 306
     }
   ]
 }

@@ -2,8 +2,10 @@ import type { MemoryDto } from '@/lib/cognitive/memories';
 import type { ConfidenceSubject, EvidenceCounts } from '@/lib/cognitive/evidence';
 import { assessWithCounts } from '@/lib/cognitive/evidence';
 import { DEFAULT_MEMORY_POLICIES } from '@/lib/cognitive/policy';
+import { isMemoryUsable } from '@/lib/cognitive/retention';
 import {
   MEMORY_READ_MAX_ITEMS,
+  MEMORY_RETRIEVAL_POOL,
   renderMemoryBlock,
   selectMemoryCandidates
 } from '@/lib/cognitive/memory-module';
@@ -64,12 +66,19 @@ function evidenceCounts(row: EvalMemory): EvidenceCounts {
   return { supports: row.supports ?? 1, contradicts: row.contradicts ?? 0 };
 }
 
-/** 候选池：全部故事共用一个池子——线上一个用户面对的就是「他的所有记忆」，不是按主题切开的。 */
+/**
+ * 候选池：全部故事共用一个池子——线上一个用户面对的就是「他的所有记忆」，不是按主题切开的。
+ *
+ * 上限 MEMORY_RETRIEVAL_POOL 是照抄 readMemory 传给 listMemories 的那个 take：
+ * 线上 SQL 只给最近 200 行，池子超过这个数以后，多出来的行根本到不了召回那一步。
+ * 不镜像这一条，铺到 30 个故事时就会测一个线上不存在的池子。
+ */
 export function buildPool(): MemoryDto[] {
   return allMemories()
     .filter((row) => visibleAt(row, EVAL_NOW))
     .map(toDto)
-    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt));
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
+    .slice(0, MEMORY_RETRIEVAL_POOL);
 }
 
 function countMap(rows: readonly EvalMemory[]): Map<string, EvidenceCounts> {
@@ -145,12 +154,16 @@ export interface FixtureProblem {
 
 /**
  * fixture 自查：把「标注得自己说得过去」变成机器断言。
- * 正文逐字出自声明的会话、重复陈述次数不许超过出现次数、反对证据必须写理由——
+ * 正文逐字出自声明的会话、重复陈述次数不许超过出现次数、反对证据必须写理由、
+ * 标准答案必须真的可达——
  * 这几条只要断一条，整份报告的金标准就不可信，所以先跑它再跑指标。
  */
 export function selfCheck(): FixtureProblem[] {
   const problems: FixtureProblem[] = [];
   const seen = new Set<string>();
+  // 标准答案得先真的在候选池里，否则 Recall 测的是「捞不到一条本来就不存在的行」。
+  const pool = new Set(buildPool().map((memory) => memory.id));
+  const rows = new Map(allMemories().map((row) => [row.id, row]));
 
   for (const story of STORIES) {
     if (story.sessions.length < 6 || story.sessions.length > 10) {
@@ -193,6 +206,31 @@ export function selfCheck(): FixtureProblem[] {
       for (const id of probe.expectLowMarked ?? []) {
         if (!probe.gold.includes(id)) {
           problems.push({ where: probe.id, message: `要求标注 ${id} 但它不在标准答案里` });
+        }
+      }
+      for (const id of probe.gold) {
+        if ((probe.forbidden ?? []).includes(id)) {
+          problems.push({ where: probe.id, message: `${id} 既是标准答案又是禁项，这条标注自相矛盾` });
+          continue;
+        }
+        if (!pool.has(id)) {
+          problems.push({
+            where: probe.id,
+            message: `标准答案 ${id} 压根不在候选池里（时效挡掉或超出 ${MEMORY_RETRIEVAL_POOL} 行上限），这条提问测不出召回`
+          });
+          continue;
+        }
+        const row = rows.get(id)!;
+        if (
+          !isMemoryUsable(
+            { context: row.context, chatId: row.session, recordedAt: iso(row.day) },
+            { policies: DEFAULT_MEMORY_POLICIES, chatId: probe.session, now: EVAL_NOW }
+          )
+        ) {
+          problems.push({
+            where: probe.id,
+            message: `标准答案 ${id} 被保留期挡在 ${probe.session} 之外（${row.context}），换会话就召不回来的东西不该当成本轮该答的`
+          });
         }
       }
     }

@@ -4,6 +4,7 @@ import { DEFAULT_MEMORY_POLICIES } from '@/lib/cognitive/policy';
 import { buildPool, EVAL_NOW, paddedPool, runProbe, selfCheck } from './harness';
 import type { ProbeScore, ArmSummary } from './metrics';
 import { scoreProbe, summarizeArm } from './metrics';
+import { BATCHES, storyNumber } from './report';
 import type { ReportInput } from './report';
 
 /**
@@ -32,7 +33,39 @@ export function evaluate(): ReportInput {
     A2: summarizeArm(scores.filter((score) => score.arm === 'A2')),
     current: summarizeArm(scores.filter((score) => score.arm === 'current'))
   };
-  return { scores, arms, visibleSize: pool.length, poolSize: MEASURED_POOL_SIZE };
+  return {
+    scores,
+    arms,
+    visibleSize: pool.length,
+    poolSize: MEASURED_POOL_SIZE,
+    dilution: measureDilution(pool, scores)
+  };
+}
+
+/**
+ * 老故事有没有被新故事挤出 8 个名额——「稀释」的直接读数。
+ *
+ * 做法是把同一批提问在「只含老故事行的池子」和「全量池子」上各跑一遍现状臂，
+ * 逐问比命中数。这一版的读数要是负的，就说明铺量铺到某个规模后必须动 K 或者上向量，
+ * 而不是继续加故事。
+ */
+function measureDilution(pool: ReturnType<typeof buildPool>, scores: ProbeScore[]): ReportInput['dilution'] {
+  const previousThrough = BATCHES.slice(0, -1).at(-1)!.through;
+  const olderPool = pool.filter((memory) => storyNumber(memory.id) <= previousThrough);
+  const probes = new Map(allProbes().map((entry) => [entry.probe.id, entry.probe]));
+  let compared = 0;
+  let changed = 0;
+  let worse = 0;
+  for (const score of scores) {
+    if (score.arm !== 'current' || score.recall === null || storyNumber(score.story) > previousThrough) continue;
+    const before = scoreProbe(runProbe(olderPool, probes.get(score.id)!, 'current'));
+    compared += 1;
+    if (before.hits.length !== score.hits.length) {
+      changed += 1;
+      if (score.hits.length < before.hits.length) worse += 1;
+    }
+  }
+  return { previousThrough, olderPoolSize: olderPool.length, compared, changed, worse };
 }
 
 /**
