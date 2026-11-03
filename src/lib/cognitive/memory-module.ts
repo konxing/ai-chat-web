@@ -6,7 +6,8 @@ import {
 } from './manager';
 import { extractMemoryCandidates } from './memory-extractor';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
-import { createMemory, listMemories, reviseMemory } from './memories';
+import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
+import { embedMemoryText } from './embedding';
 import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
 import { excludedHashes, exclusionHash } from './exclusions';
 import { log } from '@/lib/logger';
@@ -159,6 +160,8 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   const superseded = new Set<string>();
 
   let written = 0;
+  // 这一轮真正落定的行（新建或演化都算），留给循环之后补向量。
+  const vectors: Array<{ id: string; text: string }> = [];
   for (const candidate of candidates) {
     if (written >= MEMORY_WRITE_MAX_PER_TURN) break;
     const key = dedupeKey(candidate.text);
@@ -203,14 +206,38 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
     if (plan.decision === 'WRITE') {
       const created = await createMemory({ ...entry, context: plan.context });
       known.set(key, { id: created.id, chatId: turn.chatId });
+      vectors.push({ id: created.id, text: candidate.text });
     } else if (previousId) {
       // 演化不带 context：能走到这里说明这句就是旧行那件事的新说法，
       // 主题没变，而只看着这一句短话重新分类只会比旧行记的更弱。
       const revised = await reviseMemory({ ...entry, previousId, reason: SUPERSEDE_REASON });
       superseded.add(previousId);
       known.set(key, { id: revised.id, chatId: turn.chatId });
+      vectors.push({ id: revised.id, text: candidate.text });
     } else continue;
     written += 1;
+  }
+
+  if (preferences.associationEnabled) await attachVectors(turn.userId, vectors);
+}
+
+/**
+ * 后台把这一轮新写的记忆逐条算成向量再挂回行上。
+ *
+ * 放在循环之后而不是循环里：写记忆和算向量是两件事，前者已经落定了，
+ * 后者的成败不该改变「这一轮到底记住了什么」。一条算失败就跳过那一条，
+ * 其余照常——向量是可选增益，缺它的行仍走关键词召回。
+ *
+ * 日志只带 id：正文和向量本身都不进日志（任务书要求日志与审计只记 id）。
+ */
+async function attachVectors(userId: string, targets: readonly { id: string; text: string }[]): Promise<void> {
+  for (const target of targets) {
+    try {
+      const stored = await embedMemoryText(userId, target.id, target.text);
+      await attachMemoryVector(userId, target.id, stored);
+    } catch {
+      log.warn('cognitive.embedding_failed', { userId, memoryId: target.id });
+    }
   }
 }
 

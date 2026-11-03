@@ -170,6 +170,13 @@ vi.mock('@/lib/prisma', () => ({
         db.reads.push(where);
         db.takes.push(take);
         return Promise.resolve(ordered(where, orderBy, take));
+      },
+      // 事务外那条 updateMany（挂向量走的正是它）：没有 pending 可攒，命中的行当场改完。
+      updateMany: ({ where, data }: { where: unknown; data: Row }) => {
+        db.updates.push({ where, data });
+        const rows = matching(where);
+        rows.forEach((row) => Object.assign(row, data));
+        return Promise.resolve({ count: rows.length });
       }
     },
     memoryRevision: {
@@ -774,5 +781,38 @@ describe('时间线的读侧接缝', () => {
     const theirs = await listRevisionEdges('user-b');
 
     expect(theirs).toEqual([]);
+  });
+});
+
+describe('给一行记忆挂上算好的向量', () => {
+  const stored = { ciphertext: Buffer.from([1, 2, 3, 4]), model: 'embed-v1' };
+
+  it('只写那两列，正文一列都不碰', async () => {
+    const { attachMemoryVector, createMemory } = await memories();
+    const memory = await createMemory(baseInput());
+
+    await attachMemoryVector(USER, memory.id, stored);
+
+    const row = db.rows.get(memory.id)!;
+    expect(Buffer.compare(row.embeddingCiphertext as Buffer, stored.ciphertext)).toBe(0);
+    expect(row.embeddingModel).toBe('embed-v1');
+    expect(row.contentCiphertext).toBeTypeOf('string');
+    expect(db.updates[db.updates.length - 1]!.data).toEqual({
+      embeddingCiphertext: stored.ciphertext,
+      embeddingModel: 'embed-v1'
+    });
+  });
+
+  it('id 是别人的就不写：跨用户泄漏在这儿挡成 0 行', async () => {
+    const { attachMemoryVector, createMemory } = await memories();
+    const memory = await createMemory(baseInput());
+    db.rows.set('mem-theirs', { id: 'mem-theirs', userId: 'user-b', contentCiphertext: 'x' });
+    db.updates = [];
+
+    await attachMemoryVector(USER, 'mem-theirs', stored);
+
+    expect(db.updates[db.updates.length - 1]).toMatchObject({ where: { id: 'mem-theirs', userId: USER } });
+    expect(db.rows.get('mem-theirs')!.embeddingCiphertext).toBeUndefined();
+    expect(db.rows.get(memory.id)!.embeddingCiphertext).toBeUndefined();
   });
 });

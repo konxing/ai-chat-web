@@ -489,3 +489,21 @@ export async function listRevisionEdges(userId: string): Promise<TimelineEdge[]>
     createdAt: row.createdAt.toISOString()
   }));
 }
+
+/**
+ * 把后台算好的向量写进那一行。
+ *
+ * 单独一步、不进写记忆那个事务：向量是一趟可选的出站调用，端点慢了或挂了
+ * 都不该把已经落定的记忆带下水。`where` 带上 userId 是这条路径上唯一的隔离依据——
+ * 传进来的 id 属于别人时命中 0 行，而不是去动别人的列。
+ */
+export async function attachMemoryVector(
+  userId: string,
+  memoryId: string,
+  stored: { ciphertext: Buffer; model: string }
+): Promise<void> {
+  await prisma.memoryItem.updateMany({
+    where: { id: memoryId, userId },
+    data: { embeddingCiphertext: stored.ciphertext, embeddingModel: stored.model }
+  });
+}
