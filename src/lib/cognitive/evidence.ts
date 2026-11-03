@@ -63,6 +63,12 @@ export interface ConfidenceSubject {
   validTo: string | null;
 }
 
+/** 一条记忆各自的证据条数。置信度只数这个，不数被检索到了几次。 */
+export interface EvidenceCounts {
+  supports: number;
+  contradicts: number;
+}
+
 interface EvidenceRow {
   id: string;
   userId: string;
@@ -171,8 +177,7 @@ export async function assessMemories(
   memories: readonly ConfidenceSubject[],
   now: Date = new Date()
 ): Promise<Map<string, Confidence>> {
-  const result = new Map<string, Confidence>();
-  if (memories.length === 0) return result;
+  if (memories.length === 0) return new Map();
 
   const ids = memories.map((memory) => memory.id);
   const grouped = await prisma.memoryEvidence.groupBy({
@@ -181,7 +186,7 @@ export async function assessMemories(
     _count: { _all: true }
   });
 
-  const counts = new Map<string, { supports: number; contradicts: number }>();
+  const counts = new Map<string, EvidenceCounts>();
   for (const id of ids) counts.set(id, { supports: 0, contradicts: 0 });
   for (const row of grouped) {
     const entry = counts.get(row.memoryId);
@@ -190,6 +195,22 @@ export async function assessMemories(
     else if (row.kind === 'CONTRADICTS') entry.contradicts = row._count._all;
   }
 
+  return assessWithCounts(memories, counts, now);
+}
+
+/**
+ * 已经有计数时直接算档位——纯函数，不碰数据库。
+ *
+ * 拆这一层不是为了好看：认知评测 Harness 要在离线跑置信度这一环，
+ * 而它手里只有 fixture 里的证据条数，没有库。评分规则仍然只有 assessConfidence 一份。
+ * 计数里缺席的记忆按零证据算，不是跳过——「没查到」和「没算」是两回事。
+ */
+export function assessWithCounts(
+  memories: readonly ConfidenceSubject[],
+  counts: ReadonlyMap<string, EvidenceCounts>,
+  now: Date = new Date()
+): Map<string, Confidence> {
+  const result = new Map<string, Confidence>();
   for (const memory of memories) {
     const entry = counts.get(memory.id) ?? { supports: 0, contradicts: 0 };
     result.set(

@@ -11,11 +11,13 @@ import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
 import { excludedHashes, exclusionHash } from './exclusions';
 import { log } from '@/lib/logger';
 import { getMemoryPolicies } from './policy';
+import type { MemoryContext, MemoryPolicy } from './policy';
+import type { Confidence } from './confidence';
 import { getCognitivePreferences } from './preferences';
 import { rankMemories } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
-import type { MemoryOrigin } from './memories';
+import type { MemoryDto, MemoryOrigin } from './memories';
 
 /**
  * 记忆模块本体（③：让策略真正跑在对话链路上）。
@@ -25,6 +27,12 @@ import type { MemoryOrigin } from './memories';
  * 写：抽候选 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
  * WRITE 落新行、UPDATE 走演化。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
+ *
+ * 读侧的「过滤 + 召回」和「渲染」各自是一个纯函数（selectMemoryCandidates / renderMemoryBlock），
+ * 中间只夹一次算置信度的查询。拆开不是为了整洁，是为了认知评测 Harness 能在离线喂 fixture 跑同一条路径；
+ * 它不测 readMemory 那三行取数，那三行由上面的模块测试守着。
+ * 为什么不是「一个」纯函数：那样得把整池 200 行的证据计数一次查出来，
+ * 而今天只查选中的 8 条——一次 IN (200) 换不来任何东西。
  *
  * LINK 和 DELETE 这里仍然没有分支：关系要的是 Phase 2 片D 的图，
  * 删除要的是用户点下那个按钮（Phase 6 界面），都不能由词法猜出来。
@@ -71,12 +79,45 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
   // 读不到保留期就注入，等于把用户设成「30 天」的记忆又端回模型面前，宁可这一轮不带记忆。
   const policies = await getMemoryPolicies(turn.userId);
-  const usable = rows.filter((memory) => isMemoryUsable(memory, { policies, chatId: turn.chatId, now }));
-  // 一个相关项都匹配不上时，rankMemories 会退回 recordedAt 倒序，也就是改造前的行为。
-  const memories = rankMemories(turn.content, usable, { limit: MEMORY_READ_MAX_ITEMS });
+  const memories = selectMemoryCandidates({ query: turn.content, rows, policies, chatId: turn.chatId, now });
   // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
   const confidence = await assessMemories(turn.userId, memories, now);
+  return renderMemoryBlock(memories, confidence);
+}
 
+export interface MemorySelectionInput {
+  /** 用户这一轮说的话，召回的相关度就是照着它算的。 */
+  query: string;
+  rows: readonly MemoryDto[];
+  policies: Record<MemoryContext, MemoryPolicy>;
+  chatId: string;
+  now: Date;
+}
+
+/**
+ * 保留期过滤 + 关键词召回 + 条数截断——纯函数，不碰数据库。
+ *
+ * 拆出来是为了认知评测 Harness：它喂 fixture 行走的是这同一个函数，
+ * 测到的就是线上那条路径，而不是一份会各自漂移的复刻。
+ * 一个相关项都匹配不上时 rankMemories 会退回 recordedAt 倒序，也就是改造前的行为。
+ */
+export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[] {
+  const usable = input.rows.filter((memory) =>
+    isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
+  );
+  return rankMemories(input.query, usable, { limit: MEMORY_READ_MAX_ITEMS });
+}
+
+/**
+ * 把选中的记忆渲染成一段「数据不是指令」的上下文——纯函数，不碰数据库。
+ *
+ * 档位由调用方算好传进来：读侧那条路上算分要查证据表，而这里只该管文字。
+ * 字符预算是一条硬线，超了就不给，避免长会话把提示词撑爆。
+ */
+export function renderMemoryBlock(
+  memories: readonly MemoryDto[],
+  confidence: ReadonlyMap<string, Confidence>
+): CognitiveBlock[] {
   const lines: string[] = [];
   let size = BLOCK_HEADER.length;
   for (const memory of memories) {
