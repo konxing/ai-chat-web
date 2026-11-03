@@ -1,0 +1,228 @@
+# 认知层验收清单（任务书 7.4 十条门槛）
+
+这份文档只回答一个问题：**每条门槛今天真被哪个测试守着、守到哪一层、边界在哪。**
+它不是通过率报告。十条里有四条**无对象可验**（对应功能还没实现），有两条的证据只到 mock 边界。
+把这些写清楚比凑一个「10/10」有用——下一次争论「这个增强要不要上」时，这里是共同的事实基线。
+
+核对时间：2026-11-03，HEAD `4a15160`。全量单测 50 个文件 592 条用例通过（`npx vitest run`）。
+
+## 先说清证据的分层
+
+本仓库**没有任何认知单测走真实数据库**。`vitest.config.ts:10` 只收 `tests/unit/**/*.test.ts`，
+这些文件对数据库边界的处理分四类，本文每条证据都会标是哪一类：
+
+| 层 | 含义 | 换不来什么 |
+|---|---|---|
+| **纯** | 纯函数 / fixture，无 mock | 换不来任何 I/O 行为 |
+| **服务** | service 层真代码 + `vi.mock('@/lib/prisma')`（内存 Map 冒充表，加密走真 `@/lib/crypto`） | 换不来 SQL：`where` 由测试里的 `satisfies`/`matches` 求值器解释，只支持顶层相等、`in`、`null`（`tests/unit/cognitive-forgetting.test.ts:30-44`），没有 `lte`/`OR`/关联/类型转换 |
+| **路由** | 真 route handler + 服务或 prisma 被 mock | 换不来鉴权之外的真实数据行为 |
+| **离线评测** | fixture 池 + 生产纯函数（`selectMemoryCandidates` / `renderMemoryBlock`） | 换不来线上真实用户的召回质量 |
+
+`tests/run-integration.sh` 连的是真 PostgreSQL，但全文没有任何认知表断言（grep `cognitive|memoryItem|MemoryExclusion` ＝ 0 命中）——
+**集成链路不覆盖认知层**。真实 SQL 与外键行为目前**零测试覆盖**，这是下面多条门槛共同的天花板。
+
+## 十条门槛
+
+### 1. 跨用户数据泄漏零容忍
+
+**状态：已验收（服务层 / 路由层），真实 SQL 未验证。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-memories.test.ts:238` `AAD 绑住 userId：同一行密文换个用户解不开` | 服务（真加密） |
+| `tests/unit/cognitive-memories.test.ts:373` `换情境或换类型的过滤条件不影响隔离，别人的记忆读不到` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:228` `别人的 id 删不动，返回 0，一行都没少` | 服务 |
+| `tests/unit/cognitive-exclusions.test.ts:226` `撤销别人的排除返回 false，一行不动` | 服务 |
+| `tests/unit/cognitive-evidence.test.ts:266` `别人的证据不会抬 high 自己的记忆` | 服务 |
+| `tests/unit/cognitive-memories-route.test.ts:263` `列表只按 session 用户查，查询串里的 userId 换不掉它` | 路由 |
+
+**边界**：隔离靠的是「每条查询的 where 里带 userId」这句代码事实，而 where 的求值在测试里是那份手写匹配器。
+求值器若与 Prisma 语义不一致，这类测试会一起错。加密那一层（AAD 绑 userId）是真算法，不受此限。
+
+### 2. 敏感数据删除：所有派生数据按策略清理
+
+**状态：已验收（限当前存在的两种派生数据）。**
+
+当前派生数据只有两种：演化边 `MemoryRevision` 和来源排除规则 `MemoryExclusion`。
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-forgetting.test.ts:204` `指向它的演化边被摘开，活着的新版本保住「这是改口来的」这个事实` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:216` `它自己作为新版本产生的边随外键一起消失` | 服务（cascade 由 `:50-54` 的数组 filter 手工模拟） |
+| `tests/unit/cognitive-forgetting.test.ts:243` `摘边、删行和建排除在同一个事务里，不走事务外的连接` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:263` `删一条就记一条排除，存的是哈希和密文，不是明文` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:361` `只清自己的，别人的记忆和演化边一行不动` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:553` `命中排除表的候选既不新增也不演化` | 服务 |
+
+**边界（三条，都得记住）**：
+- Embedding、图关系、时间线派生、反思候选、决策关联、认知任务都还没落地，「所有派生数据」今天的分母就是上面两种。
+- `MemoryItem.chatId` 的 `onDelete: Cascade`（`prisma/schema.prisma:446`，`:447` sourceMessage 同）**没有任何测试断言**——
+  「删会话连带删记忆」这条方向目前只由 schema 声明保证，无人验证。
+- 「回答之后写记忆」这条链路（`src/app/api/chats/[id]/messages/route.ts:155` → `manager.ts:88`）无端到端测试，见门槛 3。
+
+### 3. 每条持久化记忆可追溯来源
+
+**状态：已验收（服务层），写侧端到端缺一条。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-memories.test.ts:649` `创建记忆时留下一条支持证据，来源就是那句话所在的消息` | 服务 |
+| `tests/unit/cognitive-memories.test.ts:485` `演化边记下谁取代谁、改因，以及触发它的那句话` | 服务 |
+| `tests/unit/cognitive-memories.test.ts:263` `用户亲口说和确认过的必须有确认时间，推断和观察不许冒充确认` | 服务 |
+| `tests/unit/cognitive-exclusions.test.ts:176` `带上来源会话和来源消息，方便日后追查这条排除是哪来的` | 服务 |
+| `tests/unit/cognitive-memories-route.test.ts:273` `列表同时带回这些记忆来自哪次对话的标题，归属仍按 session 用户查` | 路由 |
+| `tests/unit/cognitive-memories-route.test.ts:325` `origin 由服务端定成「用户已确认」，请求体里传什么都进不来` | 路由 |
+
+**边界**：`sourceMessageId` 指向的 `Message` 是 `onDelete: Cascade`（`prisma/schema.prisma:447`）。
+删掉原消息会把来源指针一起带走，这条行为没人测；同时手工更正的新版本继承旧 `chatId`，
+「来源」在演化链上是**上一版的来源**而不是本次动作的来源——这是设计如此，但界面没说破。
+
+### 4. 反思结论可追溯支持与反对证据
+
+**状态：无法验收——反思模块不存在。**
+
+`src/lib/cognitive/` 共 17 个文件，没有 reflection / insight 的实现（唯一沾「decision」字样的是
+`write-decision.ts`，那是写入决策的纯函数，不是决策记忆模块）。
+证据账本本身的通用能力是有测试的（`tests/unit/cognitive-evidence.test.ts:125`、`:146`、`:153`，服务层），
+但**没有反思产物可被追溯**，所以这条门槛今天既不可能失败，也不可能通过。
+依赖 Phase 6。**不为它写一条假装满足的测试。**
+
+### 5. 高置信度洞察不允许出现无来源的确定性事实
+
+**状态：部分验收——机制已验收，「洞察」无对象。**
+
+置信度与来源的关系是真代码，并且是**读时算**，不是写入时盖一个章就不管：
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-confidence.test.ts:54` `观察、推断、假设逐级降低，都在低档——推断永远不等于用户说过` | 纯 |
+| `tests/unit/cognitive-confidence.test.ts:63` `非用户确认的来源，即使带确认时间也不给那 0.05` | 纯 |
+| `tests/unit/cognitive-evidence.test.ts:229` `没有证据的记忆按来源基线给分` | 服务 |
+| `tests/unit/cognitive-evidence.test.ts:255` `有反对证据就压在低档` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:769` `低档位的记忆带上「不得以确定性语气使用」` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:802` `算不出置信度时按低档位处理，宁可多标一句也不冒充确定` | 服务 |
+
+**边界**：门槛说的是「洞察」，而洞察由反思产生——反思不存在（见门槛 4）。
+今天被验的是它的**前置机制**：任何注入给模型的记忆都带档位，低档位强制带禁用确定语气的标注。
+
+### 6. 模糊时间不得被伪造为确定日期
+
+**状态：已验收（服务层）。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-memories.test.ts:276` `时间精度不够就不许写成精确日期` | 服务 |
+| `tests/unit/cognitive-memories.test.ts:422` `存进去的时间精度原样回带，展示层才不会把它说得更精确` | 服务 |
+| `tests/unit/cognitive-memories.test.ts:293` `失效时间必须晚于生效时间` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:195` `开关打开后，技术项目的亲口陈述按「用户明说」落库，且不编造时间` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:383` `精度未知时不显示时间，精度是年时只显示年` | 服务 |
+
+**边界**：`validPrecision` 的取值由抽取层给出，抽取的测试是纯函数层（`tests/unit/cognitive-memory-extractor.test.ts`，11 条）。
+「用户说了个模糊时间 → 落库为精度不足」这一段的**判断**有测，落库之后的 SQL 默认值没有。
+
+### 7. 未确认洞察不得写入已确认画像
+
+**状态：无法验收——画像模块不存在。**
+
+最接近的两条真代码事实：写入决策层明确禁止不持久化内容进入画像/反思/关联
+（`tests/unit/cognitive-write-decision.test.ts:168`，纯函数），
+以及 origin 不许被推断冒充确认（`tests/unit/cognitive-memories.test.ts:263`，服务层）。
+策略表里的 `allowUserProfile` 字段存在于 schema 与 `policy.ts`，**全仓无读取方**。
+依赖 Phase 5/6。
+
+### 8. 未确认决策不得建立正式记录
+
+**状态：无法验收——决策记忆模块不存在；但「决策情境先问再记」已验收。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-memory-policy.test.ts:123` `决策情境默认落库但必须先经用户确认` | 服务 |
+| `tests/unit/cognitive-write-decision.test.ts:100` `决策情境允许落库，但必须先经用户确认` | 纯 |
+| `tests/unit/cognitive-memory-module.test.ts:215` `决策情境默认要先问用户确认，这一片不假装确认过：不落库` | 服务 |
+| `tests/unit/cognitive-write-decision.test.ts:217` `UPDATE 不能插队：要先确认或本来不落库的情境，即使撞上旧记忆也不动历史` | 纯 |
+
+**边界**：门槛 8 说的是「决策**记录**」（decisionMemory 模块的正式档案），那东西不存在。
+今天守住的是它的**前置**：分类为 decisionMaking 的内容在用户确认前一行都不落库。
+
+### 9. 关闭功能后不得继续执行对应模块
+
+**状态：已验收（八个开关全部有消费者）。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-preferences.test.ts:55` `库里没有记录时，八个开关都算关着` | 服务 |
+| `tests/unit/cognitive-preferences-route.test.ts:90` `GET 返回全部八个开关，库里没记录时全是默认关闭` | 路由 |
+| `tests/unit/cognitive-manager.test.ts:52` `开关没打开的模块根本不会被调用` | 服务 |
+| `tests/unit/cognitive-write-decision.test.ts:371` `关掉长期记忆后，七种情境没有任何一种产生持久化写入` | 纯 |
+| `tests/unit/cognitive-policy-learner.test.ts:330` `关掉之后 learnAfterPurge 返回空，证据够了也不收紧策略` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:441` `开关关了就不学：删一条不攒证据，但删除本身的派生清理一条都不少` | 服务 |
+
+**这一条今天有两个必须写清的事实**：
+
+1. **第八个开关 `adaptiveMemoryEnabled` 在此之前全仓无人读取。**
+   `manager.ts:43` 的 `SWITCH` 只映射七个模块键，`src/app` / `src/components` 里零命中，
+   而策略学习在删除链路上无条件执行（`forgetting.ts:90`、`:110`；`memories/[id]/route.ts:94`、`memories/route.ts:79`、`:87`）——
+   门槛 9 对这一层**当时并不成立**。`4a15160` 补上闸门：`policyLearningEnabled()`（`policy-learner.ts:85`）
+   读偏好、读不出来当关；`learnAfterPurge` 开头加闸（`policy-learner.ts:127`，一处盖住三条删除链路，route 不用各自记得问），
+   `purgeMemory` / `purgeMemoriesByChat` 在事务前读一次，关掉就跳过记证据。
+   **排除规则和摘演化边照常执行**——那是删除本身的派生清理（门槛 2），和「学不学」是两件事。
+   上面那两条新测试是先写先红的（6 条新用例在实现前全部失败），不是补的。
+2. **七个模块键里只有 `memory` 真有已注册模块**：`registerCognitiveModule` 的生产调用方只有
+   `memory-module.ts:242` 一处。其余六个开关「关了不执行」是**平凡成立**——本来就没有东西在跑，
+   不是被测出来的。等模块实现时，这条门槛才第一次真正吃紧。
+
+界面只暴露 `memoryEnabled` 一个开关（`src/components/settings/memory-panel.tsx:121-138`），
+`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
+这不是遗漏：`memory-policy-panel.tsx:24-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
+
+### 10. 新增模块全部关闭时，原有聊天功能回归通过
+
+**状态：部分验收——读侧有真链路断言，缺一条端到端。**
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-chat-wiring.test.ts:103` `开关关着时只有基础 system 和本轮用户消息` | 服务（真调 `buildConversation`，断言记忆表一次都没查） |
+| `tests/unit/cognitive-chat-wiring.test.ts:141` `记忆读取失败时对话照旧，只是没有认知块` | 服务 |
+| `tests/unit/cognitive-manager.test.ts:210` `认知引擎整体退化成「什么都没做」，对话不受影响` | 服务 |
+| `tests/unit/cognitive-manager.test.ts:129` `模块卡住时在截止时间内被放弃，对话不必等它` | 服务 |
+| `tests/unit/cognitive-eval-snapshot.test.ts:40` `现状不许比改造前的基线更差` | 离线评测 |
+
+**缺口（显式声明，不含糊）**：现有真调 route 的聊天测试
+（`tests/unit/chat-message-route-failure-audit.test.ts:157` 起）**不对认知写链路做任何断言**——
+`queueCognitiveWrites` 在里面只是被执行过、从未被验证。
+「八个开关全关 → 一次对话的出站上下文里一个字的认知内容都没有」这条端到端断言还没有。
+本轮明确不做（属于「这一片不做的事」），列为下一步第一项。
+
+## 末段那条规则：先跑基线，再定阈值
+
+任务书 7.4 末段：**「先运行基线，再根据结果设定正式阈值；没有实测收益的模块不应默认启用。」**
+
+这条规则的落地形态是三样东西，都在仓库里：
+- `scripts/cognitive-eval/report.md` + `summary.json`：30 个虚构故事 / 180 会话 / 231 行（可见 186）/ 116 提问的实测基线，
+  对照臂 A2（改造前：按 recordedAt 取最近 8 条）→ 现状：**Recall@8 0.0374 → 0.7274**、MRR 0.0154 → 0.5828、
+  至少命中一条 3.7% → 80.4%、违禁项泄漏 1 → 0。
+- `tests/unit/cognitive-eval-snapshot.test.ts`：逐字节比对已提交的 snapshot。
+  以后谁改了召回参数，数字一动就必须带着 diff 显式更新这份 snapshot——基线不再能被人悄悄挪。
+- `src/lib/cognitive/preferences.ts:40` 的 `OFF`：**除 `memoryEnabled` 外七个开关默认全关**。
+  「没有实测收益的模块不应默认启用」在代码里的表现就是这一份默认值，不是一句承诺。
+
+一个已经付了成本、还没有兑现的取舍，写在报告里而不是藏在这里：
+**44 条标准答案一次都没被关键词召回捞回**（core 7 / batch1 17 / batch2 20），
+共同形态是词面零重合的语义改写（「我还钓鱼吗」vs「我不钓了，装备挂在闲鱼了」；
+「我雅思哪一项最弱」vs「写作一直是我的短板」；「为什么不当面试官了」vs「HC 冻结了」）。
+上不上向量 Embedding 这个决定，现在有一手的标注语料可以据以做了。
+
+## 下一步（按性价比排序）
+
+1. 门槛 10 缺的那条端到端断言：八开关全关 → 出站请求体里不含任何认知块。
+2. 门槛 2/3 共同的天花板：`onDelete: Cascade`（`prisma/schema.prisma:446-447`）真实外键行为零覆盖；
+   要补得先在 `tests/run-integration.sh` 的真库流程里加认知表断言。
+3. 门槛 4/5/7/8 随 Phase 5/6 的模块实现一起转正；在那之前本文档对它们的判定是「无对象可验」。
+4. 界面暴露更多开关之前，先让那个开关真的有消费者——第八个开关这次的顺序就该反过来：先有代码读它，再谈要不要给它一个控件。
+
+## 这份清单不覆盖什么
+
+- 不覆盖写侧的真实数据库行为（抽取、情境分类、演化落库全部止于 mock 边界）。
+- 不覆盖性能与容量：延迟、存储增长、后台任务耗时在评测报告里逐项标注为「未实现，所以不测」。
+- 不做真实会话回放，不碰任何真实家庭成员的私人聊天记录（任务书 7.1 明令）；
+  语料全部虚构，标准答案由 Agent 起草、口径经用户复核，不含糊成「人工标注」。

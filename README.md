@@ -79,6 +79,7 @@ docs/               架构、数据库、加密、管理、IP、部署、备份�
 - [备份、恢复与灾难恢复](docs/BACKUP_RESTORE.md)
 - [安全设计与威胁模型](docs/SECURITY.md)
 - [测试报告与未完成项](docs/TEST_REPORT.md)
+- [认知层验收清单（任务书 7.4 十条门槛）](docs/cognitive-acceptance.md)
 
 ## 明确不做/未验证
 
