@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end integration tests against an isolated database, upload dir and backup dir.
-# Requires: PostgreSQL running, a production build (.next), Node 22, curl, jq, psql, openssl.
+# Requires: PostgreSQL 13+ (running, and the connecting role may CREATE DATABASE), a production
+# build (.next), Node 22, and these on PATH: curl jq awk base64 openssl node npx psql pg_dump
+# pg_restore tar python3. Preflight below checks all of them before it touches anything.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -125,6 +127,30 @@ trap cleanup EXIT
 [[ -f .env ]] || { echo 'missing .env' >&2; exit 1; }
 [[ -f .next/BUILD_ID ]] || { echo 'missing production build; run npm run build' >&2; exit 1; }
 
+section 'Preflight: required tools and database rights'
+
+# 缺依赖必须在这里停下，而不是在第 255 行才炸。jq 那一例最阴：json_n 里的 `jq -cn` 失败发生在
+# 命令替换里，set -e 不终止命令替换，于是 payload 是空串，256 行的断言报
+# 「expected HTTP [401], got 400」——看起来完全像产品回归，其实是机器上没装 jq。
+# 这里 exit 而不是 fail()：缺工具是「没跑成」，不是「跑失败」，不该被计入一条产品失败。
+missing_tools=()
+for tool in curl jq awk base64 openssl node npx psql pg_dump pg_restore tar; do
+  command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
+done
+# python3 在 Windows 上可能是 WindowsApps 的存根：command -v 找得到，一跑就退。所以探活不是探在。
+{ command -v python3 >/dev/null 2>&1 && python3 -c 'import sys' >/dev/null 2>&1; } \
+  || missing_tools+=('python3(存在但不可执行)')
+if ((${#missing_tools[@]})); then
+  printf 'missing required tools: %s\n' "${missing_tools[*]}" >&2
+  printf 'install: Debian/Ubuntu  apt-get install -y curl jq coreutils openssl postgresql-client tar python3\n' >&2
+  printf '         RHEL/Fedora     dnf install -y curl jq coreutils openssl postgresql tar python3\n' >&2
+  printf '         macOS           brew install jq coreutils openssl libpq python3\n' >&2
+  printf '         Git Bash        winget/scoop 装 PostgreSQL 客户端并把其 bin 目录加入 PATH\n' >&2
+  printf 'note: pg_dump / pg_restore / tar 不在本脚本里调用，但备份与恢复那两节会让**服务进程**去 exec 它们\n' >&2
+  exit 1
+fi
+pass 'all required tools present'
+
 MAIN_URL=$(grep -E '^DATABASE_URL=' .env | cut -d= -f2-)
 MAIN_DB="${MAIN_URL%%\?*}"
 DB_PREFIX="${MAIN_DB%/*}"
@@ -132,6 +158,23 @@ TEST_DB_PLAIN="$DB_PREFIX/$TEST_DB"
 RESTORE_DB_PLAIN="$DB_PREFIX/$RESTORE_DB"
 TEST_DB_URL="$TEST_DB_PLAIN?schema=public"
 RESTORE_DB_URL="$RESTORE_DB_PLAIN?schema=public"
+
+# 建库权限和版本也要在这儿问清楚：下面那句 CREATE DATABASE 失败会被 set -e 直接带走，
+# 现场只剩一句 psql 报错，看不出「超级用户的 rolcreatedb 同样是 f」这种形状。
+# 两次探测连的都是 `$DB_PREFIX/postgres`，和后面建库那两句同一个目标，所以这里的失败就是那里的失败。
+# 连接串里有密码：stderr 先收进变量、滤掉带 scheme 的行再转述，任何情况下都不回显 $MAIN_URL。
+role_probe=$(psql "$DB_PREFIX/postgres" -At -v ON_ERROR_STOP=1 \
+  -c "select case when rolsuper or rolcreatedb then 'ok' else 'no' end from pg_roles where rolname = current_user" 2>&1) \
+  || { printf 'cannot read the connecting role: %s\n' "$(printf '%s\n' "$role_probe" | grep -v '://' | head -n 3)" >&2; exit 1; }
+[[ "$role_probe" == "ok" ]] \
+  || { echo 'the connecting role can neither CREATE DATABASE nor is a superuser: the isolated test databases cannot be provisioned' >&2; exit 1; }
+pass 'connecting role can create databases'
+
+version_probe=$(psql "$DB_PREFIX/postgres" -At -v ON_ERROR_STOP=1 -c "show server_version_num" 2>&1) \
+  || { printf 'cannot read the server version: %s\n' "$(printf '%s\n' "$version_probe" | grep -v '://' | head -n 3)" >&2; exit 1; }
+{ [[ "$version_probe" =~ ^[0-9]+$ ]] && ((version_probe >= 130000)); } \
+  || { echo "PostgreSQL 13+ is required (got ${version_probe:-unreadable}): DROP DATABASE ... WITH (FORCE) does not exist before 13, so a test database still held open cannot be reclaimed" >&2; exit 1; }
+pass 'PostgreSQL is 13 or newer'
 
 OWNER_PW="Fam-$(openssl rand -hex 8)!Aa1"
 MIRA_PW="Blue-$(openssl rand -hex 8)!Aa1"
@@ -364,7 +407,7 @@ MSG_ASSIST=$(psql "$TEST_DB_PLAIN" -Atc "select id from \"Message\" where \"chat
 [[ -n "$MSG_USER" && -n "$MSG_ASSIST" ]] || fail 'no persisted message to anchor the queue rows'
 
 # 出箱闭环：上面那一轮真实对话由路由欠下一条账，此刻必须已经被活着的 worker 处理掉。
-# 新建用户的七个开关默认全关，所以 worker 的出口是「作废删行」，痕迹只留在日志的事件名里。
+# 新建用户的八个开关默认全关（任务书 1.1 那份 OFF），所以 worker 的出口是「作废删行」，痕迹只留在日志的事件名里。
 # 先等日志再查库是有顺序的：入队发生在 controller.close() 之后，直接查库会在
 # 「还没欠下来」的那一刻就误判成「已经排空」。
 DISCARDED=0
@@ -800,6 +843,9 @@ pass 'tampered backup rejected (GCM authentication)'
 
 # ---------------------------------------------------------------------- HTTPS
 section 'HTTPS/TLS, HSTS and secure cookies'
+# openssl 现在开头那份工具预检已经保证在 PATH 上了，这个 else 分支走不到。
+# 留着不动是有理由的：它标出这一节真正的边界——那 60 行 TLS 断言要的是自签证书，
+# 少了 openssl 就只能整节跳过，而不是退化成一条更弱的断言。
 if command -v openssl >/dev/null 2>&1; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
     -keyout "$TEST_ROOT/tls-key.pem" -out "$TEST_ROOT/tls-cert.pem" \

@@ -1,18 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AiMessage } from '@/lib/ai';
+import { toOutboundTexts } from './outbound-message';
+import { createTable, type MockTable } from './prisma-mock';
 
 /**
- * 本轮对话失败时的两件收尾工作（原来都不做）：
- * ④ 没有拿到任何内容也要落一条 status=ERROR 的助手消息——刷新后历史里仍然看得见"出错了"，
- *    而不是只剩用户那句孤零零的提问；
- * ① 只要真的发起了这一轮就写审计，原先 `doneSent` 只在模型自己说 done 时才为真，
- *    于是失败、取消、以及模型没发 done 的轮次在审计里完全不存在。
+ * 这一轮对话在**对话之外**留下的全部痕迹，真调 route（不是直接调服务函数）。
  *
- * 只 mock 四个外围模块（prisma / auth / providers / ai），chats.ts 与 audit.ts 走真实代码，
- * 所以 ERROR 行的列名、加密 AAD、审计的 status/error 都是真实路径上产出的。
+ * ① 失败收尾（原来都不做）：
+ *    没有拿到任何内容也要落一条 status=ERROR 的助手消息——刷新后历史里仍然看得见"出错了"，
+ *    而不是只剩用户那句孤零零的提问；只要真的发起了这一轮就写审计，原先 `doneSent`
+ *    只在模型自己说 done 时才为真，于是失败、取消、以及模型没发 done 的轮次在审计里完全不存在。
+ *    只 mock 四个外围模块（prisma / auth / providers / ai），chats.ts 与 audit.ts 走真实代码，
+ *    所以 ERROR 行的列名、加密 AAD、审计的 status/error 都是真实路径上产出的。
  *
- * 后半段管另一件事：答完之后那句入队。cognitiveTask 这个 delegate 必须在这儿——
- * 缺了它，enqueueCognitiveTask 会把 `undefined.create` 的 TypeError 一起吞进自己的 catch，
- * 于是这几条测试能在「欠账永远写不进去」的状态下绿着。
+ * ② 答完之后那句入队。cognitiveTask 这个 delegate 必须在这儿——
+ *    缺了它，enqueueCognitiveTask 会把 `undefined.create` 的 TypeError 一起吞进自己的 catch，
+ *    于是这几条测试能在「欠账永远写不进去」的状态下绿着。
+ *
+ * ③ 出站上下文里到底有没有认知内容（门槛 10 的那条端到端）。
+ *    以前这个文件对读侧不做任何断言，认知块在不在发给模型的消息里无人观测；
+ *    现在 `@/lib/ai` 的替身会把收到的 messages 原样留存，闸门开合两种状态都有对照。
  */
 const ctx = vi.hoisted(() => ({
   behavior: 'success' as
@@ -25,6 +32,13 @@ const ctx = vi.hoisted(() => ({
   rows: [] as Array<Record<string, any>>,
   audit: [] as Array<Record<string, any>>,
   taskRows: [] as Array<Record<string, any>>,
+  // 发给模型的那一份上下文，按调用次序整轮存下来（一轮一个数组）。
+  // 存原始 AiMessage[] 而不是压好的文本：断言在测试里做，替身只管留证，
+  // 也让同一份留痕既能数结构（有几条 system）又能比文字。
+  outbound: [] as AiMessage[][],
+  // 记忆表被查询时收到的 where（按次序）。开关关掉时它必须是空的：
+  // 「不注入」和「连读都不读」是两件事，后者才是任务书要的。
+  memoryWheres: [] as Array<Record<string, unknown> | undefined>,
   // 入队那一步按住的开关：松开之前 create 的 promise 不落地，
   // 于是「审计有没有排在它后面」就变成「路由到底 await 没 await」的证据。
   holdTask: false,
@@ -51,6 +65,78 @@ const PROVIDER = {
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z')
 };
+
+/**
+ * 认知读侧的表用 tests/unit/prisma-mock 那份**共享**替身，而不是在本文件里再养一个 where 求值器。
+ * 理由不是整洁：读侧的谓词形状（`origin: {notIn}`、顶层 `AND`/`OR`、证据表的 `groupBy`、
+ * 偏好表的 `findUnique`）恰好是那份额目下一块都不支持的，所以接下来每一条红都能落到
+ * 「替身缺一块能力」上，而不是「产品少写了一段」——这个区别正是这条端到端断言可信的前提。
+ *
+ * 用函数取表而不是模块常量：`vi.mock` 的工厂会被抬到 import 之前，惰性建表才不会有暂时死区。
+ */
+let tables: {
+  preference: MockTable;
+  memoryItem: MockTable;
+  memoryPolicy: MockTable;
+  memoryEvidence: MockTable;
+} | undefined;
+
+function cognitiveTables() {
+  tables ??= {
+    preference: createTable({ idField: 'userId' }),
+    memoryItem: createTable(),
+    memoryPolicy: createTable(),
+    memoryEvidence: createTable()
+  };
+  return tables;
+}
+
+function resetCognitiveTables() {
+  tables = undefined;
+  ctx.memoryWheres = [];
+}
+
+/** 一行长期记忆：正文按 src/lib/cognitive/memories.ts:180 的 AAD 加密，走真实解密路径。 */
+async function memoryRow(id: string, content: string) {
+  const { encryptString } = await import('@/lib/crypto');
+  return {
+    id,
+    userId: USER.id,
+    chatId: null,
+    sourceMessageId: null,
+    type: 'PROJECT',
+    context: 'TECHNICAL_PROJECT',
+    origin: 'EXPLICIT',
+    contentCiphertext: encryptString(content, `memory:v1:${USER.id}:${id}`),
+    confirmedAt: new Date('2026-11-02T10:00:00.000Z'),
+    validPrecision: 'UNKNOWN',
+    validFrom: null,
+    validTo: null,
+    version: 1,
+    supersededAt: null,
+    recordedAt: new Date('2026-11-02T10:00:00.000Z')
+  };
+}
+
+/**
+ * 任务书 1.1 的八个开关：逐列写全，默认全关。
+ * 留空等于让替身替产品决定默认值——正向对照那条用例就会因为「少了一列」而假绿。
+ */
+function preferenceRow(overrides: Record<string, boolean> = {}) {
+  return {
+    userId: USER.id,
+    memoryEnabled: false,
+    userModelEnabled: false,
+    emotionEnabled: false,
+    associationEnabled: false,
+    timelineEnabled: false,
+    reflectionEnabled: false,
+    decisionMemoryEnabled: false,
+    adaptiveMemoryEnabled: false,
+    emotionTransparency: 'IMPLICIT',
+    ...overrides
+  };
+}
 
 vi.mock('@/lib/auth', () => ({
   requireUser: () => {
@@ -126,6 +212,27 @@ vi.mock('@/lib/prisma', async () => {
           });
         }
       },
+      // 认知读侧的四张表（门槛 10 的端到端要看的就是这条路）。
+      // 每个 delegate 只是把调用转给共享替身，唯一的例外是 memoryItem 会把 where 留一份：
+      // 「开关关掉以后记忆表一次都没被查过」这句话只能从调用记录里断出来。
+      cognitivePreference: {
+        findUnique: (args: { where: Record<string, unknown> }) =>
+          cognitiveTables().preference.findUnique(args)
+      },
+      memoryItem: {
+        findMany: (args: { where?: Record<string, unknown>; orderBy?: unknown; take?: number }) => {
+          ctx.memoryWheres.push(args.where);
+          return cognitiveTables().memoryItem.findMany(args);
+        }
+      },
+      memoryPolicy: {
+        findMany: (args: { where?: Record<string, unknown> }) =>
+          cognitiveTables().memoryPolicy.findMany(args)
+      },
+      memoryEvidence: {
+        groupBy: (args: { by: string[]; where?: Record<string, unknown>; _count: Record<string, boolean> }) =>
+          cognitiveTables().memoryEvidence.groupBy(args)
+      },
       $transaction: (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx)
     }
   };
@@ -166,8 +273,12 @@ vi.mock('@/lib/ai', async () => {
   }
 
   return {
-    streamChatCompletion: (input: { signal: AbortSignal }) => {
+    streamChatCompletion: (input: { messages: AiMessage[]; signal: AbortSignal }) => {
       ctx.modelCalls += 1;
+      // 这一份 messages 就是路由交给模型的完整上下文：它在 src/lib/ai.ts:126 被塞进请求体之前
+      // 就被留在这里。证明的是「出站上下文数组」，不是「HTTP 请求体的字节」——
+      // 后者要真库 + 真模型服务，tests/mock-ai.mjs 也不落盘请求体。
+      ctx.outbound.push(input.messages);
       return events(input.signal);
     },
     transcribeAudio: () => Promise.resolve({ text: '' })
@@ -198,19 +309,22 @@ function assistantRows() {
   return ctx.rows.filter((row) => row.role === 'ASSISTANT');
 }
 
-describe('本轮失败时的落库与审计', () => {
-  beforeEach(() => {
-    ctx.behavior = 'success';
-    ctx.rows = [];
-    ctx.audit = [];
-    ctx.taskRows = [];
-    ctx.holdTask = false;
-    ctx.releaseTask = null;
-    ctx.modelCalls = 0;
-    ctx.abortRequest = null;
-    ctx.sawAbortedSignal = null;
-  });
+/** 每个用例都从干净的一轮开始（模块作用域：下面两个 describe 共用这一份重置）。 */
+beforeEach(() => {
+  ctx.behavior = 'success';
+  ctx.rows = [];
+  ctx.audit = [];
+  ctx.taskRows = [];
+  ctx.outbound = [];
+  ctx.holdTask = false;
+  ctx.releaseTask = null;
+  ctx.modelCalls = 0;
+  ctx.abortRequest = null;
+  ctx.sawAbortedSignal = null;
+  resetCognitiveTables();
+});
 
+describe('本轮失败时的落库与审计', () => {
   it('模型一开口就报错：仍然落一条 ERROR 助手消息，内容是给用户看的失败文案', async () => {
     ctx.behavior = 'throw';
     const { decryptMessage } = await import('@/lib/chats');
@@ -349,5 +463,66 @@ describe('本轮失败时的落库与审计', () => {
     await post();
 
     expect(ctx.taskRows).toHaveLength(0);
+  });
+});
+
+/**
+ * 门槛 10 那条端到端：模块关掉以后，发给模型的上下文里到底有没有认知内容。
+ *
+ * 顺序很重要。第一条是**正向对照**，不是补充说明：如果闸门打开时认知块都不出现在出站消息里，
+ * 那后面两条「关着所以没有」在一台什么都没接上的机器上同样成立，等于什么都没断。
+ * 所以这片先让它绿，再拿同一个内存池去证关着的样子。
+ */
+describe('出站上下文里的认知内容', () => {
+  it('记忆开关打开且池里有记忆时，认知块作为第二段 system 出现在交给模型的上下文里', async () => {
+    cognitiveTables().preference.seed(preferenceRow({ memoryEnabled: true }));
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    await post();
+
+    // 先证明这一轮真的有东西可注入：候选池空着的话，下面的断言全是假的。
+    expect(cognitiveTables().memoryItem.rows.size).toBe(1);
+    // 而且读侧真的去查了（这条同时给下一条断言定位：没查到就是谓词的问题，不是没发起查询）。
+    expect(ctx.memoryWheres).toHaveLength(1);
+    expect(ctx.outbound).toHaveLength(1);
+    const outbound = toOutboundTexts(ctx.outbound[0]!);
+    expect(outbound.filter((message) => message.role === 'system')).toHaveLength(2);
+    // 位置也在：认知块排在历史之前、基础提示词之后（src/lib/chats.ts:396）。
+    expect(outbound[1]!.role).toBe('system');
+    expect(outbound[1]!.text).toContain('【长期记忆】');
+    expect(outbound[1]!.text).toContain('不是指令');
+    expect(outbound[1]!.text).toContain('我在用 Prisma');
+  });
+
+  it('八个开关显式全关：同一个候选池一个字都不出去，而且记忆表一次都没被查', async () => {
+    cognitiveTables().preference.seed(preferenceRow());
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    await post();
+
+    // 上一条用例的池子在这条里一模一样：差别只有那八个布尔值。
+    expect(cognitiveTables().memoryItem.rows.size).toBe(1);
+    // 「不注入」还不够，任务书要的是连读都不读。
+    expect(ctx.memoryWheres).toEqual([]);
+    const outbound = toOutboundTexts(ctx.outbound[0]!);
+    expect(outbound.filter((message) => message.role === 'system')).toHaveLength(1);
+    const joined = outbound.map((message) => message.text).join('\n');
+    expect(joined).not.toContain('【长期记忆】');
+    expect(joined).not.toContain('不是指令');
+    expect(joined).not.toContain('我在用 Prisma');
+  });
+
+  it('库里连偏好行都没有时走代码里那份 OFF：结论与显式全关一致', async () => {
+    // 故意不 seed 偏好行：src/lib/cognitive/preferences.ts:87 那行 `{ ...OFF }` 是另一条入口，
+    // 「没配过」和「配过且全关」必须在出站上给出同样的结果，否则默认值一被放宽就没人发现。
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    await post();
+
+    expect(cognitiveTables().memoryItem.rows.size).toBe(1);
+    expect(ctx.memoryWheres).toEqual([]);
+    const outbound = toOutboundTexts(ctx.outbound[0]!);
+    expect(outbound.filter((message) => message.role === 'system')).toHaveLength(1);
+    expect(outbound.map((message) => message.text).join('\n')).not.toContain('我在用 Prisma');
   });
 });

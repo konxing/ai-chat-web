@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiProvider } from '@prisma/client';
+import { toOutboundTexts } from './outbound-message';
 
 /**
  * ③ 的接线面：认知块必须真的出现在发给模型的消息里，而且——
@@ -73,7 +74,6 @@ async function memoryRow(userId: string, id: string, content: string) {
   };
 }
 
-/** 每条消息压成 {role, text}：最后那条用户消息的 content 是 ChatContentPart[]（要塞 image_url），不是裸字符串。 */
 async function build(userId = 'user-a') {
   const { buildConversation } = await import('@/lib/chats');
   const messages = await buildConversation({
@@ -83,13 +83,7 @@ async function build(userId = 'user-a') {
     attachments: [],
     provider: PROVIDER
   });
-  return messages.map((message) => ({
-    role: message.role,
-    text:
-      typeof message.content === 'string'
-        ? message.content
-        : (message.content as Array<{ type: string; text?: string }>).find((part) => part.type === 'text')?.text ?? ''
-  }));
+  return toOutboundTexts(messages);
 }
 
 beforeEach(() => {
