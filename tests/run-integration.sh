@@ -338,6 +338,103 @@ assert_status 200 "$code" 'chat rename works'
 code=$(api PATCH "/api/chats/$CHAT_OWNER/model" "$JAR_OWNER" "$(json_n --arg id "$PROVIDER_ID" '{providerId:$id}')" "$OWNER_CSRF")
 assert_status 200 "$code" 'per-chat model switch works'
 
+# ---------------------------------------------------- cognitive task queue
+section 'Cognitive background task queue: real-database assertions'
+
+# 这一节证明的是内存替身永远证明不了的四件事：迁移能落到干净库、约束长在库上而不是代码里、
+# 过期租约被真实在跑的 worker 收回、以及那条队列真的跟着服务进程活着。
+# 下面第一条闭环断言走的是「开关默认关 → 欠账作废删行」这条真实出口，
+# 但真库里没有「开关打开 → 记忆真的写进 MemoryItem」的对照（要注入偏好才行，本片区没有那个旋钮），
+# 所以「闸门开着会继续执行」那半边只有单测证据，docs/cognitive-acceptance.md 里如实标了未验收。
+
+psql "$TEST_DB_PLAIN" -Atc "select coalesce(to_regclass('public.\"CognitiveTask\"')::text,'')" | grep -qx 'CognitiveTask' \
+  || fail 'CognitiveTask table missing: the migration did not apply to a fresh database'
+pass 'migration 20261103113000_cognitive_tasks applies to a fresh database'
+
+[[ -f node_modules/.prisma/client/index.d.ts ]] && grep -q 'CognitiveTask' node_modules/.prisma/client/index.d.ts \
+  || fail 'generated Prisma client has no CognitiveTask (schema changed without npm run db:generate)'
+pass 'generated Prisma client is fresh for this schema'
+
+grep -rq 'cognitiveTask' .next/server \
+  || fail 'production build has no cognitiveTask reference (schema changed without npm run build)'
+pass 'production build contains the task queue'
+
+MSG_USER=$(psql "$TEST_DB_PLAIN" -Atc "select id from \"Message\" where \"chatId\" = '$CHAT_OWNER' and role = 'USER' order by \"createdAt\" limit 1")
+MSG_ASSIST=$(psql "$TEST_DB_PLAIN" -Atc "select id from \"Message\" where \"chatId\" = '$CHAT_OWNER' and role = 'ASSISTANT' order by \"createdAt\" limit 1")
+[[ -n "$MSG_USER" && -n "$MSG_ASSIST" ]] || fail 'no persisted message to anchor the queue rows'
+
+# 出箱闭环：上面那一轮真实对话由路由欠下一条账，此刻必须已经被活着的 worker 处理掉。
+# 新建用户的七个开关默认全关，所以 worker 的出口是「作废删行」，痕迹只留在日志的事件名里。
+# 先等日志再查库是有顺序的：入队发生在 controller.close() 之后，直接查库会在
+# 「还没欠下来」的那一刻就误判成「已经排空」。
+DISCARDED=0
+for _ in $(seq 1 40); do
+  if grep -Eq "\"event\":\"cognitive.task_discarded\".*\"sourceMessageId\":\"$MSG_USER\"" "$SERVER_LOG"; then
+    DISCARDED=1
+    break
+  fi
+  sleep 0.5
+done
+[[ "$DISCARDED" == "1" ]] || fail 'the running worker never handled the task the chat route enqueued'
+pass 'chat turn enqueued a debt the running worker claimed and voided (switches default to off)'
+
+if psql "$TEST_DB_PLAIN" -Atc "select 1 from \"CognitiveTask\" where \"sourceMessageId\" = '$MSG_USER'" | grep -q 1; then
+  fail 'a voided task left its row in the queue'
+fi
+pass 'a voided task leaves no row behind: the table only holds outstanding work'
+
+grep -q 'hello integration' "$SERVER_LOG" && fail 'the worker logged the message content' || true
+pass 'the queue log line carries ids only, never the sentence itself'
+
+# 唯一约束的真身：两条完全相同的欠账放在同一条语句里插进去，库层必须挡下来。
+# 用单条多值 INSERT 而不是两条语句，是为了不给 worker 留出「先领走第一条」的时间窗。
+# 两处形状是拿真库试出来的，不是想当然：id 的 @default(uuid()) 是 Prisma 在应用层生成的，
+# 库里那列没有默认值，裸 SQL 必须自己给；INSERT ... SELECT 里的 'MEMORY' 会被推成 text
+# 而不会自动转枚举（VALUES 形式才会），所以要写显式转换。
+DUP_OUT=$(psql "$TEST_DB_PLAIN" -q -v ON_ERROR_STOP=1 -c "
+INSERT INTO \"CognitiveTask\" (\"id\",\"userId\",\"chatId\",\"sourceMessageId\",\"kind\",\"updatedAt\")
+SELECT 'dup-a','$OWNER_ID','$CHAT_OWNER','$MSG_USER','MEMORY'::\"CognitiveTaskKind\",now()
+UNION ALL SELECT 'dup-b','$OWNER_ID','$CHAT_OWNER','$MSG_USER','MEMORY'::\"CognitiveTaskKind\",now();" 2>&1) \
+  && fail 'database accepted a duplicate (sourceMessageId, kind) task'
+case "$DUP_OUT" in
+  *'CognitiveTask_sourceMessageId_kind_key'*) pass 'unique (sourceMessageId, kind) enforced by the database' ;;
+  *) fail "duplicate insert failed for an unexpected reason: $DUP_OUT" ;;
+esac
+
+# 僵尸租约：模拟「进程压在这一条上被杀掉了」。没有注入点能让写停在半路等着被杀，
+# 所以这里种的是杀完之后库里必然留下的那种行——RUNNING 且租约已经过期。
+# attempts 刻意取 3（=上限）：取 1 的那条会先回 PENDING、再被默认关着的开关作废删掉，
+# 两条合起来才同时覆盖「次数用完判死」和「还有次数就回收重跑」这两个出口。
+psql "$TEST_DB_PLAIN" -q -v ON_ERROR_STOP=1 -c "
+INSERT INTO \"CognitiveTask\"
+  (\"id\",\"userId\",\"chatId\",\"sourceMessageId\",\"kind\",\"status\",\"attempts\",\"availableAt\",\"leaseOwner\",\"leaseUntil\",\"updatedAt\")
+VALUES
+  ('zombie-exhausted','$OWNER_ID','$CHAT_OWNER','$MSG_USER','MEMORY','RUNNING',3,now()-interval '1 minute','worker-killed',now()-interval '5 seconds',now()),
+  ('zombie-reclaimable','$OWNER_ID','$CHAT_OWNER','$MSG_ASSIST','MEMORY','RUNNING',1,now()-interval '1 minute','worker-killed',now()-interval '5 seconds',now());" >/dev/null \
+  || fail 'could not seed zombie task rows'
+
+ZOMBIE_OK=1
+for _ in $(seq 1 40); do
+  A=$(psql "$TEST_DB_PLAIN" -Atc "select status || '/' || coalesce(\"lastErrorCode\",'-') from \"CognitiveTask\" where id = 'zombie-exhausted'")
+  B=$(psql "$TEST_DB_PLAIN" -Atc "select count(*) from \"CognitiveTask\" where id = 'zombie-reclaimable'")
+  if [[ "$A" == "DEAD/LEASE_EXPIRED" && "$B" == "0" ]]; then
+    ZOMBIE_OK=0
+    break
+  fi
+  sleep 0.5
+done
+[[ "$ZOMBIE_OK" == "0" ]] || fail "zombie leases not reclaimed by the worker (exhausted=$A, reclaimable left=$B)"
+pass 'expired lease with attempts exhausted is marked DEAD, not resurrected'
+pass 'expired lease with attempts left is reclaimed, re-claimed and drained'
+grep -E "\"sourceMessageId\":\"$MSG_ASSIST\"" "$SERVER_LOG" >/dev/null \
+  || fail 'the reclaimed task was never touched by any worker event'
+pass 'the reclaimed task was executed by the live worker'
+
+psql "$TEST_DB_PLAIN" -q -c "DELETE FROM \"CognitiveTask\" WHERE \"id\" LIKE 'zombie-%';" >/dev/null
+LEFTOVER=$(psql "$TEST_DB_PLAIN" -Atc "select count(*) from \"CognitiveTask\"")
+[[ "$LEFTOVER" == "0" ]] || fail "$LEFTOVER task rows left in the queue after this section"
+pass 'the queue holds only outstanding work: finished and voided tasks leave no rows'
+
 # -------------------------------------------------------------------- uploads
 section 'Uploads, content inspection, encryption, document extraction and STT'
 printf 'integration upload marker SECRET-UPLOAD-42\n' >"$TEST_ROOT/note.txt"

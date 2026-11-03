@@ -47,6 +47,43 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 `email`、`purpose`(REGISTER/RESET/EMAIL_CHANGE)、`codeHash`(HMAC)、`username?`、`userId?`、`expiresAt`、`consumedAt`、`attempts`、`ip`、`createdAt`。
 验证码 6 位、10 分钟、单次使用、绑定邮箱与用途；错误尝试计数；请求限速由内存 limiter + Nginx 共同承担。
 
+## 认知层表
+
+认知层的八张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
+
+### CognitivePreference
+`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、时间戳。
+**默认全关**：库里没有行时应用层补 `OFF`，开关由服务端在每个模块入口读取，前端传什么都不算。
+
+### MemoryPolicy
+复合主键 `(userId, context)`，七个情境各一行。`allowPersistence`、`allowedMemoryTypes[]`、`requireConfirmation`、`retention`(SESSION_ONLY/…)、`allowUserProfile`、`allowReflection`、`allowAssociation`。
+`learnedAt` 非空＝这一档被策略学习层自动收紧过；`manualOverrideAt` 非空＝用户亲手定过，学习层从此不再碰它。库里没有行时由应用层补齐内置默认（最保守的一档）。
+
+### MemoryPolicySignal
+`id`、`userId`、`context`、`createdAt`，索引 `(userId, context, createdAt)`。只有「永久删除」会留下信号，没有正文、没有原因——它只回答「这个情境被撤过」，不回答撤的是什么。
+
+### MemoryItem
+`userId`、`chatId?`、`sourceMessageId?`、`type`、`context`、`origin`、`contentCiphertext`、`confirmedAt?`、`version`、`supersededAt?`、`validFrom?`、`validTo?`、`validPrecision`、`recordedAt`、`updatedAt`。索引 `(userId, supersededAt)`、`(userId, type)`。
+双时间模型：`validFrom/validTo` 是事实成立的区间，`recordedAt` 是系统记下的时间，两者互不替代。正文用 AES-GCM 加密，AAD 绑住 `userId` 与记录 id，整表导出读不出内容。
+
+### MemoryRevision
+`userId`、`action`、`memoryId`、`previousId?`、`reasonCiphertext`、`sourceMessageId?`、`createdAt`。索引 `(memoryId)`、`(previousId)`、`(userId, createdAt)`。
+一次演化的边，正文不复制：改口时给旧行盖 `supersededAt` 并新写一行，历史逐条可读，谁都不被覆盖。
+
+### MemoryExclusion
+`userId`、`contentHash`(HMAC(APP_SECRET, userId:归一化正文))、`contentCiphertext`、`chatId?`、`sourceMessageId?`、`createdAt`。唯一 `(userId, contentHash)`。
+**`chatId`/`sourceMessageId` 故意不建外键**：排除必须比来源活得久，会话删掉之后那句话仍然不该被重新记住。密文列只为界面能显示和撤销，只有哈希用户认不出哪条是哪条。
+
+### MemoryEvidence
+`userId`、`memoryId`、`kind`、`origin`、`sourceMessageId?`、`sourceChatId?`、`noteCiphertext?`、`createdAt`。唯一 `(userId, memoryId, kind, sourceMessageId)`，索引 `(userId, memoryId)`。
+置信度不存在 `MemoryItem` 上，读时按这些证据算——存一列就要维护刷新时机，漏一处就是一个过期的假数字。`sourceMessageId` 可空是给手工输入的记忆留的，PostgreSQL 唯一索引把 NULL 视为互不相同，这一类去重由服务层负责。
+
+### CognitiveTask
+`id`、`userId`、`chatId`、`sourceMessageId`、`kind`、`status`(PENDING/RUNNING/DEAD)、`attempts`、`availableAt`、`leaseOwner?`、`leaseUntil?`、`lastErrorCode?`、时间戳。唯一 `(sourceMessageId, kind)`，索引 `(status, availableAt)`、`(userId, chatId)`。
+一行＝「这一句话的认知写入还欠着」。**表里没有任何正文**：要重建这一轮，靠 `sourceMessageId` 把 Message 行解密出来，所以「派生数据不许出现明文」这条红线在这里是结构上违反不了的——没有可以放正文的列。
+`attempts` 在领取时 +1（不是失败时 +1），崩在执行半路也要占掉一次；`leaseOwner` 同时是 fencing token，租约过期被下一任领走后，上一任僵尸执行的所有完结写入都会因 owner 不匹配命中 0 行。待重试没有独立状态：那是「PENDING 且 `availableAt` 在未来」。
+成功即删行、作废也删行（区别只在日志事件名），所以这张表只装欠着的活，不是历史表；只有判死的 DEAD 行会留下，由 `npm run logs:prune` 按保留期清掉。
+
 ## ER 图
 
 ```mermaid
@@ -58,10 +95,21 @@ erDiagram
   User ||--o{ LoginLog : generates
   User ||--o{ AuditLog : acts
   User ||--o{ IpRule : creates
+  User ||--o{ CognitivePreference : toggles
+  User ||--o{ MemoryPolicy : sets
+  User ||--o{ MemoryPolicySignal : generates
+  User ||--o{ MemoryItem : remembers
+  User ||--o{ MemoryExclusion : rules
+  User ||--o{ CognitiveTask : owes
   Chat ||--o{ Message : contains
   Chat ||--o{ Attachment : has
+  Chat ||--o{ CognitiveTask : queues
   Message ||--o{ Attachment : includes
+  Message ||--o{ CognitiveTask : enqueues
+  Message ||--o{ MemoryItem : sourceOf
   AiProvider ||--o{ Chat : selected
+  MemoryItem ||--o{ MemoryRevision : evolves
+  MemoryItem ||--o{ MemoryEvidence : supportedBy
 ```
 
 ## 隔离与权限规则

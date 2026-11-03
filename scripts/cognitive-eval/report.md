@@ -298,7 +298,7 @@ s10-m4, s10-m5, s10-m7, s11-m5, s11-m8, s11-m9, s13-m6, s13-m7, s14-m1, s14-m6, 
 | 时间线完整性、演化链正确率 | Phase 4 认知时间线未开始 |
 | 反思相关指标 | Phase 6 未开始 |
 | 决策经验复用率 | Phase 5 未开始，且 requireConfirmation 的确认界面缺失 |
-| 后台任务成功率与延迟 | CognitiveTask 队列未落地（§六），没有东西可测 |
+| 后台任务成功率与延迟 | 队列已落地（`src/lib/cognitive/task-queue.ts` / `task-worker.ts`），但这个 harness 测不到：它跑的是离线纯函数池，没有进程、没有真库，也就没有「一条任务从入队到收口耗时」这个可观测量。耗时目前只在 `cognitive.task_done` 日志里，60 秒租约仍是推断 |
 | 存储增长曲线 | 需要真实库和真实时间跨度 |
 | 检索延迟（ms） | 见下面「延迟」一节：不进 snapshot |
 | 撤回/永久删除后的不可见率 | 已由 tests/unit/cognitive-memories.test.ts 在 SQL 层守住，harness 里重述一遍只会多一个可能不一致的来源 |

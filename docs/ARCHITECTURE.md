@@ -45,6 +45,17 @@
 4. 用户消息与助手消息以 AES-256-GCM 密文落库；中断时保存 `PARTIAL`/`ERROR` 状态。
 5. 浏览器端用 `react-markdown` + `remark-gfm` + `remark-math/rehype-katex` 渲染；代码块可复制。
 
+### 认知写入（后台任务队列）
+
+1. 流式回答字节交付完、`controller.close()` 之后，请求处理只做一件事：往 `CognitiveTask` 欠一行 id（`userId` / `chatId` / `sourceMessageId` / `kind`）。`await` 它，但入队函数自己永不抛错，所以这一步既不会拖慢响应也不会让已关闭的流出问题。
+2. 表里没有任何正文。Worker 领取后按 `sourceMessageId` 取 Message 行、用 `decryptMessage` 重建这一轮，先校验会话归属（`Chat.userId`）再取消息，内容与请求体一字不差。
+3. `src/instrumentation.ts` 的 `register()` 在 Node runtime 下拉起 worker（进程内轮询 2 秒，`unref` 的定时器）。它吞掉全部异常：`server.js` 直接 `await app.prepare()`，`register()` 抛错会让端口根本不监听。
+4. 领取靠一条条件 UPDATE 原子完成，`leaseOwner` 同时是 fencing token；租约 60 秒，超时未收口的行由下一轮 tick 回收——用满 3 次尝试的判 `DEAD`，否则回 `PENDING`。进程被杀不需要优雅退出，租约过期就是恢复机制。
+5. 单条任务内并发为 1（tick 之间用 `running` 标志互不重叠），模块级截止 20 秒。每个模块先过服务端偏好闸门：`on` 正常跑、`off` 删行并记 `cognitive.task_discarded`、读偏好失败只退避不删行。成功和作废都删行——这张表只装欠着的活。
+6. 用户点「忘记这次对话」时，还没跑的欠账在同一个事务里被 `cancelCognitiveTasks` 撤销，不会被 worker 事后重新记回来。
+
+后台任务永不阻塞对话：它跑在 HTTP 请求之外的独立轮询里，写侧失败只进日志和退避，读侧（构建上下文时召回记忆）另有 1 秒截止，超时就当没有。
+
 ### 上传 / 语音
 
 1. `POST /api/upload`（multipart）限制大小与字段；根据魔数识别类型，仅允许图片、PDF、DOCX、TXT/MD/CSV、常见音频。
@@ -75,6 +86,12 @@
 | `src/lib/files.ts` | 魔数、解析、分块、加密存储 |
 | `src/lib/backups.ts` | 备份列表、下载完整性、恢复调用 |
 | `src/lib/admin.ts` | 管理后台业务与审计 |
+| `src/lib/cognitive/preferences.ts` / `policy.ts` | 八个模块开关与七情境写入策略，服务端强制 |
+| `src/lib/cognitive/manager.ts` | 认知模块注册表：闸门、错误隔离、读/写两侧的截止 |
+| `src/lib/cognitive/task-queue.ts` | 欠账落库：入队、原子领取、租约回收、退避重试、作废 |
+| `src/lib/cognitive/task-worker.ts` | 进程内轮询执行器：重建这一轮、跑写侧、收口；由 `instrumentation.ts` 拉起 |
+| `src/lib/cognitive/memories.ts` / `retrieval.ts` | 记忆读写、双时间有效性、关键词召回与上下文注入 |
+| `src/lib/cognitive/forgetting.ts` / `exclusions.ts` | 永久删除（含派生数据与欠账撤销）、来源排除规则 |
 
 ## 技术栈
 
@@ -91,3 +108,5 @@
 - **整字段加密而非透明列加密**：密钥不进入数据库，备份即使泄露也需独立主密钥；代价是无法对标题/正文做数据库全文检索（当前不需要）。
 - **Nginx auth_request 而不是静态 allow 文件**：IP 变化立即生效，不需要 reload；代价是每个请求多一次内部健康检查（应用层本来也要检查，缓存后开销很小）。
 - **默认拒绝 + 无默认密码**：部署多一步 bootstrap，但避免“默认口令被扫到”的常见事故。
+- **认知写作用数据库欠账而非请求尾部的 fire-and-forget**：进程被杀不丢记忆，失败可重试，用户撤销时能作废还没跑的活；代价是租约/重试这套机制要维护，且多副本部署时每个实例都会起 worker（条件 UPDATE 保证同一行只被执行一次，抢输的一方白刷一次 `attempts`）。
+- **进程内轮询而不是外部队列服务**：单实例自托管，不为此引入 Redis/消息中间件；代价是最长一个轮询周期（2 秒）的写入延迟，以及冷启动要等第一次 tick。

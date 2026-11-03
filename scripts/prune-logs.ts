@@ -19,6 +19,8 @@ async function main() {
   const byCreated = { createdAt: { lt: cutoff } };
   // 已过期的锁定行留着没有意义：没人会再来查询，也永远不会再拦截请求。
   const locks = { lockedUntil: { lt: cutoff, not: null } };
+  // 认知任务的 PENDING / RUNNING 行是欠账，worker 会自己删；只有判死的 DEAD 行没人再碰，只增不减。
+  const deadTasks = { status: 'DEAD' as const, ...byCreated };
 
   const summary: Array<[string, number]> = [];
   if (dryRun) {
@@ -26,11 +28,13 @@ async function main() {
     summary.push(['LoginLog', await prisma.loginLog.count({ where: byCreated })]);
     summary.push(['AuditLog', await prisma.auditLog.count({ where: byCreated })]);
     summary.push(['LoginLock', await prisma.loginLock.count({ where: locks })]);
+    summary.push(['CognitiveTask(DEAD)', await prisma.cognitiveTask.count({ where: deadTasks })]);
   } else {
     summary.push(['IpAccessLog', (await prisma.ipAccessLog.deleteMany({ where: byCreated })).count]);
     summary.push(['LoginLog', (await prisma.loginLog.deleteMany({ where: byCreated })).count]);
     summary.push(['AuditLog', (await prisma.auditLog.deleteMany({ where: byCreated })).count]);
     summary.push(['LoginLock', (await prisma.loginLock.deleteMany({ where: locks })).count]);
+    summary.push(['CognitiveTask(DEAD)', (await prisma.cognitiveTask.deleteMany({ where: deadTasks })).count]);
   }
 
   console.log(`日志保留 ${days} 天，处理 ${cutoff.toISOString()} 之前的记录${dryRun ? '（试运行，未删除）' : ''}`);
