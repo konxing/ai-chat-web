@@ -129,6 +129,12 @@ vi.mock('@/lib/prisma', () => ({
           deleteMany: ({ where }: { where: unknown }) => Promise.resolve(deleteMany(where, db.txOps))
         },
         memoryRevision: {
+          // 删一条要顺着「它是改口来的」那条边往回走，所以演化边先是读得见的。
+          findFirst: ({ where }: { where: unknown }) => {
+            db.txOps.push('edge_find');
+            const row = db.edges.filter((edge) => matches(edge, where))[0];
+            return Promise.resolve(row ? { ...row } : null);
+          },
           updateMany: ({ where, data }: { where: unknown; data: Row }) =>
             Promise.resolve(detach(where, data, db.txOps))
         },
@@ -308,7 +314,7 @@ describe('永久删除一条', () => {
     expect(db.edges[0]).toMatchObject({ id: 'edge-1', memoryId: 'mem-2', previousId: null });
   });
 
-  it('它自己作为新版本产生的边随外键一起消失', async () => {
+  it('它自己作为新版本产生的边随外键一起消失，它折叠的旧版本也不再留着', async () => {
     db.rows.set('mem-1', row('mem-1', { version: 2 }));
     db.rows.set('mem-0', row('mem-0', { supersededAt: new Date() }));
     db.edges = [edge('edge-1', 'mem-1', 'mem-0')];
@@ -317,7 +323,8 @@ describe('永久删除一条', () => {
     await purgeMemory('mem-1', USER);
 
     expect(db.edges).toEqual([]);
-    expect(db.rows.has('mem-0')).toBe(true);
+    // 留着它，时间线就会把这条刚被删掉的内容的旧说法当成一个新事件摆回来（见「整条版本链」那一组）。
+    expect(db.rows.has('mem-0')).toBe(false);
   });
 
   it('别人的 id 删不动，返回 0，一行都没少', async () => {
@@ -346,6 +353,114 @@ describe('永久删除一条', () => {
     expect(db.txOps).toContain('detach');
     expect(db.txOps).toContain('delete');
     expect(db.txOps).toContain('exclude');
+    expect(db.topOps).toEqual([]);
+  });
+});
+
+/**
+ * 「删除事件及其派生记录」（任务书 4.4）里的那个「事件」= 一整条版本链，不是当前那一行。
+ *
+ * 只删当前版本会出事：被折叠在它下面的旧版本带着 supersededAt 留在库里，而它那条
+ * 「我是谁的新版本」的边随外键一起消失，于是时间线读回来时它折叠不到任何后继——
+ * `timeline.ts:96-101` 的做法是把这种孤行单独成事件（既有 `cognitive-timeline.test.ts:169-175` 守着）。
+ * 连起来就是：用户删掉一条两版的历史，时间线下一刷新把它的第一版当成新事件摆回来，
+ * 而那些正文在「记忆」那一屏根本看不见（列表只给当前有效行），用户既看不到也删不掉。
+ */
+describe('删除一条事件＝连它的旧版本一起删', () => {
+  it('三版的链全消失，返回删掉的行数', async () => {
+    db.rows.set('mem-0', row('mem-0', { supersededAt: new Date('2026-10-31T10:00:00.000Z') }, '我在用 Prisma'));
+    db.rows.set('mem-1', row('mem-1', { version: 2, supersededAt: new Date('2026-11-01T10:00:00.000Z') }, '我在用 Drizzle'));
+    db.rows.set('mem-2', row('mem-2', { version: 3 }, '我在用 Kysely'));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0'), edge('edge-2', 'mem-2', 'mem-1')];
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-2', USER)).resolves.toMatchObject({ purged: 3 });
+
+    expect(db.rows.size).toBe(0);
+    expect(db.edges).toEqual([]);
+  });
+
+  it('每一版的正文各记一条排除：删掉的那句和它以前的说法都不许被记回来', async () => {
+    db.rows.set('mem-0', row('mem-0', { supersededAt: new Date() }, '我在用 Prisma'));
+    db.rows.set('mem-1', row('mem-1', { version: 2 }, '我在用 Drizzle'));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0')];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.exclusions).toHaveLength(2);
+    const hashes = db.exclusions.map((item) => item.contentHash);
+    expect(new Set(hashes).size).toBe(2);
+  });
+
+  it('删中间那一版：它的历史跟着走，比它新的那一版留着', async () => {
+    db.rows.set('mem-0', row('mem-0', { supersededAt: new Date('2026-10-31T10:00:00.000Z') }));
+    db.rows.set('mem-1', row('mem-1', { version: 2, supersededAt: new Date('2026-11-01T10:00:00.000Z') }));
+    db.rows.set('mem-2', row('mem-2', { version: 3 }));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0'), edge('edge-2', 'mem-2', 'mem-1')];
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 2 });
+
+    expect([...db.rows.keys()]).toEqual(['mem-2']);
+    // 活着那一版「来自一次改口」这个事实保住，只是不再指向一条已被删掉的正文。
+    expect(db.edges).toEqual([expect.objectContaining({ id: 'edge-2', memoryId: 'mem-2', previousId: null })]);
+  });
+
+  it('一条没有前身的记忆照旧只删自己', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 1 });
+
+    expect(db.rows.size).toBe(0);
+  });
+
+  it('别人的边不给我的链引路：同 memoryId 的一条别人边指到哪一行都不跟着删', async () => {
+    db.rows.set('mem-1', row('mem-1', { version: 2 }));
+    db.rows.set('mem-9', row('mem-9', { userId: OTHER }));
+    db.edges = [edge('edge-other', 'mem-1', 'mem-9', OTHER)];
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 1 });
+
+    expect(db.rows.has('mem-9')).toBe(true);
+  });
+
+  it('数据异常成环（互指前后）也终止，不把删除拖成死循环', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-2', row('mem-2'));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-2'), edge('edge-2', 'mem-2', 'mem-1')];
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 2 });
+
+    expect(db.rows.size).toBe(0);
+  });
+
+  it('链式删除按情境记证据，不按行数：三个版本同一情境只算一条', async () => {
+    db.rows.set('mem-0', row('mem-0', { context: 'TECHNICAL_PROJECT', supersededAt: new Date() }));
+    db.rows.set('mem-1', row('mem-1', { context: 'TECHNICAL_PROJECT', version: 2, supersededAt: new Date() }));
+    db.rows.set('mem-2', row('mem-2', { context: 'GENERAL', version: 3 }));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0'), edge('edge-2', 'mem-2', 'mem-1')];
+    const { purgeMemory } = await forgetting();
+
+    const result = await purgeMemory('mem-2', USER);
+
+    expect(result.contexts.sort()).toEqual(['general', 'technicalProject']);
+    expect(db.signals).toHaveLength(2);
+  });
+
+  it('走链也整个在同一个事务里：读边不许跑到事务外的连接上', async () => {
+    db.rows.set('mem-0', row('mem-0', { supersededAt: new Date() }));
+    db.rows.set('mem-1', row('mem-1', { version: 2 }));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0')];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.commits).toBe(1);
+    expect(db.txOps).toContain('edge_find');
     expect(db.topOps).toEqual([]);
   });
 });

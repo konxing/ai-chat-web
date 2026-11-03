@@ -19,6 +19,11 @@ import type { Prisma } from '@prisma/client';
  * 保住「这一版来自一次改口」这个事实，同时不留任何指向已删内容的指针。
  * 至于 memoryId 指向被删行的边，那是在描述被删的这一行自己怎么来的，随外键一起消失是对的。
  *
+ * 「删一条记忆」删的是**一整条版本链**（任务书 4.4 的「删除事件及其派生记录」）：
+ * 旧版本只留着的话，它在「记忆」那一屏看不见（列表只给当前有效行），在时间线上却会
+ * 因为折叠不到后继而单独成事件（`timeline.ts:96-101`），于是用户删掉的内容换了一副样子回来。
+ * 所以 purged 报的是行数不是事件数，界面那句话得跟着说清。
+ *
  * 派生数据当前有三种：演化边、排除规则，以及还没跑的认知任务（任务书 §6 的 CognitiveTask）。
  * 撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
  * 用户看到的「忘记这次对话」会在下一次轮询时被 worker 推翻。
@@ -78,24 +83,56 @@ async function detachEdges(tx: Prisma.TransactionClient, userId: string, ids: st
   });
 }
 
+/**
+ * 这一条事件占着哪几行：顺着「这一版是改口来的」那条边往回走。
+ *
+ * 排序和折叠口径跟 `memories.ts:479` 的 `listRevisionEdges` 一致（`createdAt asc`、一个版本只认第一条边），
+ * 所以「时间线上折叠到一起的那几行」和「这里收集到的那几行」是同一批——两处口径一漂，
+ * 就会出现「界面折叠三条、删除只删一条」。
+ * 环是数据异常不是常态，但 `seen` 是必须有的：没有它，一次异常互指就能让这个循环永不结束，
+ * 而它跑在删除事务里，等着它的是数据库连接被一直占着。
+ */
+async function eventChainIds(tx: Prisma.TransactionClient, userId: string, headId: string): Promise<string[]> {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = headId;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    ids.push(cursor);
+    const found = (await tx.memoryRevision.findFirst({
+      where: { userId, memoryId: cursor },
+      orderBy: { createdAt: 'asc' },
+      select: { previousId: true }
+    })) as { previousId: string | null } | null;
+    cursor = found?.previousId ?? null;
+  }
+  return ids;
+}
+
 /** 删掉一条记忆。不属于当前用户或者已经不存在都返回 purged: 0，不报错——调用方按 404 处理。 */
 export async function purgeMemory(memoryId: string, userId: string): Promise<PurgeResult> {
   // 闸门开在事务之前：关掉学习时这一轮一条证据都不攒，事务里也就少一次写入。
   const recordSignals = await policyLearningEnabled(userId);
   return prisma.$transaction(async (tx) => {
-    const row = await tx.memoryItem.findFirst({ where: { id: memoryId, userId } });
-    if (!row) return { purged: 0, contexts: [] };
-    const target = row as unknown as PurgeTargetRow;
-    const context = fromDbMemoryContext(target.context);
-    await detachEdges(tx, userId, [memoryId]);
-    const result = await tx.memoryItem.deleteMany({ where: { id: memoryId, userId } });
-    await recordSources(tx, userId, [target]);
+    const head = await tx.memoryItem.findFirst({ where: { id: memoryId, userId } });
+    if (!head) return { purged: 0, contexts: [] };
+    // 「事件」是整条版本链，不是当前那一行：留着旧版本，它们过一遍时间线就会
+    // 作为折叠不到后继的孤行重新成事件——用户刚删掉的内容被摆回他眼前。
+    const ids = await eventChainIds(tx, userId, head.id);
+    const rows = (await tx.memoryItem.findMany({
+      where: { userId, id: { in: ids } }
+    })) as unknown as PurgeTargetRow[];
+    const contexts = [...new Set(rows.map((row) => fromDbMemoryContext(row.context)))];
+    await detachEdges(tx, userId, ids);
+    const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
+    await recordSources(tx, userId, rows);
     // 来源那次对话还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
     // 挡不住换个说法的那一句。没有来源对话的记忆不去动别人的队列。
-    if (target.chatId) await cancelCognitiveTasks(tx, { userId, chatId: target.chatId });
-    // 一次删除只算一条证据，哪怕这一条同时触发了排除和演化边清理。
-    if (recordSignals) await recordPolicySignal(tx, userId, context);
-    return { purged: result.count, contexts: [context] };
+    if (head.chatId) await cancelCognitiveTasks(tx, { userId, chatId: head.chatId });
+    // 一次删除按情境各记一条证据，不是按行数：用户点的是一个按钮，
+    // 一版接一版的同一件事更不该被数成「他反复表达了五次这个意思」。
+    for (const context of contexts) if (recordSignals) await recordPolicySignal(tx, userId, context);
+    return { purged: result.count, contexts };
   });
 }
 
