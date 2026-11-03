@@ -5,6 +5,7 @@ import {
   type CognitiveTurn
 } from './manager';
 import { extractMemoryCandidates } from './memory-extractor';
+import { decisionModule } from './decision-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
 import { embedMemoryText } from './embedding';
@@ -292,4 +293,5 @@ export function ensureCognitiveModules(): void {
   if (registered) return;
   registered = true;
   registerCognitiveModule(memoryModule);
+  registerCognitiveModule(decisionModule);
 }
