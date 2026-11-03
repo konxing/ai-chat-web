@@ -4,20 +4,22 @@
 它不是通过率报告。十条里有四条**无对象可验**（对应功能还没实现），其余每一条的证据都止于内存替身——没有一条认知单测走过真实数据库。
 把这些写清楚比凑一个「10/10」有用——下一次争论「这个增强要不要上」时，这里是共同的事实基线。
 
-核对时间：2026-11-03，基线 HEAD `c8069dd` 加上本片（D′：附件读侧收口，无迁移）。
-全量单测 55 个文件 659 条用例通过（`npx vitest run`）——比 `c8069dd` 基线多出的那 1 个文件 3 条用例
-属于同日的附件列表投影改动（`tests/unit/attachment-page-read-shape.test.ts`），不碰本文任何证据，
-本文引用的行号也未因它漂移。
+核对时间：2026-11-03（最后一次随「Phase 4 第四片」那片更新），基线 HEAD `53f6967` 加上尚未提交的界面改动
+（`src/components/settings/timeline-panel.tsx`，只多两个内联动作区，不碰本文任何服务层证据）。
+全量单测 **58 个文件 734 条用例**通过（`npx vitest run`），`npx tsc --noEmit` exit 0。
+从 `c8069dd`（那份文档初稿的基线）到这里多出 3 个测试文件：`cognitive-timeline.test.ts` 13 条、`cognitive-timeline-route.test.ts` 9 条、
+`cognitive-temporal.test.ts` 9 条，另有写侧与遗忘两组在原文件里加的用例。
+**Phase 4 第四片的界面那一半一条测试都没加**——这个项目没有组件测试，那句话在下面的第四片边界表里单独写着。
 
 ## 先说清证据的分层
 
 本仓库**没有任何认知单测走真实数据库**。`vitest.config.ts:10` 只收 `tests/unit/**/*.test.ts`，
-这些文件对数据库与网络边界的处理分五类，本文每条证据都会标是哪一类：
+这些文件对数据库与网络边界的处理分五类，本文每条证据都会标是哪一类（下面引用的 `cognitive-forgetting.test.ts` 行号已随 Phase 4 第四片重排，全部按 11-03 现号复核过）：
 
 | 层 | 含义 | 换不来什么 |
 |---|---|---|
 | **纯** | 纯函数 / fixture，无 mock | 换不来任何 I/O 行为 |
-| **服务** | service 层真代码 + `vi.mock('@/lib/prisma')`（内存 Map 冒充表，加密走真 `@/lib/crypto`） | 换不来 SQL：`where` 由测试里手写的求值器解释。遗忘那套（`tests/unit/cognitive-forgetting.test.ts:31-45`）只认顶层相等、`in`、`null`，没有 `lte`/`OR`/关联/类型转换；队列、worker 与本片的**路由层**用例共用另一套（`tests/unit/prisma-mock.ts`，多了 `lt`/`lte`/`gt`/`gte`、`notIn`、顶层 `AND`/`OR`、`orderBy`、`groupBy`、`findUnique`、列默认值），**两套都是替身，不是 PostgreSQL** |
+| **服务** | service 层真代码 + `vi.mock('@/lib/prisma')`（内存 Map 冒充表，加密走真 `@/lib/crypto`） | 换不来 SQL：`where` 由测试里手写的求值器解释。遗忘那套（`tests/unit/cognitive-forgetting.test.ts:31-46`）只认顶层相等、`in`、`null`，没有 `lte`/`OR`/关联/类型转换；队列、worker 与本片的**路由层**用例共用另一套（`tests/unit/prisma-mock.ts`，多了 `lt`/`lte`/`gt`/`gte`、`notIn`、顶层 `AND`/`OR`、`orderBy`、`groupBy`、`findUnique`、列默认值），**两套都是替身，不是 PostgreSQL** |
 | **路由** | 真 route handler + 服务或 prisma 被 mock | 换不来鉴权之外的真实数据行为。出站断言在这里拿的是 `src/lib/ai.ts:126` 序列化**之前**的 `messages` 数组 |
 | **回环** | 真 `streamChatCompletion` + 真本地 HTTP 服务（请求体在服务端原样收下再解析） | 换不来 TLS 出口与线上真字节：请求方向的序列化、`providerParams` 合并、以及 Key 只进头不进体，都在这一层断；压缩与对端服务不在 |
 | **离线评测** | fixture 池 + 生产纯函数（`selectMemoryCandidates` / `renderMemoryBlock`） | 换不来线上真实用户的召回质量 |
@@ -52,7 +54,7 @@
 |---|---|
 | `tests/unit/cognitive-memories.test.ts:238` `AAD 绑住 userId：同一行密文换个用户解不开` | 服务（真加密） |
 | `tests/unit/cognitive-memories.test.ts:373` `换情境或换类型的过滤条件不影响隔离，别人的记忆读不到` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:323` `别人的 id 删不动，返回 0，一行都没少` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:330` `别人的 id 删不动，返回 0，一行都没少` | 服务 |
 | `tests/unit/cognitive-exclusions.test.ts:226` `撤销别人的排除返回 false，一行不动` | 服务 |
 | `tests/unit/cognitive-evidence.test.ts:266` `别人的证据不会抬 high 自己的记忆` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:280` `会话属于别人 ⇒ 就当没有：Message 行没有 userId，隔离锚点是 Chat.userId` | 服务 |
@@ -70,16 +72,17 @@
 
 | 证据 | 层 |
 |---|---|
-| `tests/unit/cognitive-forgetting.test.ts:299` `指向它的演化边被摘开，活着的新版本保住「这是改口来的」这个事实` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:311` `它自己作为新版本产生的边随外键一起消失` | 服务（cascade 由测试里的数组 filter 手工模拟） |
-| `tests/unit/cognitive-forgetting.test.ts:338` `摘边、删行和建排除在同一个事务里，不走事务外的连接` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:358` `删一条就记一条排除，存的是哈希和密文，不是明文` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:456` `只清自己的，别人的记忆和演化边一行不动` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:217` `删一条记忆 ⇒ 它来源那次对话的欠账一起撤，且在同一个事务里` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:229` `别人那次对话的欠账一条都不动（同 chatId 也不行，得连 userId 一起对）` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:239` `记忆不是从对话里来的（chatId 为空）⇒ 什么都不撤：不带 chatId 是按用户全撤` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:264` `那次对话还没产出记忆（欠账还压在队列里）⇒ 撤账不能因为「没东西可删」就跳过` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:274` `清空全部 ⇒ 按用户撤干净，别人的欠账一行不动，而且这条也走事务` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:305` `指向它的演化边被摘开，活着的新版本保住「这是改口来的」这个事实` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:317` `它自己作为新版本产生的边随外键一起消失，它折叠的旧版本也不再留着` | 服务（cascade 由测试里的数组 filter 手工模拟） |
+| `tests/unit/cognitive-forgetting.test.ts:369` `删除一条事件＝连它的旧版本一起删`（整组 8 条：三版链、每版各一条排除、删中间版、孤行、别人的边不引路、成环终止、按情境记证据、单事务） | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:345` `摘边、删行和建排除在同一个事务里，不走事务外的连接` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:473` `删一条就记一条排除，存的是哈希和密文，不是明文` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:571` `只清自己的，别人的记忆和演化边一行不动` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:223` `删一条记忆 ⇒ 它来源那次对话的欠账一起撤，且在同一个事务里` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:235` `别人那次对话的欠账一条都不动（同 chatId 也不行，得连 userId 一起对）` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:245` `记忆不是从对话里来的（chatId 为空）⇒ 什么都不撤：不带 chatId 是按用户全撤` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:270` `那次对话还没产出记忆（欠账还压在队列里）⇒ 撤账不能因为「没东西可删」就跳过` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:280` `清空全部 ⇒ 按用户撤干净，别人的欠账一行不动，而且这条也走事务` | 服务 |
 | `tests/unit/cognitive-memory-module.test.ts:553` `命中排除表的候选既不新增也不演化` | 服务 |
 | `tests/run-integration.sh:427` `作废的任务不留在库里：这张表只装还欠着的活` | 真库（**本片区未跑过**） |
 
@@ -87,6 +90,8 @@
 - Embedding、图关系、反思候选、决策关联都还没落地，「所有派生数据」今天的分母就是上面三种。
   时间线派生（`src/lib/cognitive/timeline.ts`）已经落地，但它是**读时投影、不落库**，所以不进这个分母：
   删掉一行记忆，时间线上那条事件就跟着消失，没有第二份东西需要清理。
+  **这句在 11-03 之前是半真话**：只删当前版本时，链上带 `supersededAt` 的旧行会作为孤立事件回到时间线上。
+  「Phase 4 第四片」把 `purgeMemory` 改成沿版本链整条删之后，它才是全真（`src/lib/cognitive/forgetting.ts:95`、`:113`）。
 - **撤销欠账只覆盖「还没被领走的行」**。租约还在、worker 正在跑的那一条撤不掉——它会在 20 秒截止内跑完并把记忆写回来。单测里 `attempts` 的领取语义有测，这个窗口没有测试，也没有对策（任务书 §6 只要「撤销还没跑的」）。
 - `MemoryItem.chatId` 的 `onDelete: Cascade`（`prisma/schema.prisma:465`，`:466` sourceMessage 同）**没有任何测试断言**——
   「删会话连带删记忆」这条方向目前只由 schema 声明保证，无人验证。`CognitiveTask` 的三个外键同理，只是它的级联在真库上形状验过（`tests/run-integration.sh:438` 的插入依赖 `chatId`/`sourceMessageId` 真实存在）。
@@ -109,7 +114,7 @@
 **边界**：`sourceMessageId` 指向的 `Message` 是 `onDelete: Cascade`（`prisma/schema.prisma:447`）。
 删掉原消息会把来源指针一起带走，这条行为没人测；同时手工更正的新版本继承旧 `chatId`，
 「来源」在演化链上是**上一版的来源**而不是本次动作的来源——这是设计如此，但界面没说破。
-再加一条：上表 `:485` 那条用例喂的是**近乎同句**的两行，而自动取代在真实中文语料上实测 **0/36**（见「Phase 4 第三片」那一节），
+再加一条：上表 `:485` 那条用例喂的是**近乎同句**的两行，而自动取代在这份**中文 fixture 语料**（虚构评测故事，不是真实用户语料）上实测 **0/36**（见「Phase 4 第三片」那一节），
 所以演化边今天的实际来源主要是设置页的手工更正那条路（`src/app/api/account/cognitive/memories/[id]/route.ts:50`），不是对话里的改口。
 
 ### 4. 反思结论可追溯支持与反对证据
@@ -164,7 +169,7 @@
 **边界**：`validPrecision` 的取值不再由抽取层给出——抽取只管类型和正文，时间这一栏归
 `src/lib/cognitive/temporal.ts`（Phase 4 第二片，见下文）。
 「用户说了个模糊时间 → 落库为精度不足」这一段的**判断**有测，落库之后的 SQL 默认值没有。
-时间线这一屏把「退到记录时间」显示成 `发生时间未知`（`src/components/settings/timeline-panel.tsx:195`），
+时间线这一屏把「退到记录时间」显示成 `发生时间未知`（`src/components/settings/timeline-panel.tsx:279`），
 这句文案本身没有测试守着——项目没有组件测试，能验的是它上游的 `timeSource` 字段算得对。
 
 ### 7. 未确认洞察不得写入已确认画像
@@ -202,7 +207,7 @@
 | `tests/unit/cognitive-manager.test.ts:52` `开关没打开的模块根本不会被调用` | 服务 |
 | `tests/unit/cognitive-write-decision.test.ts:371` `关掉长期记忆后，七种情境没有任何一种产生持久化写入` | 纯 |
 | `tests/unit/cognitive-policy-learner.test.ts:330` `关掉之后 learnAfterPurge 返回空，证据够了也不收紧策略` | 服务 |
-| `tests/unit/cognitive-forgetting.test.ts:536` `开关关了就不学：删一条不攒证据，但删除本身的派生清理一条都不少` | 服务 |
+| `tests/unit/cognitive-forgetting.test.ts:651` `开关关了就不学：删一条不攒证据，但删除本身的派生清理一条都不少` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:196` `开关关掉 ⇒ 不跑写、删行、留下作废的痕迹` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:220` `偏好读不出来 ⇒ 行留着退避重试，不删（一次数据库抖动不能清空用户排队的活）` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:232` `开关打开 ⇒ 写这一轮跑一次，截止用的是后台的宽期限` | 服务 |
@@ -216,7 +221,7 @@
    而策略学习曾在删除链路上无条件执行（`memories/[id]/route.ts:94`、`memories/route.ts:79`、`:87`）——
    门槛 9 对这一层**当时并不成立**。`4a15160` 补上闸门：`policyLearningEnabled()`（`policy-learner.ts:85`）
    读偏好、读不出来当关；`learnAfterPurge` 开头加闸（`policy-learner.ts:127`，一处盖住三条删除链路，route 不用各自记得问），
-   `purgeMemory` / `purgeMemoriesByChat` 在事务前读一次（`forgetting.ts:84`、`:104`），关掉就跳过记证据。
+   `purgeMemory` / `purgeMemoriesByChat` 在事务前读一次（`forgetting.ts:115`、`:141`），关掉就跳过记证据。
    **排除规则和摘演化边照常执行**——那是删除本身的派生清理（门槛 2），和「学不学」是两件事。
    上面那两条新测试是先写先红的（6 条新用例在实现前全部失败），不是补的。
 2. **七个模块键里只有 `memory` 真有已注册模块**：`registerCognitiveModule` 的生产调用方只有
@@ -233,7 +238,7 @@
    所以「闸门开着会继续执行」这一半只有单测证据（`cognitive-task-worker.test.ts:232`）。
 
 界面暴露两个开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）和
-`timelineEnabled`（`src/components/settings/timeline-panel.tsx:84-118`）——后者是 4-T1 才有的，
+`timelineEnabled`（`src/components/settings/timeline-panel.tsx:84-115`，控件渲染在 `:199`）——后者是 4-T1 才有的，
 因为开关得先真有消费者，才轮得到它有一个控件。`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
 这不是遗漏：`memory-policy-panel.tsx:24-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
 
@@ -308,8 +313,9 @@
 3. **上限会吃掉最老的历史**。`MEMORY_LIST_MAX_ROWS = 200` 按 `recordedAt desc` 截断，顶到上限时
    **最老的记忆先被丢**，接口用 `capped: true` 明说「只覆盖最近这一批」。同一原因下 `historyCount` 可能小于
    `version - 1`：界面对应那句「更早的版本已不在库里」，严格说是「没被这一批读回来」——分页还没做。
-4. **旧版本浏览不在这一屏**。时间线只给折叠计数，链的走法留在「记忆」那一屏的「版本」，
-   同一个动作不做两个入口。
+4. **旧版本浏览不在这一屏**。时间线只给折叠计数，链的走法留在「记忆」那一屏的「版本」。
+   这一片立的那条「同一个动作不做两个入口」，到第四片被你**批准地**开了一处口子：「更正」和「永久删除」在时间线上也各有一个按钮，
+   走的是同一对端点，见「Phase 4 第四片」那一节。
 
 **这一片今天验到的边界**：
 
@@ -484,9 +490,79 @@
 所以 0/36 **不是这份语料碰巧不像**，是**中文改口在结构上就进不了这套词法门槛**；
 `:173` 那段注释早就写了「短句里换一个词占比就过半」，这次把「过半」量成了 0.20–0.75 这个具体位置。
 
-**再评估的触发条件**：一、任务书 4.3 的**原文**（不在仓库里；本文档能引用的只有我自己写的转述）若明确要求写侧自动取代，
-那就按 architectural 出 spec，别在时间线这一层顺手做；二、真库里出现第一批 ≥20 行真实记忆时，这份 0/36 应当用真实语料重测一遍——
-分母换掉，结论可能不一样。
+**再评估的触发条件（11-03 按任务书 4.3 原文改写过）**：
+
+任务书 4.3 的**原文**这次拿到了（在本会话的附件记录里，仍然**没有进仓库**——本文档里能逐字引用的还是转述）。
+原文要的是**聚合式观察**：六类检测（兴趣出现和变化、目标状态变化、项目进展、偏好变化、长期重复主题、长时间未解决的事项）、
+**必须保留样本数量和观察时间跨度**、**数据不足时输出 `INSUFFICIENT_EVIDENCE`**，并禁止据极少数聊天记录预测人生或生成确定性人格结论。
+原文**一个字也没要求写侧自动取代**。所以这一片的判词范围要收窄清楚：
+
+- 0/36 否掉的是**「用词法相似度把改口识别成取代」这一种实现**（调阈值、拆类型门槛都算在内）；
+- 0/36 **不是** 4.3 的验收结论——4.3 的实体（`ChangeDetector`：样本数 + 观察跨度 + `INSUFFICIENT_EVIDENCE`）今天**不存在**，
+  `src/lib/cognitive/` 里没有一行聚合观察的代码。它和逐条取代是两件事，以后别再互相冒充。
+
+于是触发条件只剩两条：一、真要建 4.3 那个 `ChangeDetector`，那是引入模型推断的新子系统，**按 architectural 出 spec** 才能碰，
+不在时间线或写入决策这一层顺手做；二、真库里出现第一批 ≥20 行真实记忆时，这份 0/36 应当用真实语料重测一遍——分母换掉，结论可能不一样。
+
+## Phase 4 第四片：纠正错误事件、删除事件及其派生记录
+
+任务书 4.4 列的八项，前六项（排序、类别筛选、事件详情、原始来源、确认状态、历史版本）4-T1 就已经在了；
+**最后两项——「纠正错误事件」和「删除事件及其派生记录」——在时间线那一屏上一直没有入口**，
+要改要删只能先去「记忆」那一屏把同一行找出来。这片补的就是这两项：**零新表、零新端点、零迁移、零新开关**。
+
+**交付两件事。**
+
+一、**服务层：永久删除一条 = 删掉整条版本链**（已提交 `53f6967`）。
+
+- **为什么必须改**：只删当前那一行会留下带 `supersededAt` 的旧行，而时间线的折叠口径在找不到后继时
+  **会把孤立的旧行单独成一个事件**（`src/lib/cognitive/timeline.ts:96-101`，由 `tests/unit/cognitive-timeline.test.ts:168` 守着）——
+  用户刚删掉的内容换个旧说法回到他眼前，正撞 4.4 的「删除事件及其派生记录」。
+  而且旧行一旦孤立就没有别的入口：「记忆」那一屏列的是当前有效行（`memories.ts:331` 的 `supersededAt: null` 过滤），
+  版本链要从头一行点进去走，头一行没了链就走不到。
+- **实现**：`src/lib/cognitive/forgetting.ts:95` 的 `eventChainIds` 沿 `MemoryRevision.previousId` 从被点那一行往回走
+  （`where` 带 `userId`、`orderBy: { createdAt: 'asc' }`、`seen` 集合挡成环），`purgeMemory`（`:113`）把整条 id 列表
+  交给原有的摘边 / 删行 / 建排除 / 撤欠账 / 记证据那套；链上产生的边由外键 cascade 带走（`prisma/schema.prisma:490`）。
+- **`purged` 报的是行数，不是事件数**：删一条三版的历史返回 `purged: 3`。审计和界面都按这个数说话。
+
+二、**界面：时间线一屏内联「更正」与「永久删除」**（`src/components/settings/timeline-panel.tsx`，复用现有那对端点）。
+
+| 位置 | 内容 |
+|---|---|
+| `:321` `:328` | 展开区尾部两个按钮：`更正`、`永久删除` |
+| `:118` `:124` | 收起条目即清动作状态；一条事件同时只开一个动作区 |
+| `:128` | 更正框**预填当前这一版正文**——起点是他看到的那句话，不是一个空框 |
+| `:148` | `PATCH /api/account/cognitive/memories/[id]`，成功提示 `已按新说法更新，旧版本仍保留`，然后重载时间线 |
+| `:163` | `DELETE` 同一路径，提示 `已永久删除`，然后重载 |
+| `:175` | `purgeWarning` 按事件形状给三种警示：折叠到 N 个历史版本 → 「这条事件和它折叠的 N 个历史版本会一起从数据库里删掉，不可恢复」；链上有这一屏没列出的更早版本 → 另说一种；没有前身的孤行 → 第三种。**三种都以「原对话记录不动」收尾**（7.3 要求区分「忘记记忆」和「删除聊天」） |
+| `:336` `:345` `:362` `:382` | 表单措辞 `新的说法` / `为什么改` / `保存新版本` / `确认永久删除`，与「记忆」那一屏一字不差 |
+
+**同一动作两处入口是你批准的取舍**，代价记在这儿：这两句文案以后要改口径得同时改两个文件（`timeline-panel.tsx` 和 `memory-panel.tsx`），
+它不像「版本浏览」那样只有一处。4-T1 那条「同一个动作不做两个入口」的规则，这是唯一一处经你点头开的口子。
+
+**顺带转正一句假话**：`memory-panel.tsx:633` 从写下那天就承诺「这条记忆和它的历史版本会一起从数据库里删掉」，
+`53f6967` 之前它**不是真的**——`purgeMemory` 只删传进来的那一行。这片让它第一次对上代码。
+
+**证据**：
+
+| 证据 | 层 |
+|---|---|
+| 先红 **7 条**（`tests/unit/cognitive-forgetting.test.ts` 共 40 条，7 failed）。11-03 复核做法：把 `forgetting.ts` 临时退回 `53f6967^`、只跑这一个文件，跑完立即还原，之后 `git status --short` 只剩界面那一个 `M` | 服务 |
+| 红的构成：新组 `:369` 「删除一条事件＝连它的旧版本一起删」8 条里的 6 条 + 既有那条 `:317` 改写后的新断言 | 服务 |
+| 新组里 **2 条按设计就是绿的**，不是漏红：`「一条没有前身的记忆照旧只删自己」` 守不变的行为，`「别人的边不给我的链引路」` 防的是「走链不判 `userId`」这种错实现——旧代码只删头一行，本来也不会误删别人 | 服务 |
+| `npx vitest run` = **58 文件 / 734 用例全绿**；`npx tsc --noEmit` exit **0** | 全量 |
+| `:454` 走链也整个在同一个事务里：`db.txOps` 含 `edge_find`、`db.topOps` 为空 | 服务 |
+| `:383` 链上每一版各记一条来源排除，两个不同的 `contentHash`——旧说法也不许被后台记回来 | 服务 |
+
+**边界，不写清就是夸大**：
+
+| 边界 | 现状 |
+|---|---|
+| 真库 | `MemoryItem` 与 `MemoryRevision` 仍各 **0 行**（11-03 实测）。「在时间线上点一次永久删除，链真的整条消失」这一层**无法验收**——上表全部数字来自 `tests/unit/cognitive-forgetting.test.ts:31-46` 那套文件内自带的内存替身，不是 SQL |
+| 界面 | 项目没有组件测试：两个按钮、三种警示、预填、「一次只开一个动作区」这些形状**一条断言都没有**。而且我**没在浏览器里验证过**——按规矩我不启动你的服务，这一屏渲染归你 |
+| 「纠正」的边界 | 更正只改得了说法，**改不了时间**：PATCH 的请求体只有 `{content, reason}`（`src/lib/validation.ts:163-166`），`validFrom` / `precision` 没有任何写入口。所以 4.4 的「纠正错误事件」今天**不含纠正时间**——时间记错了只能删了重说 |
+| 排序口径 | `eventChainIds` 那句 `orderBy: { createdAt: 'asc' }` 在测试替身上**不真排序**：这个文件自带的 `memoryRevision.findFirst`（`tests/unit/cognitive-forgetting.test.ts:133`）只按数组插入顺序取第一条，`orderBy` 参数根本没被读——它和 `prisma-mock.ts` 是两套，后者才实现 `orderBy`。一行只有一条后继边时两种取法等价；真库上「同一版挂着多条后继边」时跟着哪一条走**无法验收** |
+| 「派生」覆盖到哪 | 显式处理的是演化边、来源排除、策略证据、未跑的认知任务欠账。支持证据行靠外键 cascade（`schema.prisma:542`）消失，**级联行为没人测**（同「下一步」第 3 条那条天花板） |
+| 限流 | 两处入口共用同两个桶（`memory-revise` 30/小时、`memory-purge` 20/小时，按 `userId`）。从时间线删和从记忆屏删**合起来算**，不是各自 20 次 |
 
 ## 末段那条规则：先跑基线，再定阈值
 
@@ -517,8 +593,8 @@
 1. **先在有 `jq` 和建库权限的机器上跑一次 `npm run test:integration`**——门槛 2/9/10 新写的那批真库断言（`tests/run-integration.sh:385-479`）
    从 `0e5b89e` 起一次都没完整跑过。这一步不产生新代码，但它是目前**唯一把「worker 随服务进程活着」从推断变成观测**的机会。
    本片加的预检（`:130-177`）只保证「缺什么工具/权限」在第一秒就说清楚，它替不了这一跑。
-   **11-03 实测过一次变异探针**（临时把 `forgetting.ts:138-139` 的 `userId` 过滤整个去掉，跑完立即还原，改动没进提交）：
-   上表 `:274`（别人的欠账一行不动）与 `:456`（别人的记忆和演化边一行不动）**同时**转红，全文件 30 条照样绿——
+   **11-03 实测过一次变异探针**（临时把 `forgetting.ts:175-176` 的 `userId` 过滤整个去掉，跑完立即还原，改动没进提交；那是 `purgeAllMemories` 的 `deleteMany` 与撤欠账两行）：
+   上表 `:280`（别人的欠账一行不动）与 `:571`（别人的记忆和演化边一行不动）**同时**转红，其余 30 条照样绿（那次跑的是第四片之前的 32 条文件）——
    这两行不是空断言，`purgeAllMemories` 的用户隔离在 mock 层真的守着。真库那一半仍然要靠集成 `:418`。
 2. 出站字节的最后一寸：**真 TLS 出口与真模型服务**。本地回环已经验过序列化保真（`tests/unit/ai-outbound-request-body.test.ts:105`），
    剩下的是让集成链上的 `tests/mock-ai.mjs` 把收到的 body 落盘再断一次——但那需要真库里的「闸门打开 + 有一行记忆」的注入点，成本比这片高。
@@ -526,9 +602,13 @@
    `CognitiveTask` 的三个外键这轮只在真库上验了「行插得进去、约束在库上」，级联删的行为同样没测。
 4. 门槛 4/5/7/8 随 Phase 5/6 的模块实现一起转正；在那之前本文档对它们的判定是「无对象可验」。
 5. 界面暴露更多开关之前，先让那个开关真的有消费者——第八个开关这次的顺序就该反过来：先有代码读它，再谈要不要给它一个控件。
-6. **Phase 4 的三片到此判完**：时间线读侧（已建）、时间解析（已建，收益 11%）、**变化检测（11-03 实测 0/36，词法方案不做，判词在上一节）**。
-   时间这一层没有待写的代码了。4-T3 剩下的「同一主体不同取值」需要主语/槽位抽取，那是引入模型推断的新子系统，
-   要走 architectural 出 spec 才能碰——**且必须先有任务书 4.3 的原文口径**（仓库里没有这份原文，只有我自己的转述）。
+6. **Phase 4 的四片到此判完**：时间线读侧（已建）、时间解析（已建，收益 11%）、变化检测（11-03 实测 0/36，**词法方案不做**，判词在上一节）、
+   纠正与删除事件（已建，判词在「Phase 4 第四片」）。时间这一层没有待写的代码了。
+   还挂着的两件事都**不是**「再写一片就完」：
+   - 任务书 **4.1 事件抽取**今天不存在——时间线里的每条事件都是一行记忆，而不是一个抽取出来的事件，
+     所以 12 类事件里有 4 类一条也生成不了（4-T1 第一节写明了原因：宁可少几类，不凭语感造经历）。
+   - 任务书 **4.3 的 `ChangeDetector`**（六类聚合观察 + 样本数 + 观察跨度 + `INSUFFICIENT_EVIDENCE`）同样不存在。
+     它和 4-T3 否掉的「词法取代识别」是两件事，别互相冒充；要建得走 architectural 出 spec，因为它必然引入模型推断。
    在此之前不建议再调相似度阈值：0.20–0.75 那组实测已经说明没有既不误合又能命中的中间值。
 
 ## 这份清单不覆盖什么

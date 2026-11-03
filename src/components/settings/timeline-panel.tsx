@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronDown, History } from 'lucide-react';
+import { ChevronDown, History, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
-import { Alert, EmptyState, LoadingBlock, useToast } from '@/components/ui';
+import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
 import {
   CONTEXT_LABELS,
   ORIGIN_LABELS,
@@ -17,21 +17,31 @@ import type { MemoryType } from '@/lib/cognitive/policy';
 import type { TimelineEvent } from '@/lib/cognitive/timeline';
 
 /**
- * 认知时间线那一屏（任务书 4.4 的读侧界面）。
+ * 认知时间线那一屏（任务书 4.4 的界面）。
  *
- * 三条形状不是审美选择，是后端和任务书直接落下来的：
+ * 四条形状不是审美选择，是后端和任务书直接落下来的：
  * 一、开关放在界面上，闸门留在服务端。关着时这一屏连请求都不发（省一趟解密），
  *    而接口自己照样 409——界面上的「关」不是唯一那道闸，绕过去也读不到东西。
  * 二、时间有两种说法，不许混。`validity` 是用户说过的事情发生的时间，
  *    `recorded` 只是系统把它记下来的时刻；4.2 禁止后者冒充前者，
  *    所以退到记录时间的那一条必须挂上「发生时间未知」。
  * 三、旧版本在这里只给计数，版本链的浏览留在「记忆」那一屏——同一个动作不做两个入口。
+ * 四、4.4 最后两条（纠正错误事件、删除事件及其派生记录）在这一屏做了，
+ *    走的是与「记忆」屏同一对端点。同一个动作两处有入口是任务书点名的，经用户批准保留；
+ *    代价用「用词完全一致」压到最小：按钮、标签、报错句和 `memory-panel.tsx` 一字不差。
+ *    「更正」只改得了说法，改不了时间——PATCH 的请求体里没有时间和精度（`validation.ts:163`）。
  */
 
 const TIMELINE_URL = '/api/account/cognitive/timeline';
 const PREFERENCES_URL = '/api/account/cognitive';
+const MEMORY_URL = (id: string) => `/api/account/cognitive/memories/${encodeURIComponent(id)}`;
+
+/** 与服务端同一对上界（`validation.ts:163-166`），在这里再挡一次只为了少一次白跑的往返。 */
+const CONTENT_MAX = 1000;
+const REASON_MAX = 500;
 
 type Filter = MemoryType | 'all';
+type EventAction = 'edit' | 'purge' | null;
 
 export function TimelinePanel() {
   const { push } = useToast();
@@ -45,6 +55,12 @@ export function TimelinePanel() {
   const [loadError, setLoadError] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [openId, setOpenId] = useState<string | null>(null);
+  // 一条事件最多开一个动作区，和「记忆」屏同一个形状：两个表单同时开，谁先提交谁都说不清。
+  const [action, setAction] = useState<EventAction>(null);
+  const [draft, setDraft] = useState('');
+  const [reason, setReason] = useState('');
+  const [busyId, setBusyId] = useState('');
+  const [formError, setFormError] = useState('');
 
   const loadTimeline = useCallback(async () => {
     setLoading(true);
@@ -96,6 +112,74 @@ export function TimelinePanel() {
     } finally {
       setFlagBusy(false);
     }
+  }
+
+  /** 展开或收起一条事件；换条目时动作区跟着关，别让刚打开的表单挂到别的事件上。 */
+  function toggleEvent(event: TimelineEvent) {
+    setOpenId(openId === event.memoryId ? null : event.memoryId);
+    setAction(null);
+    setFormError('');
+  }
+
+  function openAction(kind: 'edit' | 'purge', event: TimelineEvent) {
+    setAction(kind);
+    setFormError('');
+    setReason('');
+    // 正文预填当前这一版：更正的起点是他看到的那句话，不是一个空框。
+    if (kind === 'edit') setDraft(event.content);
+  }
+
+  function closeAction() {
+    setAction(null);
+    setFormError('');
+  }
+
+  async function submitEdit(event: TimelineEvent) {
+    if (!draft.trim()) {
+      setFormError('记忆正文不能为空');
+      return;
+    }
+    if (!reason.trim()) {
+      setFormError('改记忆要写明理由');
+      return;
+    }
+    setBusyId(event.memoryId);
+    try {
+      await apiFetch(MEMORY_URL(event.memoryId), { method: 'PATCH', json: { content: draft, reason } });
+      push('已按新说法更新，旧版本仍保留');
+      closeAction();
+      await loadTimeline();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /** 不可逆，所以不给「一键删掉」的顺手路径：先展开说清删的是哪些行，再要一次确认。 */
+  async function submitPurge(event: TimelineEvent) {
+    setBusyId(event.memoryId);
+    try {
+      await apiFetch(MEMORY_URL(event.memoryId), { method: 'DELETE' });
+      push('已永久删除');
+      closeAction();
+      await loadTimeline();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /** 三句按「这一屏数到了几版」分叉：数得到就报数，数不到就明说有没列出来的。 */
+  function purgeWarning(event: TimelineEvent): string {
+    if (event.historyCount > 0) {
+      return `这条事件和它折叠的 ${event.historyCount} 个历史版本会一起从数据库里删掉，不可恢复。原对话记录不动。`;
+    }
+    if (event.version > 1) {
+      return '这一屏没列出的更早版本也会一起删掉。不可恢复。原对话记录不动。';
+    }
+    return '这条事件会从数据库里删掉，不可恢复。原对话记录不动。';
   }
 
   const shown = filter === 'all' ? events : events.filter((event) => event.category === filter);
@@ -172,7 +256,7 @@ export function TimelinePanel() {
                   <button
                     type="button"
                     className="flex w-full items-start justify-between gap-3 text-left"
-                    onClick={() => setOpenId(isOpen ? null : event.memoryId)}
+                    onClick={() => toggleEvent(event)}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block text-[11.5px] text-white/35">{when}</span>
@@ -225,6 +309,83 @@ export function TimelinePanel() {
                             <span>来自：原对话已删除</span>
                           )}
                         </p>
+                      ) : null}
+
+                      {action === null ? (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <button
+                            type="button"
+                            className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
+                            onClick={() => openAction('edit', event)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" /> 更正
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost !px-2.5 !py-1.5 !text-[12px] hover:text-red-300"
+                            onClick={() => openAction('purge', event)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> 永久删除
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {action === 'edit' ? (
+                        <div className="space-y-2.5 pt-1">
+                          <div>
+                            <label className="label">新的说法</label>
+                            <textarea
+                              className="field min-h-[88px]"
+                              maxLength={CONTENT_MAX}
+                              value={draft}
+                              onChange={(e) => setDraft(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="label">为什么改</label>
+                            <input
+                              className="field"
+                              maxLength={REASON_MAX}
+                              placeholder="例如：这条的时间记错了"
+                              value={reason}
+                              onChange={(e) => setReason(e.target.value)}
+                            />
+                          </div>
+                          {formError ? <Alert tone="error">{formError}</Alert> : null}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="btn-primary !px-3 !py-1.5 !text-[12px]"
+                              disabled={busyId === event.memoryId}
+                              onClick={() => void submitEdit(event)}
+                            >
+                              {busyId === event.memoryId ? <Spinner /> : null} 保存新版本
+                            </button>
+                            <button type="button" className="btn-ghost !px-3 !py-1.5 !text-[12px]" onClick={closeAction}>
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {action === 'purge' ? (
+                        <div className="space-y-2.5 pt-1">
+                          <p className="text-[12.5px] leading-relaxed text-white/60">{purgeWarning(event)}</p>
+                          {formError ? <Alert tone="error">{formError}</Alert> : null}
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="btn-danger !px-3 !py-1.5 !text-[12px]"
+                              disabled={busyId === event.memoryId}
+                              onClick={() => void submitPurge(event)}
+                            >
+                              {busyId === event.memoryId ? <Spinner /> : <Trash2 className="h-3.5 w-3.5" />} 确认永久删除
+                            </button>
+                            <button type="button" className="btn-ghost !px-3 !py-1.5 !text-[12px]" onClick={closeAction}>
+                              取消
+                            </button>
+                          </div>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
