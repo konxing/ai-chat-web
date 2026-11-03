@@ -14,6 +14,8 @@
  *
  * 向量、图扩展、Reranker、RRF 都不在这里：向量要独立的 Embedding Provider 配置，
  * 图扩展要 MemoryRelation 表，两样都还不存在（任务书 3.4）。
+ * 顺带一句：想用这里的词法分数直接生成 RELATED_TO 边已经试过并且否掉了，
+ * 实测数据和不成立的理由写在 tests/unit/cognitive-relations-calibration.test.ts。
  *
  * 纯函数，不碰数据库。测试：tests/unit/cognitive-retrieval.test.ts、
  * 与时间序基线的对照在 tests/unit/cognitive-retrieval-eval.test.ts。
