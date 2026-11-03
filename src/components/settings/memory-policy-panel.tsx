@@ -296,7 +296,7 @@ export function MemoryPolicyPanel() {
       </div>
 
       <p className="mt-5 text-[11.5px] leading-relaxed text-white/30">
-        还没做的部分：用户画像、情绪、关联、时间线、反思、决策记忆六个模块尚未实现，它们的开关不会出现在这里，
+        还没做的部分：用户画像、情绪、关联、反思、决策记忆五个模块尚未实现，它们的开关不会出现在这里，
         等模块落地再一起上。策略里的「写入画像 / 反思 / 关联」三项接口已能保存，但目前没有代码读取。
       </p>
     </section>

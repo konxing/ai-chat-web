@@ -84,7 +84,9 @@
 | `tests/run-integration.sh:427` `作废的任务不留在库里：这张表只装还欠着的活` | 真库（**本片区未跑过**） |
 
 **边界（四条，都得记住）**：
-- Embedding、图关系、时间线派生、反思候选、决策关联都还没落地，「所有派生数据」今天的分母就是上面三种。
+- Embedding、图关系、反思候选、决策关联都还没落地，「所有派生数据」今天的分母就是上面三种。
+  时间线派生（`src/lib/cognitive/timeline.ts`）已经落地，但它是**读时投影、不落库**，所以不进这个分母：
+  删掉一行记忆，时间线上那条事件就跟着消失，没有第二份东西需要清理。
 - **撤销欠账只覆盖「还没被领走的行」**。租约还在、worker 正在跑的那一条撤不掉——它会在 20 秒截止内跑完并把记忆写回来。单测里 `attempts` 的领取语义有测，这个窗口没有测试，也没有对策（任务书 §6 只要「撤销还没跑的」）。
 - `MemoryItem.chatId` 的 `onDelete: Cascade`（`prisma/schema.prisma:465`，`:466` sourceMessage 同）**没有任何测试断言**——
   「删会话连带删记忆」这条方向目前只由 schema 声明保证，无人验证。`CognitiveTask` 的三个外键同理，只是它的级联在真库上形状验过（`tests/run-integration.sh:438` 的插入依赖 `chatId`/`sourceMessageId` 真实存在）。
@@ -138,7 +140,7 @@
 
 ### 6. 模糊时间不得被伪造为确定日期
 
-**状态：已验收（服务层）。**
+**状态：已验收（服务层 + 时间线派生层）。**
 
 | 证据 | 层 |
 |---|---|
@@ -147,9 +149,15 @@
 | `tests/unit/cognitive-memories.test.ts:293` `失效时间必须晚于生效时间` | 服务 |
 | `tests/unit/cognitive-memory-module.test.ts:195` `开关打开后，技术项目的亲口陈述按「用户明说」落库，且不编造时间` | 服务 |
 | `tests/unit/cognitive-memory-module.test.ts:383` `精度未知时不显示时间，精度是年时只显示年` | 服务 |
+| `tests/unit/cognitive-timeline.test.ts:98` `时间精度是未知时事件按记录时间走，绝不补出一个日期` | 派生纯函数 |
+| `tests/unit/cognitive-timeline.test.ts:83` `今天提到的「去年发生的事」排在去年，不排在记录时间` | 派生纯函数 |
+| `tests/unit/cognitive-timeline.test.ts:106` `同为「年」精度的两条打平时用记录时间定序，界面上不假装更精确` | 派生纯函数 |
+| `tests/unit/cognitive-timeline-route.test.ts:168` `事件只带派生层算出来的那几列：没有密文，也没有演化理由` | 路由 |
 
 **边界**：`validPrecision` 的取值由抽取层给出，抽取的测试是纯函数层（`tests/unit/cognitive-memory-extractor.test.ts`，11 条）。
 「用户说了个模糊时间 → 落库为精度不足」这一段的**判断**有测，落库之后的 SQL 默认值没有。
+时间线这一屏把「退到记录时间」显示成 `发生时间未知`（`src/components/settings/timeline-panel.tsx:195`），
+这句文案本身没有测试守着——项目没有组件测试，能验的是它上游的 `timeSource` 字段算得对。
 
 ### 7. 未确认洞察不得写入已确认画像
 
@@ -190,6 +198,8 @@
 | `tests/unit/cognitive-task-worker.test.ts:196` `开关关掉 ⇒ 不跑写、删行、留下作废的痕迹` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:220` `偏好读不出来 ⇒ 行留着退避重试，不删（一次数据库抖动不能清空用户排队的活）` | 服务 |
 | `tests/unit/cognitive-task-worker.test.ts:232` `开关打开 ⇒ 写这一轮跑一次，截止用的是后台的宽期限` | 服务 |
+| `tests/unit/cognitive-timeline-route.test.ts:117` `timelineEnabled 关着时返回 MODULE_DISABLED，一次记忆查询都不发` | 路由 |
+| `tests/unit/cognitive-timeline-route.test.ts:130` `开关读不出来时按关闭处理：拿不准就不读用户的记忆` | 路由 |
 
 **这一条今天有两个必须写清的事实**：
 
@@ -202,16 +212,21 @@
    **排除规则和摘演化边照常执行**——那是删除本身的派生清理（门槛 2），和「学不学」是两件事。
    上面那两条新测试是先写先红的（6 条新用例在实现前全部失败），不是补的。
 2. **七个模块键里只有 `memory` 真有已注册模块**：`registerCognitiveModule` 的生产调用方只有
-   `memory-module.ts:242` 一处。其余六个开关「关了不执行」是**平凡成立**——本来就没有东西在跑，
-   不是被测出来的。等模块实现时，这条门槛才第一次真正吃紧。
+   `memory-module.ts:242` 一处。其余六个开关「关了不执行」在 4-T1 之前是**平凡成立**——本来就没有东西在跑，
+   不是被测出来的。现在 `timeline` 不再是那六个之一：`src/app/api/account/cognitive/timeline/route.ts:29`
+   在捞记忆行**之前**读 `timelineEnabled`，读不出来当关，这条有两条新用例钉着（上面那两行）。
+   注意它**不走 `manager.ts` 的注册表**——时间线是对话之外的只读接口，不参与上下文注入，所以那道闸门和
+   `MODULE_SWITCH` 是两处独立代码，口径相同（读不出来 = 关）但不会互相提醒。剩下五个键
+   （`userModel` / `emotion` / `association` / `reflection` / `decisionMemory`）仍是平凡成立，等模块实现才真正吃紧。
 3. **后台任务这一侧的闸门是三值的，不是开关/关闭两值**：`on` 正常跑、`off` 删行作废、**读偏好失败当 `unknown`，只退避不删行**
    （`tests/unit/cognitive-task-worker.test.ts:220`）。这条是给数据库抖动留的——一次读不出来就把用户排队的活清空，
    比多跑一次严重得多。真库上「默认全关 → 欠账被作废删行」这条出口写进了集成断言（`tests/run-integration.sh:409-427`），
    但**没有「先开后关」的对照**：那片区域没有注入点能让真库跑到「开关打开、记忆真的写进 `MemoryItem`」那一步，
    所以「闸门开着会继续执行」这一半只有单测证据（`cognitive-task-worker.test.ts:232`）。
 
-界面只暴露 `memoryEnabled` 一个开关（`src/components/settings/memory-panel.tsx:121-138`），
-`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
+界面暴露两个开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）和
+`timelineEnabled`（`src/components/settings/timeline-panel.tsx:84-118`）——后者是 4-T1 才有的，
+因为开关得先真有消费者，才轮得到它有一个控件。`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
 这不是遗漏：`memory-policy-panel.tsx:24-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
 
 ### 10. 新增模块全部关闭时，原有聊天功能回归通过
@@ -256,6 +271,7 @@
    没覆盖的是 TLS 出口与真模型服务：集成链上的 `tests/mock-ai.mjs:30-48` 收下请求体、只把最后一句用户话回显成 `MOCK_REPLY:`，从不落盘，那里仍无字节断言。
 2. **八个键里只有 `memoryEnabled` 真的参与了这条断言**。`manager.ts:44` 的 `MODULE_SWITCH` 映射七个模块键，而除 `memory` 外没有已注册模块
    （见门槛 9 第 2 点），其余键「关了不注入」是**平凡成立**，等模块实现时这条门槛才第一次真正吃紧。
+   `timelineEnabled` 现在有服务端消费者了，但它在**只读接口**那一侧，不在这条出站上下文的链路上，所以这句话对它同样成立。
 3. **内存替身不是 PostgreSQL**。读侧那段真实谓词（`supersededAt: null`、`origin.notIn`、`validFrom/validTo` 的双 `OR`）由 `tests/unit/prisma-mock.ts`
    的求值器解释，真库上这条端到端链路零覆盖——「其余认知表在真库仍零覆盖」那句天花板对这里同样成立。
 
@@ -265,6 +281,40 @@
 
 **这一条曾经缺的东西**（`0e5b89e` 起写在这里，现在补上了）：读侧证据真调的是 `buildConversation` 而不是 route handler，
 而真调 route 的那个文件当时只管失败收尾与欠账，对**读**侧不做任何断言——两边没接上，所以把 `manager.ts` 的闸门整段删掉，全仓仍然一片绿。
+
+## Phase 4 第一片：时间线读侧验到哪一层
+
+任务书 Phase 4 要事件抽取、自然语言时间解析、变化检测、时间线四样。这一片只做了最后一样的**读侧投影**，
+形状是「每条事件都指得回一行真实记忆」：`src/lib/cognitive/timeline.ts` 是纯函数（不 import prisma），
+输入是记忆行 + 演化边四列，输出按发生时间从早到晚的事件；`src/app/api/account/cognitive/timeline/route.ts`
+加闸门并读那两样；`src/components/settings/timeline-panel.tsx` 是设置页新加的「认知时间线」那一屏。
+26 条新用例：派生纯函数 13、只读接口 9、服务层读接缝 4。
+
+**四件事按任务书红线写在这里，别让下一片顺手做掉**：
+
+1. **不虚构经历**。任务书列的事件类型里 `INTEREST_EMERGED`、`MILESTONE`、`CHALLENGE`、`GOAL_COMPLETED`
+   在现有列上没有来源，所以一条也不生成。类别筛选用的是记忆自己的六个 `type`（`TYPE_LABELS`），
+   没有为界面另造一套词汇。
+2. **历史时间不被记录时间冒充**。`timeSource` 只有 `validity` / `recorded` 两种值，
+   退到 `recorded` 的那一条在界面上必须挂「发生时间未知」——这是这一片唯一会撒谎的地方，所以单独成了一个字段。
+3. **上限会吃掉最老的历史**。`MEMORY_LIST_MAX_ROWS = 200` 按 `recordedAt desc` 截断，顶到上限时
+   **最老的记忆先被丢**，接口用 `capped: true` 明说「只覆盖最近这一批」。同一原因下 `historyCount` 可能小于
+   `version - 1`：界面对应那句「更早的版本已不在库里」，严格说是「没被这一批读回来」——分页还没做。
+4. **旧版本浏览不在这一屏**。时间线只给折叠计数，链的走法留在「记忆」那一屏的「版本」，
+   同一个动作不做两个入口。
+
+**这一片今天验到的边界**：
+
+| 边界 | 现状 |
+|---|---|
+| 真库数据 | `MemoryItem` 与 `MemoryRevision` **各 0 行**（11-03 实测 `p.memoryItem.count()` / `p.memoryRevision.count()`）。你打开这一屏看到的是空态：开关从关拨到开、空态文案、关着不发请求这三件可验；事件排布、折叠计数、来源跳转**无法验收**，要等写侧真落库 |
+| 求值层 | 服务层那 4 条新用例跑在 `tests/unit/prisma-mock.ts` 的谓词求值器上，不是 SQL：`includeSuperseded` 放宽的到底是哪一条、边按 `userId` 隔离，真库上零覆盖 || 界面 | 项目没有组件测试。`timeline-panel.tsx` 的文案与「一次只展开一个」这类形状全部没有断言守着 |
+| 闸门 | `timelineEnabled` 的强制在 route 里自己读偏好，**不走 `manager.ts` 的注册表**：和 `MODULE_SWITCH` 是两处代码，口径相同但不会互相提醒 |
+
+**这片的顺序瑕疵，用探针补了证据**：服务层那 4 条用例（`includeSuperseded`、`listRevisionEdges`）是先写实现后补测试的。
+11-03 各做了一次变异探针（改完立即还原，没进提交）：把 `listMemories` 改成「无论是否放宽都滤掉被取代的行」，
+只有 `cognitive-memories.test.ts:718` 那条转红；把 `listRevisionEdges` 改成带走 `reasonCiphertext` 并解密理由，
+只有 `:743` 那条转红（报的是 `Unsupported ciphertext format`，正是那句注释预言的炸法）。两次都只牵动对应那一条，说明用例不是装饰。
 
 ## 末段那条规则：先跑基线，再定阈值
 
@@ -295,6 +345,9 @@
 1. **先在有 `jq` 和建库权限的机器上跑一次 `npm run test:integration`**——门槛 2/9/10 新写的那批真库断言（`tests/run-integration.sh:385-479`）
    从 `0e5b89e` 起一次都没完整跑过。这一步不产生新代码，但它是目前**唯一把「worker 随服务进程活着」从推断变成观测**的机会。
    本片加的预检（`:130-177`）只保证「缺什么工具/权限」在第一秒就说清楚，它替不了这一跑。
+   **11-03 实测过一次变异探针**（临时把 `forgetting.ts:138-139` 的 `userId` 过滤整个去掉，跑完立即还原，改动没进提交）：
+   上表 `:274`（别人的欠账一行不动）与 `:456`（别人的记忆和演化边一行不动）**同时**转红，全文件 30 条照样绿——
+   这两行不是空断言，`purgeAllMemories` 的用户隔离在 mock 层真的守着。真库那一半仍然要靠集成 `:418`。
 2. 出站字节的最后一寸：**真 TLS 出口与真模型服务**。本地回环已经验过序列化保真（`tests/unit/ai-outbound-request-body.test.ts:105`），
    剩下的是让集成链上的 `tests/mock-ai.mjs` 把收到的 body 落盘再断一次——但那需要真库里的「闸门打开 + 有一行记忆」的注入点，成本比这片高。
 3. 门槛 2/3 共同的天花板：`onDelete: Cascade`（`prisma/schema.prisma:465-466`）真实外键行为零覆盖。

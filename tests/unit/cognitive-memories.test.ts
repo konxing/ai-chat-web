@@ -697,3 +697,82 @@ describe('证据随记忆一起落库', () => {
     expect(db.evidence).toEqual([]);
   });
 });
+
+/**
+ * 4-T1 时间线要用的两处读侧接缝。
+ *
+ * 时间线本身是纯派生（tests/unit/cognitive-timeline.test.ts），但它得先拿到两样东西：
+ * 被取代过的旧行，和能把旧行折回新版本的那批演化边。这两样都是**放宽**读取，
+ * 所以钉的是「放宽只放宽到这一处」：默认口径一个字节都不许变。
+ */
+describe('时间线的读侧接缝', () => {
+  const AGAIN = {
+    userId: USER,
+    content: '用户的澄境项目用 Next.js 15。',
+    origin: 'explicit' as const,
+    confirmedAt: new Date('2026-11-03T10:00:00.000Z'),
+    precision: 'unknown' as const,
+    reason: '用户说了新的版本号'
+  };
+
+  it('默认口径不变：被取代的旧行只在上限放行时才回来', async () => {
+    const { createMemory, listMemories, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput({ content: '用户的澄境项目用 Next.js 14。' }));
+    await reviseMemory({ ...AGAIN, previousId: previous.id });
+
+    const current = await listMemories(USER);
+    const withHistory = await listMemories(USER, { includeSuperseded: true });
+
+    expect(current.map((memory) => memory.content)).toEqual(['用户的澄境项目用 Next.js 15。']);
+    expect(withHistory.map((memory) => memory.content).sort()).toEqual(
+      ['用户的澄境项目用 Next.js 14。', '用户的澄境项目用 Next.js 15。']
+    );
+  });
+
+  it('上限放行也只放宽「被取代」这一条：撤回过的行照样不进时间线', async () => {
+    const { createMemory, listMemories, retractMemory } = await memories();
+    const kept = await createMemory(baseInput());
+    const gone = await createMemory(baseInput({ content: '我以前住在广州。', origin: 'explicit' as const }));
+    await retractMemory(gone.id, USER, '这不是我的情况');
+
+    const rows = await listMemories(USER, { includeSuperseded: true });
+
+    expect(rows.map((memory) => memory.id)).toEqual([kept.id]);
+  });
+
+  it('演化边一次取回整批：只带四列，不碰密文也不解密理由', async () => {
+    const { createMemory, listRevisionEdges, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+    await reviseMemory({ ...AGAIN, previousId: previous.id });
+    // 一条解不开的边：列表这一层要是真去解密，这里就会炸出「（理由解密失败）」或者抛错。
+    db.edges.push({
+      id: 'edge-broken',
+      userId: USER,
+      action: 'SUPERSEDED',
+      memoryId: 'mem-x',
+      previousId: 'mem-y',
+      reasonCiphertext: '这一列压根不是合法密文',
+      sourceMessageId: null,
+      createdAt: new Date('2026-11-03T09:00:00.000Z')
+    });
+
+    const edges = await listRevisionEdges(USER);
+
+    expect(edges).toHaveLength(2);
+    for (const edge of edges) {
+      expect(Object.keys(edge).sort()).toEqual(['action', 'createdAt', 'memoryId', 'previousId']);
+    }
+    expect(edges.every((edge) => edge.action === 'superseded')).toBe(true);
+    expect(JSON.stringify(edges)).not.toContain('这一列压根不是合法密文');
+  });
+
+  it('边按调用者自己的 userId 取，别人的边一条也不给', async () => {
+    const { createMemory, listRevisionEdges, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+    await reviseMemory({ ...AGAIN, previousId: previous.id });
+
+    const theirs = await listRevisionEdges('user-b');
+
+    expect(theirs).toEqual([]);
+  });
+});

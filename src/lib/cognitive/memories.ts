@@ -11,12 +11,14 @@ import {
   type MemoryContext,
   type MemoryType
 } from './policy';
+import type { TimelineEdge } from './timeline';
 
 export const MEMORY_CONTENT_MAX_CHARS = 1000;
 export const MEMORY_REASON_MAX_CHARS = 500;
 
-/** 一次最多捞多少行：每行都要 AES-256-GCM 解密，捞回来就是真开销，调用方不能自己放开。 */
-const MEMORY_LIST_MAX_ROWS = 200;
+/** 一次最多捞多少行：每行都要 AES-256-GCM 解密，捞回来就是真开销，调用方不能自己放开。
+ * 导出是给时间线用的——它和记忆列表读的是同一批行，上限必须只有一个数。 */
+export const MEMORY_LIST_MAX_ROWS = 200;
 
 /** 一条记忆能被信任到什么程度（任务书 2.2）。推断和假设永远不等于用户说过或确认过。 */
 const ORIGIN_PAIRS = [
@@ -106,6 +108,8 @@ export interface MemoryListFilters {
   contexts?: MemoryContext[];
   /** 只要最近这几条：正文是密文，捞多少行就要解密多少行，不能白搬。 */
   take?: number;
+  /** 时间线要的是历史，不是「当前有效」：被新说法取代过的旧行也得进来，才能在派生层折叠。 */
+  includeSuperseded?: boolean;
 }
 
 /** 更新一条记忆（任务书 2.3）：新写一行、旧行盖 supersededAt，绝不原地改正文。
@@ -321,9 +325,10 @@ export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
 export async function listMemories(userId: string, filters: MemoryListFilters = {}): Promise<MemoryDto[]> {
   const where: Record<string, unknown> = {
     userId,
-    supersededAt: null,
     origin: { notIn: [toStoredOrigin('retracted')] }
   };
+  // 默认只要当前有效的那批；时间线把被取代过的旧行也读回来，但折叠不折叠是派生层的事。
+  if (!filters.includeSuperseded) where.supersededAt = null;
   if (filters.types?.length) where.type = { in: filters.types.map(toDbMemoryType) };
   if (filters.contexts?.length) where.context = { in: filters.contexts.map(toDbMemoryContext) };
   if (filters.asOf) {
@@ -462,4 +467,25 @@ export async function listMemoryRevisions(memoryId: string, userId: string): Pro
       createdAt: row.createdAt.toISOString()
     };
   });
+}
+
+/**
+ * 时间线要的全量演化边：只取四列，**不解密理由**。
+ *
+ * 逐条记忆的展开区里那份理由（listMemoryRevisions）是点开才算的，时间线一次读 200 行，
+ * 为没人看的折叠把每条边的密文都解一遍只是多花一倍开销，而折叠本身只需要 previousId。
+ */
+export async function listRevisionEdges(userId: string): Promise<TimelineEdge[]> {
+  const rows = await prisma.memoryRevision.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'asc' },
+    take: MEMORY_LIST_MAX_ROWS,
+    select: { memoryId: true, previousId: true, action: true, createdAt: true }
+  });
+  return rows.map((row) => ({
+    memoryId: row.memoryId,
+    previousId: row.previousId,
+    action: fromStoredAction(row.action),
+    createdAt: row.createdAt.toISOString()
+  }));
 }
