@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
+import { getCognitivePreferences } from './preferences';
 import {
   MEMORY_CONTEXTS,
   applyLearnedPolicy,
@@ -75,6 +76,22 @@ export async function recordPolicySignal(
   });
 }
 
+/**
+ * 学习层唯一的闸门：偏好表里的第八个开关（`adaptiveMemoryEnabled`）。
+ *
+ * 读不出来当关——和 `manager.ts` 的 `enabledModules` 同一个立场：认知引擎宁可什么都不做，
+ * 也不能在用户没表达过的情况下自己学会点什么。
+ */
+export async function policyLearningEnabled(userId: string): Promise<boolean> {
+  try {
+    const preferences = await getCognitivePreferences(userId);
+    return preferences.adaptiveMemoryEnabled;
+  } catch {
+    log.warn('cognitive.policy_preferences_unavailable', { userId });
+    return false;
+  }
+}
+
 /** 删除完成、事务提交之后调用：证据够了就把这个情境收紧成「先问再记」。 */
 export async function learnFromPurge(userId: string, context: MemoryContext): Promise<LearningOutcome> {
   const state = await readLearningState(userId, context);
@@ -106,6 +123,8 @@ export async function learnAfterPurge(
   userId: string,
   contexts: readonly MemoryContext[]
 ): Promise<MemoryContext[]> {
+  // 闸门放在这里，三条删除链路（单条 / 按会话 / 清空）一起盖住，route 不用各自记得问一遍。
+  if (!(await policyLearningEnabled(userId))) return [];
   const learned: MemoryContext[] = [];
   for (const context of contexts) {
     try {

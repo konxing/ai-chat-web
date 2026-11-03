@@ -20,7 +20,9 @@ type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({
   policies: new Map<string, Row>(),
   signals: [] as Row[],
-  tick: 0
+  tick: 0,
+  /** 偏好表里的第八个开关。null 表示「偏好读不出来」。 */
+  adaptiveEnabled: true as boolean | null
 }));
 
 function policyKey(userId: string, context: string) {
@@ -86,6 +88,13 @@ vi.mock('@/lib/prisma', () => ({
         db.signals = db.signals.filter((row) => !rows.includes(row));
         return Promise.resolve({ count: rows.length });
       }
+    },
+    // 闸门在事务之外读一次偏好；null 让 getCognitivePreferences 走到「读不出来」那一支。
+    cognitivePreference: {
+      findUnique: () =>
+        db.adaptiveEnabled === null
+          ? Promise.reject(new Error('preference unavailable'))
+          : Promise.resolve({ adaptiveMemoryEnabled: db.adaptiveEnabled })
     }
   }
 }));
@@ -122,6 +131,7 @@ beforeEach(() => {
   db.policies.clear();
   db.signals = [];
   db.tick = 0;
+  db.adaptiveEnabled = true;
 });
 
 describe('证据只来自永久删除', () => {
@@ -303,6 +313,48 @@ describe('用户亲手改过就不许再学', () => {
 
     expect(db.signals).toHaveLength(1);
     expect(db.signals[0]).toMatchObject({ context: 'GENERAL' });
+  });
+});
+
+describe('开关关了就不学（任务书 7.4 门槛 9 的策略学习层）', () => {
+  /**
+   * 只攒证据、不跑学习：purgeOnce 里那步 learnFromPurge 会把策略当场收紧，
+   * 用它就没法证明收紧是闸门放开之后 learnAfterPurge 干的了。
+   */
+  async function threeSignals(userId: string, context: Context) {
+    const { recordPolicySignal } = await learner();
+    const { prisma } = await import('@/lib/prisma');
+    for (let i = 0; i < 3; i += 1) await recordPolicySignal(prisma as never, userId, context);
+  }
+
+  it('关掉之后 learnAfterPurge 返回空，证据够了也不收紧策略', async () => {
+    db.adaptiveEnabled = false;
+    await threeSignals(USER, 'technicalProject');
+    const { learnAfterPurge } = await learner();
+
+    const learned = await learnAfterPurge(USER, ['technicalProject']);
+
+    expect(learned).toEqual([]);
+    expect(db.policies.size).toBe(0);
+  });
+
+  it('开着才照旧收紧：同样的三条证据，learnAfterPurge 报出被改的情境', async () => {
+    await threeSignals(USER, 'technicalProject');
+    const { learnAfterPurge } = await learner();
+
+    const learned = await learnAfterPurge(USER, ['technicalProject']);
+
+    expect(learned).toEqual(['technicalProject']);
+    expect((await currentPolicy('technicalProject')).requireConfirmation).toBe(true);
+  });
+
+  it('偏好读不出来当关：什么都不学，也不要把错误冒到删除链路上', async () => {
+    db.adaptiveEnabled = null;
+    await threeSignals(USER, 'general');
+    const { learnAfterPurge } = await learner();
+
+    await expect(learnAfterPurge(USER, ['general'])).resolves.toEqual([]);
+    expect(db.policies.size).toBe(0);
   });
 });
 

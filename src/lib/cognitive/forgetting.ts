@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
 import { decryptMemoryContent } from './memories';
 import { fromDbMemoryContext, type MemoryContext } from './policy';
-import { recordPolicySignal } from './policy-learner';
+import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
 import type { Prisma } from '@prisma/client';
 
@@ -76,6 +76,8 @@ async function detachEdges(tx: Prisma.TransactionClient, userId: string, ids: st
 
 /** 删掉一条记忆。不属于当前用户或者已经不存在都返回 purged: 0，不报错——调用方按 404 处理。 */
 export async function purgeMemory(memoryId: string, userId: string): Promise<PurgeResult> {
+  // 闸门开在事务之前：关掉学习时这一轮一条证据都不攒，事务里也就少一次写入。
+  const recordSignals = await policyLearningEnabled(userId);
   return prisma.$transaction(async (tx) => {
     const row = await tx.memoryItem.findFirst({ where: { id: memoryId, userId } });
     if (!row) return { purged: 0, contexts: [] };
@@ -85,13 +87,14 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     const result = await tx.memoryItem.deleteMany({ where: { id: memoryId, userId } });
     await recordSources(tx, userId, [target]);
     // 一次删除只算一条证据，哪怕这一条同时触发了排除和演化边清理。
-    await recordPolicySignal(tx, userId, context);
+    if (recordSignals) await recordPolicySignal(tx, userId, context);
     return { purged: result.count, contexts: [context] };
   });
 }
 
 /** 忘记某次对话产生的全部记忆，对话本身保留。 */
 export async function purgeMemoriesByChat(chatId: string, userId: string): Promise<PurgeResult> {
+  const recordSignals = await policyLearningEnabled(userId);
   return prisma.$transaction(async (tx) => {
     const rows = (await tx.memoryItem.findMany({
       where: { userId, chatId }
@@ -104,7 +107,7 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
     await recordSources(tx, userId, rows);
     // 用户点的是一次按钮：删掉 5 条技术项目记忆算一条证据，不是五条，
     // 否则一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
-    for (const context of contexts) await recordPolicySignal(tx, userId, context);
+    for (const context of contexts) if (recordSignals) await recordPolicySignal(tx, userId, context);
     return { purged: result.count, contexts };
   });
 }

@@ -22,7 +22,9 @@ const db = vi.hoisted(() => ({
   signals: [] as Row[],
   txOps: [] as string[],
   topOps: [] as string[],
-  commits: 0
+  commits: 0,
+  /** 策略学习层的开关（偏好表里的第八个）。null 表示「偏好读不出来」。 */
+  adaptiveEnabled: true as boolean | null
 }));
 
 function satisfies(value: unknown, condition: unknown): boolean {
@@ -130,7 +132,15 @@ vi.mock('@/lib/prisma', () => ({
         Promise.resolve(detach(where, data, db.topOps))
     },
     memoryExclusion: exclusionClient(db.topOps),
-    memoryPolicySignal: signalClient(db.topOps)
+    memoryPolicySignal: signalClient(db.topOps),
+    // 闸门在事务之外读一次偏好：null 走 getCognitivePreferences 的「没行＝全关」，
+    // 抛错用来测「偏好读不出来」时学习层宁可什么都不学。
+    cognitivePreference: {
+      findUnique: () =>
+        db.adaptiveEnabled === null
+          ? Promise.reject(new Error('preference unavailable'))
+          : Promise.resolve({ adaptiveMemoryEnabled: db.adaptiveEnabled })
+    }
   }
 }));
 
@@ -178,6 +188,7 @@ beforeEach(() => {
   db.txOps = [];
   db.topOps = [];
   db.commits = 0;
+  db.adaptiveEnabled = true;
 });
 
 describe('永久删除一条', () => {
@@ -423,6 +434,48 @@ describe('删除时记录策略学习证据', () => {
     const { purgeMemory } = await forgetting();
 
     await purgeMemory('mem-1', USER);
+
+    expect(db.signals).toEqual([]);
+  });
+
+  it('开关关了就不学：删一条不攒证据，但删除本身的派生清理一条都不少', async () => {
+    db.adaptiveEnabled = false;
+    db.rows.set('mem-1', row('mem-1', { context: 'TECHNICAL_PROJECT' }));
+    db.rows.set('mem-2', row('mem-2', { version: 2 }));
+    db.edges = [edge('edge-1', 'mem-2', 'mem-1')];
+    const { purgeMemory } = await forgetting();
+
+    const result = await purgeMemory('mem-1', USER);
+
+    expect(result).toMatchObject({ purged: 1, contexts: ['technicalProject'] });
+    // 学习层一条证据都不攒：下次打开开关也不会被这次删除追溯性收紧
+    expect(db.signals).toEqual([]);
+    expect(db.txOps).not.toContain('signal');
+    // 排除规则和摘边属于删除本身（任务书 7.4 门槛 2），和「学不学」是两件事，照常执行
+    expect(db.txOps).toContain('exclude');
+    expect(db.exclusions).toHaveLength(1);
+    expect(db.edges[0]).toMatchObject({ previousId: null });
+  });
+
+  it('开关关了就不学：按会话批量删除同样一条证据都不记', async () => {
+    db.adaptiveEnabled = false;
+    db.rows.set('mem-1', row('mem-1', { chatId: 'chat-1', context: 'TECHNICAL_PROJECT' }));
+    db.rows.set('mem-2', row('mem-2', { chatId: 'chat-1', context: 'GENERAL' }));
+    const { purgeMemoriesByChat } = await forgetting();
+
+    const result = await purgeMemoriesByChat('chat-1', USER);
+
+    expect(result).toMatchObject({ purged: 2 });
+    expect([...result.contexts].sort()).toEqual(['general', 'technicalProject']);
+    expect(db.signals).toEqual([]);
+  });
+
+  it('偏好读不出来当关：宁可什么都不学，也不替用户攒他没表达过的证据', async () => {
+    db.adaptiveEnabled = null;
+    db.rows.set('mem-1', row('mem-1'));
+    const { purgeMemory } = await forgetting();
+
+    await expect(purgeMemory('mem-1', USER)).resolves.toMatchObject({ purged: 1 });
 
     expect(db.signals).toEqual([]);
   });
