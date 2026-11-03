@@ -17,6 +17,7 @@ import { getCognitivePreferences } from './preferences';
 import { rankMemories } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
+import { resolveTemporalFrame } from './temporal';
 import type { MemoryDto, MemoryOrigin } from './memories';
 
 /**
@@ -183,8 +184,11 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
     });
     if (plan.decision !== 'WRITE' && plan.decision !== 'UPDATE') continue;
 
-    // 规则抽出来的是用户原话，所以来源是「亲口说」而不是「系统推断」；
-    // 但这句话到底说的是什么时候，我们并不知道，所以时间精度一律 unknown。
+    // 规则抽出来的是用户原话，所以来源是「亲口说」而不是「系统推断」。
+    // 时间那一栏交给 temporal：这句话里确实有一个能落地的时间说法，才落 validFrom；
+    // 解析不出来就维持 unknown——「不知道说的是什么时候」是合法状态，编一个起点不是。
+    const saidAt = turn.occurredAt ?? new Date();
+    const frame = resolveTemporalFrame(candidate.text, saidAt);
     const entry = {
       userId: turn.userId,
       chatId: turn.chatId,
@@ -192,8 +196,9 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       type: candidate.type,
       content: candidate.text,
       origin: 'explicit' as MemoryOrigin,
-      confirmedAt: turn.occurredAt ?? new Date(),
-      precision: 'unknown' as const
+      confirmedAt: saidAt,
+      precision: frame?.precision ?? ('unknown' as const),
+      validFrom: frame?.validFrom ?? null
     };
     if (plan.decision === 'WRITE') {
       const created = await createMemory({ ...entry, context: plan.context });

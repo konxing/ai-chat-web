@@ -209,7 +209,35 @@ describe('写侧：策略在服务端真的生效', () => {
       content: '我在用 Next.js 15 和 Prisma'
     });
     expect(db.creates[0].confirmedAt).toEqual(OCCURRED);
-    expect(db.creates[0].validFrom).toBeUndefined();
+    expect(db.creates[0].validFrom).toBeNull();
+  });
+
+  /**
+   * 4-T2 接线：写侧的时间来源只有这一个入口。
+   * 两句放在一起才看得出这不是「总落 validFrom」也不是「永远不落」——
+   * 词表里认得出的那个说法落，认不出的一律维持 unknown。
+   */
+  it('句子里有词表内的时间说法时，精度和 validFrom 一起落下', async () => {
+    db.memoryEnabled = true;
+
+    // OCCURRED 是 2026-11-02，所以「去年」是 2025 年，且必须对齐到 1 月 1 日 00:00。
+    await write('去年我住在杭州。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]).toMatchObject({
+      content: '去年我住在杭州',
+      precision: 'year',
+      validFrom: new Date('2025-01-01T00:00:00.000Z')
+    });
+  });
+
+  it('周档和循环说法不在词表里：这句照样按时间未知落库', async () => {
+    db.memoryEnabled = true;
+
+    await write('我习惯周三打球。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]).toMatchObject({ precision: 'unknown', validFrom: null });
   });
 
   it('决策情境默认要先问用户确认，这一片不假装确认过：不落库', async () => {
