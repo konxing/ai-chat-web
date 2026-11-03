@@ -166,9 +166,35 @@ psql -U family_chat -d family_chat -c "SHOW random_page_cost;"
 
 ## 读写路径上已经做掉的事
 
-- 列表类查询（会话详情、更早消息、附件库）用投影 `ATTACHMENT_PUBLIC_SELECT`，把最大的 `chunksCiphertext` 挡在内存之外；只有真的要给模型做检索增强时才整行取。`extractedTextCiphertext` 目前仍在投影里，只为了 DTO 上那个 `hasText` 标记（上传接口有集成测试断言它）——界面并没有用到这个字段，等确认可以摘掉后，列表查询能再省下一次最贵的列。
+- 列表类查询（会话详情、更早消息、附件库）用投影 `ATTACHMENT_PUBLIC_SELECT`，把两个大列 `chunksCiphertext` 和 `extractedTextCiphertext` 都挡在内存之外；只有真的要给模型做检索增强时才整行取。两个大列都省掉的前提是 DTO 上那个 `hasText` 标记一并去掉——界面从没读过它，只有上传回执在读，所以改成上传路由单独用整行现算（`uploadedAttachment`），页面列表走投影（`publicAttachment`）。
+- `textSkipped`（「这个文件太大，没给你抽正文」的提示）也不再回读正文列去核对，改由 `parseSkippedFor(mime, size)` 直接算。等价性靠的是写入顺序：`inspectUpload` 先用 `mime` 和 `buffer.length` 判定要不要抽文本，抽了才写正文列，而存进库的 `mime`/`size` 就是那两个入参。所以「这行有正文」⟹「当时判定不该跳过」，反过来「没正文且按 mime/size 该跳过」和「按 mime/size 该跳过」是同一个条件。代价是这条线**只能上调不能下调**：历史上按旧线抽过正文、体积却在新线之上的行会被误标成跳过，这个约束写在 `TEXT_PARSE_MAX_BYTES` 的注释上。
+- 摘掉正文列的收益实测（临时表、不可压缩密文、墙钟计时，100 个附件的一页）：每份正文 20 KB 时 **24.0 ms → 1.2 ms**，200 KB 时 **83.2 ms → 1.7 ms**，2 MB 时 **807.4 ms → 1.1 ms**。上限是真实存在的：抽取文本在 `src/lib/files.ts:227` 硬截到 2,000,000 字符（约 2.7 MB base64 密文），一页历史 60 条消息（`src/lib/chats.ts:167`）× 每条最多 15 个附件（`src/lib/validation.ts:79`）= 900 个附件，附件库一页 `take: 500`（`src/lib/chats.ts:447`）。注意测量方法本身有坑：`EXPLAIN (ANALYZE, BUFFERS)` 对大文本列会严重低报（142 MB 那一档只报 `local hit=4`、`quicksort Memory: 31kB`），必须用墙钟加到端字节；另外用 `repeat('x', N)` 造的数据会被 TOAST 压扁到几百字节原地存放，测不出 IO。
 - 一条用户消息只产生一次 `Chat` UPDATE（活跃时间 + 本轮模型 + 自动标题合并），`updatedAt` 由 `@updatedAt` 自动带上。
 - 管理员首页的目录体积统计按 32 个一批并发 `stat`，不再串行等每个文件一次往返。
 - IP 白名单缓存把规则查询移出请求路径：冷启动 await 一次，之后由定时器按 `IP_CACHE_MS` 预热，被扫描时数据库的查询频率恒定而不是随请求线性增长。
 
 日志检索仍然用子串匹配（`contains`），没有改成前缀匹配。原因是这个库的 collation 实测为 `Chinese (Simplified)_China.936`，非 C 排序下 `(ip, createdAt)`、`(action, createdAt)` 的 btree 索引服务不了 `LIKE 'x%'`，要额外建 `varchar_pattern_ops` 索引才有意义。在没有那套索引之前，改前缀只会缩小管理员能搜到的范围，换不来任何速度。
+
+## 记忆读侧索引：实测后暂不做
+
+检索热路径的形状是「`userId` 等值 + `supersededAt IS NULL` + `origin NOT IN` + `validFrom/validTo` 双 `OR` + `ORDER BY recordedAt DESC LIMIT n`」（`src/lib/cognitive/memory-module.ts` 的 `MEMORY_RETRIEVAL_POOL = 200`，截断到 8 条）。已有索引只有 `@@index([userId, supersededAt])`，看起来「缺一个 `recordedAt`」，实测下来这个直觉是错的。
+
+方法：临时表 `bench_mem`（`ON COMMIT DROP`，包在同一个 `$transaction` 里才看得见），单用户 `bench-user`，只变未取代行数，跑真实的 `EXPLAIN (ANALYZE, BUFFERS)`。
+
+| 未取代行数 | A 现状 `[userId, supersededAt]` | B 原拟 `[userId, supersededAt, recordedAt]` | C 偏索引 `(userId, recordedAt DESC) WHERE supersededAt IS NULL` |
+| --- | --- | --- | --- |
+| 320 | 0.251 ms（Sort，`hit=25`） | — | 0.238 ms（**仍走 Sort，优化器没选它**） |
+| 800 | 0.610 ms（`hit=63`） | — | 0.126 ms（Index Scan，`hit=194 read=2`） |
+| 3200 | 1.414 ms（`hit=250`） | — | 0.139 ms |
+| 8000 | 3.365 ms（`hit=625`） | 2.848 ms（**计划未变，仍 Bitmap Heap Scan + top-N heapsort**） | 0.179 ms |
+| 40000 | 13.536 ms（`local read=3125`） | 14.989 ms（**仍 Sort**） | 0.752 ms（`hit=67 read=136`） |
+
+三个结论：
+
+1. **B（在现有索引上补第三列）确认无效**。它不改变计划：优化器仍然先用 `[userId, supersededAt]` 捞出全部候选行，再做 top-N heapsort，因为 `supersededAt IS NULL` 和 `origin NOT IN` 的谓词夹在中间，第三列的有序性用不上。8000 行 3.365 → 2.848 ms、40000 行 13.536 → 14.989 ms 都在噪声里，等于白付一次写放大和一次迁移。
+2. **只有 C 这种偏索引（把 `supersededAt IS NULL` 放进 WHERE）能变成有序 Index Scan**，收益也真实（40000 行 13.5 ms → 0.75 ms；按 8 条截断的那条读法在 8000 行是 4.033 → 0.055 ms、40000 行 12.480 → 0.033 ms）。但它在**行数小的时候优化器根本不选**（320 行那一档仍是 Sort），要见效至少得单用户上千条活记忆。
+3. **真库现在 `MemoryItem` 是 0 行**（`Attachment` 同样 0 行），家庭规模的量级离触发条件还远。
+
+偏偏 C 表达不出来：Prisma 的 `@@index` 不支持 partial index 谓词，只能写裸 SQL DDL。而这个仓库 `prisma/migrations/` 下 12 个迁移**没有任何一处手写索引 DDL**，索引全部由 schema 声明——引入第一条裸 SQL 索引，就成了「声明式 schema 之外、下一次 `migrate dev` 的 shadow-DB diff 可能生成 `DROP INDEX`」的机制性风险。这个漂移我只做了推理、本机没有影子库无法实测，所以不为它承担未经检验的风险。
+
+**触发条件**（满足再回来做）：单个用户的未取代记忆稳定超过 ~1000 条，且 `/api/account/cognitive/memories` 或对话检索出现可复现的慢请求。做法是裸 SQL 偏索引 `(userId, recordedAt DESC) WHERE supersededAt IS NULL`，并同步把它记进迁移清单、验证一次 `migrate dev` 不会把它 diff 掉。

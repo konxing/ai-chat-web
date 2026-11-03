@@ -1,7 +1,7 @@
 import { api, ApiError, getRequestIp, readMultipartLimited, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { getChatOwned } from '@/lib/chats';
-import { maxUploadBytes, publicAttachment, storeUpload } from '@/lib/files';
+import { maxUploadBytes, storeUpload, uploadedAttachment } from '@/lib/files';
 import { rateLimit } from '@/lib/rate-limit';
 import { withUploadSlot } from '@/lib/upload-gate';
 import { ApiError as ApiErr } from '@/lib/http';
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
         filename: file.name,
         declaredMime: file.type
       });
-      return { attachment: publicAttachment(attachment) };
+      return { attachment: uploadedAttachment(attachment) };
     });
   });
 }

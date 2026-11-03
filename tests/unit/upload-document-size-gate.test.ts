@@ -115,12 +115,29 @@ describe('50MB 以上的文档跳过文本抽取', () => {
       mime: 'application/pdf',
       size: 51 * MB,
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      originalNameCiphertext: '',
-      extractedTextCiphertext: null
+      originalNameCiphertext: ''
     };
 
     expect(publicAttachment(summary).textSkipped).toBe(true);
     expect(publicAttachment({ ...summary, size: 1 * MB }).textSkipped).toBe(false);
-    expect(publicAttachment({ ...summary, extractedTextCiphertext: 'x' }).textSkipped).toBe(false);
+    expect(publicAttachment({ ...summary, mime: 'image/png' }).textSkipped).toBe(false);
+    // 页面上没有谁能回答「这份文档抽到正文了没有」——那一列不再搬回进程，
+    // 所以 DTO 也不再假装知道：hasText 这个字段整条删掉。
+    expect(publicAttachment(summary)).not.toHaveProperty('hasText');
+  });
+
+  it('上传回执仍然报告这次有没有抽到正文：整行只在这一条路上才拿得到', async () => {
+    const { uploadedAttachment } = await import('@/lib/files');
+    const base = {
+      id: 'a1',
+      kind: 'FILE' as const,
+      mime: 'application/pdf',
+      size: 1 * MB,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      originalNameCiphertext: ''
+    };
+
+    expect(uploadedAttachment({ ...base, extractedTextCiphertext: 'CIPHERTEXT-BODY' }).hasText).toBe(true);
+    expect(uploadedAttachment({ ...base, extractedTextCiphertext: null }).hasText).toBe(false);
   });
 });

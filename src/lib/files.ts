@@ -72,6 +72,10 @@ export function imageSendSummary(attachments: Attachment[]): { sent: number; ski
  * 原件存得下不等于解析得起：unpdf 和 mammoth 都是把整份文件在内存里展开的，
  * 50MB 的 PDF 抽一次能吃掉几百 MB。超过这条线就只存原件，并把这个事实告诉前端——
  * 用户看见的不能是「上传成功」然后以为模型读到了内容。
+ *
+ * 这条线**只能上调，不能下调**。写入侧（`inspectUpload`）用它决定要不要抽文本，
+ * 读侧（`publicAttachment`）也用它把「过大未解析」讲给用户听，而读侧已经不再回读正文列
+ * 去核对——所以一旦下调，历史上那些「按旧线抽过正文、体积却在新线之上」的行会被误标成跳过。
  */
 export const TEXT_PARSE_MAX_BYTES = 50 * 1024 * 1024;
 
@@ -80,7 +84,15 @@ const PARSED_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]);
 
-/** 图片本来就抽不出文本，不算「跳过」；只有本该抽却没有抽的才需要在界面上说明。 */
+/**
+ * 图片本来就抽不出文本，不算「跳过」；只有本该抽却没有抽的才需要在界面上说明。
+ *
+ * 这个判断同时也是 `publicAttachment` 里 `textSkipped` 的全部依据，依据是写入顺序：
+ * `inspectUpload` 先算出 `textSkipped` 再决定要不要调用解析器，所以
+ * 「这一行存了正文」⟹ 当时 `parseSkippedFor` 为假；而 `mime` 与 `size` 存的就是
+ * 它的两个入参，此后不会变。于是旧写法 `!有正文 && parseSkippedFor(...)` 与
+ * `parseSkippedFor(...)` 对所有真实存在的行等价——读侧因此不必把正文密文列搬回进程。
+ */
 function parseSkippedFor(mime: string, size: number): boolean {
   return PARSED_MIMES.has(mime) && size > TEXT_PARSE_MAX_BYTES;
 }
@@ -314,14 +326,15 @@ export interface PublicAttachment {
   mime: string;
   size: number;
   kind: AttachmentKind;
-  hasText: boolean;
   textSkipped: boolean;
   createdAt: string;
 }
 
 /**
- * 展示附件列表所需的列。刻意不取 chunksCiphertext：一页 60 条消息可能带几十个附件，
- * 文档分块密文是最大的两列之一，列表页取它纯属浪费 IO 与解密时间。
+ * 展示附件列表所需的列。刻意不取两个大列：一页 60 条消息可能带几十个附件，
+ * 而列表页对它们的唯一用途是「这份文档有没有正文」——那件事 mime 和 size 就够回答了。
+ * 实测把 `extractedTextCiphertext` 从这条读取里去掉，100 个附件的一页：
+ * 每份正文 20 KB 时 24.0 ms → 1.2 ms，200 KB 时 83.2 ms → 1.7 ms，2 MB 时 807.4 ms → 1.1 ms。
  */
 export const ATTACHMENT_PUBLIC_SELECT = {
   id: true,
@@ -329,13 +342,12 @@ export const ATTACHMENT_PUBLIC_SELECT = {
   mime: true,
   size: true,
   createdAt: true,
-  originalNameCiphertext: true,
-  extractedTextCiphertext: true
+  originalNameCiphertext: true
 } as const satisfies Prisma.AttachmentSelect;
 
 export type AttachmentSummary = Pick<
   Attachment,
-  'id' | 'kind' | 'mime' | 'size' | 'createdAt' | 'originalNameCiphertext' | 'extractedTextCiphertext'
+  'id' | 'kind' | 'mime' | 'size' | 'createdAt' | 'originalNameCiphertext'
 >;
 
 export function publicAttachment(attachment: AttachmentSummary): PublicAttachment {
@@ -345,10 +357,19 @@ export function publicAttachment(attachment: AttachmentSummary): PublicAttachmen
     mime: attachment.mime,
     size: attachment.size,
     kind: attachment.kind,
-    hasText: !!attachment.extractedTextCiphertext,
-    textSkipped: !attachment.extractedTextCiphertext && parseSkippedFor(attachment.mime, attachment.size),
+    textSkipped: parseSkippedFor(attachment.mime, attachment.size),
     createdAt: attachment.createdAt.toISOString()
   };
+}
+
+/**
+ * 上传回执专用：只有这一条路还拿着整行，所以只有这里能如实报告「这次抽到正文了没有」。
+ * 页面读取回不了这个答案，也不再假装能——那是那一列被移出列表读取的代价，也是它的收益。
+ */
+export function uploadedAttachment(
+  attachment: AttachmentSummary & Pick<Attachment, 'extractedTextCiphertext'>
+): PublicAttachment & { hasText: boolean } {
+  return { ...publicAttachment(attachment), hasText: !!attachment.extractedTextCiphertext };
 }
 
 export async function getAttachmentForUser(id: string, userId: string): Promise<Attachment> {

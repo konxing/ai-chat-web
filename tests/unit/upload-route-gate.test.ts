@@ -28,7 +28,7 @@ vi.mock('@/lib/files', () => ({
       ctx.storeResolvers.push(() => resolve({ id: 'att-1', filename: input.filename }));
     });
   },
-  publicAttachment: (attachment: { filename: string }) => attachment
+  uploadedAttachment: (attachment: { filename: string }) => attachment
 }));
 
 const MB = 1024 * 1024;
