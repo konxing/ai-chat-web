@@ -1,0 +1,189 @@
+import { STORIES, allMemories } from './fixtures/stories';
+import type { ProbeScore, ArmSummary } from './metrics';
+
+/**
+ * 报告是**从 summary 数据渲染出来的**，不是手写的：
+ * snapshot 测试要能重跑一遍再逐字节比对，手写的段落一动就对不上，
+ * 而对不上之后人干的事通常是把 snapshot 更新掉——那这条门禁就废了。
+ */
+
+export interface ReportInput {
+  scores: ProbeScore[];
+  arms: { A2: ArmSummary; current: ArmSummary };
+  visibleSize: number;
+  /** 8 个故事的池子本身只有几十行，线上一条查询面对的是整个候选池；两者要分开报。 */
+  poolSize: number;
+}
+
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function categoryTable(arms: ReportInput['arms']): string {
+  const rows = Object.keys({ ...arms.A2.byCategory, ...arms.current.byCategory }).sort();
+  const lines = ['| 类别 | 守这一层的是 | 提问数 | A2 通过 | 现状通过 |', '|---|---|---|---|---|'];
+  for (const row of rows) {
+    const a = arms.A2.byCategory[row];
+    const b = arms.current.byCategory[row];
+    lines.push(
+      `| ${row} | ${(a ?? b)!.guard} | ${a?.probes ?? 0} | ${a ? `${a.passed}/${a.probes}` : '—'} | ${
+        b ? `${b.passed}/${b.probes}` : '—'
+      } |`
+    );
+  }
+  return lines.join('\n');
+}
+
+function goldTable(scores: ProbeScore[]): string {
+  const byProbe = new Map<string, { A2?: ProbeScore; current?: ProbeScore }>();
+  for (const score of scores) {
+    const entry = byProbe.get(score.id) ?? {};
+    if (score.arm === 'A2') entry.A2 = score;
+    else entry.current = score;
+    byProbe.set(score.id, entry);
+  }
+  const lines = [
+    '| 提问 | 这一轮注入的（按注入顺序） | 标准答案 | 命中 | 违禁项 | 低可信漏标 |',
+    '|---|---|---|---|---|---|'
+  ];
+  for (const [, entry] of byProbe) {
+    const current = entry.current!;
+    lines.push(
+      `| ${current.id} | ${current.injected.join(' → ') || '（空）'} | ${current.gold.join(', ') || '（应为空）'} | ${
+        current.hits.length
+      }/${current.gold.length} | ${current.violations.join(', ') || '—'} | ${
+        current.missingLowMark.join(', ') || '—'
+      } |`
+    );
+  }
+  return lines.join('\n');
+}
+
+export function renderReport(input: ReportInput): string {
+  const { arms, scores } = input;
+  const current = arms.current;
+  const baseline = arms.A2;
+  const currentScores = scores.filter((score) => score.arm === 'current');
+  const missed = currentScores.filter((score) => score.recall !== null && score.recall < 1);
+
+  return `# 认知评测报告（切片 3b：8 个故事）
+
+标注来源：**Agent 起草，用户复核口径**（任务书 7.1 要的是「人工制定的标准答案」，
+这一版还不是人工标注，复核结论见文末）。所有故事、会话、记忆全部虚构，
+未使用任何真实家庭成员的聊天记录。
+
+- 池子：${allMemories().length} 行，其中此刻可见 ${input.visibleSize} 行（另有取代/失效/未生效的被挡在门外）
+- 提问：${current.probes} 个，覆盖 ${STORIES.length} 个故事；延迟一栏另垫到 ${input.poolSize} 行量级
+
+## 一句话结论
+
+现状相对 A2：Recall@8 ${percent(baseline.recallAt8)} → ${percent(current.recallAt8)}，
+MRR ${baseline.mrr} → ${current.mrr}，违禁项注入次数 ${baseline.forbiddenInjections} → ${current.forbiddenInjections}，
+平均注入字符数 ${baseline.avgInjectedChars} → ${current.avgInjectedChars}。
+
+## 四个对照臂今天的实际状态
+
+| 臂 | 内容 | 今天 |
+|---|---|---|
+| A1 | 只有近期上下文，不带长期记忆 | 不跑：它要的是「模型作答质量」，harness 离线不接模型 |
+| A2 | 改造前：按 recordedAt 取最近 K 条 | **跑了**，本报告里的旧基线 |
+| B | 长期记忆 + 向量检索 | 跑不了：没有 Embedding Provider（5.3 未落地） |
+| C | + 图关联 | 跑不了：RELATED_TO 边按实测否掉，见 tests/unit/cognitive-relations-calibration.test.ts |
+| D | + 反思与决策经验 | 跑不了：Phase 5/6 未开始；且 decisionMaking 情境要求用户确认，确认界面还没做，今天一条决策记忆都落不进库 |
+| 现状 | 保留期过滤 + 关键词召回 + 置信度标注 | **跑了**，就是线上行为 |
+
+两臂共用同一个渲染器，差异只在「怎么选这 8 条」——所以数字动了说得出是谁干的。
+
+## 指标
+
+| 指标 | A2 | 现状 |
+|---|---|---|
+| Recall@8 | ${baseline.recallAt8} | ${current.recallAt8} |
+| Precision@8 | ${baseline.precisionAt8} | ${current.precisionAt8} |
+| MRR | ${baseline.mrr} | ${current.mrr} |
+| 至少命中一条的提问占比 | ${percent(baseline.hitRate)} | ${percent(current.hitRate)} |
+| 违禁项被注入的次数 | ${baseline.forbiddenInjections} | ${current.forbiddenInjections} |
+| 该标低可信却没标的次数 | ${baseline.unmarkedLowConfidence} | ${current.unmarkedLowConfidence} |
+| 平均注入字符数 | ${baseline.avgInjectedChars} | ${current.avgInjectedChars} |
+
+## 分类别通过率
+
+${categoryTable(arms)}
+
+**guard 这一列不能省。** seam = 走的是线上那两个纯函数（selectMemoryCandidates / renderMemoryBlock）；
+mirror = 靠 harness 里那份 visibleAt 复刻池子规则，真实来源是 listMemories 的 where 条件
+（另由 tests/unit/cognitive-memories.test.ts 守住，不在这里重复计分）。
+把两类混成一个总分报出去，等于拿复刻的数字冒充线上行为。
+
+## 这份基线读出来的四件事
+
+1. **每轮 8 个名额里，平均 ${current.avgNonGoldSlots} 条不是这一问该答的。**
+   这不是 bug，是 rankMemories 的补位设计——相关项不够时用最近的凑，宁可多给也不让这一轮完全没有记忆可用。
+   但它意味着 Precision@8 只有 ${current.precisionAt8}，而这是这一版里最便宜的收益点：
+   补位改成「只补分数大于 0 的」就能把噪声砍掉一大截，代价是有些轮会一条都不注入。要不要换，等 3c 铺到 30 个故事再定。
+2. **有 ${current.unreachableGold.length} 条标准答案关键词一次都没捞回**：${current.unreachableGold.join(', ') || '无'}。
+   这一栏是下一次要不要上向量、要不要重开 RELATED_TO 的第一手依据，也是 3c 铺量时唯一值得盯的增长。
+3. **「该标低可信却没标」两臂都是 ${baseline.unmarkedLowConfidence} / ${current.unmarkedLowConfidence}，但这两个 0 不是一回事**：
+   A2 那个 0 是因为该标的那几条压根没被注入（它输在 Recall 上），不是它标对了。这一栏只在「确实出现了」的前提下有意义。
+4. **违禁项泄漏现状 ${current.forbiddenInjections} 次、A2 ${baseline.forbiddenInjections} 次。**
+   数字小主要因为大多数违禁项（被取代的、已失效的）根本不进候选池——那是 SQL 层的功劳，不是这次改动的功劳；
+   真正属于读侧的那类（跨会话的敏感记忆）A2 泄漏、现状不泄漏，见 forgetting 一栏。
+
+## 逐问明细（复核用这一张表）
+
+${goldTable(scores)}
+
+### 现状这一版没答上的提问
+
+${missed.length === 0 ? '无' : missed.map((score) => `- ${score.id}：期望 ${score.gold.join(', ')}，实际注入 ${score.injected.join(', ') || '（空）'}，漏了 ${score.gold.filter((id) => !score.hits.includes(id)).join(', ')}`).join('\n')}
+
+### 关键词一次都没捞回的标准答案条目
+
+${current.unreachableGold.length === 0 ? '无' : current.unreachableGold.join(', ')}
+
+## 7.3 里今天测不了的指标
+
+| 指标 | 为什么没有 |
+|---|---|
+| 向量召回质量（B 臂） | 没有 Embedding Provider |
+| 图关联命中、多跳路径正确率 | 关系表没建（实测否掉，见上） |
+| 时间线完整性、演化链正确率 | Phase 4 认知时间线未开始 |
+| 反思相关指标 | Phase 6 未开始 |
+| 决策经验复用率 | Phase 5 未开始，且 requireConfirmation 的确认界面缺失 |
+| 后台任务成功率与延迟 | CognitiveTask 队列未落地（§六），没有东西可测 |
+| 存储增长曲线 | 需要真实库和真实时间跨度 |
+| 检索延迟（ms） | 见下面「延迟」一节：不进 snapshot |
+| 撤回/永久删除后的不可见率 | 已由 tests/unit/cognitive-memories.test.ts 在 SQL 层守住，harness 里重述一遍只会多一个可能不一致的来源 |
+
+## 延迟
+
+延迟每次跑都不一样，写进报告就成了每次 commit 都动的噪声，所以**不进 summary.json**，
+只在 \`npm run eval:cognitive\` 的标准输出里给本机实测值（200 行池子、中位数）。
+纯函数这一层是微秒级；一条查询真正的开销在解密整池 200 行，那一步在 readMemory 里，
+harness 测不到，也不假装测得到。
+
+## 这一版的限制
+
+1. fixture 是 Agent 编的，池子也是编的。它能证明「相对 A2 有收益且不退化」，
+   **不能证明线上真实用户的召回质量**。
+2. 标准答案由 Agent 起草，尚未逐条人工复核；复核完成前，上面所有分类别通过率都算「待确认」。
+3. 8 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的第一批，样本量不足以定正式阈值；
+   7.4 末段要求「先运行基线，再根据结果设定正式阈值」，这份报告就是那个基线的第一版。
+`;
+}
+
+export function renderSummary(input: ReportInput): string {
+  const payload = {
+    schema: 1,
+    counts: {
+      stories: STORIES.length,
+      sessions: STORIES.reduce((sum, story) => sum + story.sessions.length, 0),
+      memories: allMemories().length,
+      visibleMemories: input.visibleSize,
+      probes: input.arms.current.probes
+    },
+    arms: { A2: input.arms.A2, current: input.arms.current },
+    scores: input.scores
+  };
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
