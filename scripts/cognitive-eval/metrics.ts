@@ -82,6 +82,8 @@ export interface ArmSummary {
   /** 低可信标注缺失的次数（该标的没标）。 */
   unmarkedLowConfidence: number;
   avgInjectedChars: number;
+  /** 每轮实际注入了几条：「补位总是把 8 个名额填满」这句话得用这个数证明，不能靠读设计意图。 */
+  avgInjectedItems: number;
   /** 每轮 8 个名额里平均有几条不是这一问该答的——补位噪声的直接读数。 */
   avgNonGoldSlots: number;
   /** 一次都没被捞回来的标准答案条数——这就是「关键词召回捞不到」的第一手依据。 */
@@ -154,6 +156,7 @@ export function summarizeArm(scores: readonly ProbeScore[]): ArmSummary {
     byCategory,
     unmarkedLowConfidence: scores.reduce((sum, score) => sum + score.missingLowMark.length, 0),
     avgInjectedChars: round(mean(scores.map((score) => score.injectedChars))),
+    avgInjectedItems: round(mean(scores.map((score) => score.injected.length))),
     avgNonGoldSlots: round(mean(scores.map((score) => score.injected.length - score.hits.length))),
     unreachableGold: [...unreachableGold].sort()
   };

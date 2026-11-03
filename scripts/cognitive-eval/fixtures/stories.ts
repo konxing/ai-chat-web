@@ -1,40 +1,24 @@
 import type { EvalMemory, EvalProbe, EvalStory } from '../fixture-types';
+import { memory } from './memory-factory';
+import { BATCH1_STORIES } from './stories-batch1';
 
 /**
- * 8 个虚构故事（任务书 7.1 的第一批语料）。
+ * 认知评测的语料入口。第一批 s1–s8 在本文件里，后续批次各占一个文件，在这里拼接。
  *
- * 覆盖面对照任务书点名的主题面：工作（s1 / s8）、学习（s2）、兴趣（s3）、目标（s4）、
- * 项目（s5）、决策（s6）、情绪交互（s7）；五种情形各有至少一次：
- * 事实变化 s1·s3·s5、时间冲突 s2·s4、反例 s1·s4·s6、遗忘 s7、用户纠正 s3。
+ * 覆盖面对照任务书点名的主题面：工作（s1 / s8 / s9 / s16）、学习（s2 / s10 / s17）、兴趣（s3 / s11 / s18）、
+ * 目标（s4 / s12）、项目（s5 / s13 / s19）、决策（s6 / s14）、情绪交互（s7 / s15）；
+ * 五种情形各有至少一次：事实变化 s1·s3·s5·s9·s16、时间冲突 s2·s4·s14·s18·s19、
+ * 反例 s1·s4·s6·s9·s11·s12·s17·s18、遗忘 s7·s15、用户纠正 s3·s11·s13·s17。
  *
  * 每个故事的会话都是 6 个（7.1 要求 6~10 个）。day 是相对评测时刻的天数，负数是过去。
  *
- * 两条能被机器查的规矩写在 stories 文件末尾的 selfCheck 里：
+ * 两条能被机器查的规矩写在 harness.ts 的 selfCheck 里：
  * 记忆正文必须逐字出自它声明的那个会话；supports 不许超过这句话出现过的会话数。
  * 剩下查不了的（contradicts 凭什么、gold 凭哪条判）一律要求写 note／why，
  * 复核的时候是逐条摊开看的，不是看一个总分。
  */
 
-function memory(
-  id: string,
-  content: string,
-  session: string,
-  day: number,
-  fields: Partial<EvalMemory> = {}
-): EvalMemory {
-  return {
-    id,
-    content,
-    session,
-    day,
-    type: 'fact',
-    context: 'general',
-    origin: 'explicit',
-    ...fields
-  };
-}
-
-export const STORIES: EvalStory[] = [
+const CORE_STORIES: EvalStory[] = [
   {
     id: 's1',
     title: '订单服务与主库',
@@ -585,6 +569,9 @@ export const STORIES: EvalStory[] = [
     ]
   }
 ];
+
+/** 全部批次拼成一个池子：harness、报告和 snapshot 都只认这一个入口。 */
+export const STORIES: EvalStory[] = [...CORE_STORIES, ...BATCH1_STORIES];
 
 /** 一个用户的全部记忆行——线上 listMemories 给的就是「这个人的所有」，不是按故事切开的。 */
 export function allMemories(): EvalMemory[] {

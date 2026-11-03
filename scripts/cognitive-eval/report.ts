@@ -11,7 +11,7 @@ export interface ReportInput {
   scores: ProbeScore[];
   arms: { A2: ArmSummary; current: ArmSummary };
   visibleSize: number;
-  /** 8 个故事的池子本身只有几十行，线上一条查询面对的是整个候选池；两者要分开报。 */
+  /** 语料池只有百来行，线上一条查询面对的是整个候选池；两个量级要分开报。 */
   poolSize: number;
 }
 
@@ -107,6 +107,8 @@ export function renderReport(input: ReportInput): string {
   const baseline = arms.A2;
   const currentScores = scores.filter((score) => score.arm === 'current');
   const missed = currentScores.filter((score) => score.recall !== null && score.recall < 1);
+  const zeroHit = currentScores.filter((score) => score.recall !== null && score.hits.length === 0);
+  const minInjected = Math.min(...currentScores.map((score) => score.injected.length));
 
   return `# 认知评测报告（${STORIES.length} 个故事）
 
@@ -164,12 +166,14 @@ ${perStoryTable(scores)}
 铺量时要盯的是「现状平均命中」这一列：新故事进了池子以后，老故事的数字往下走，
 说明 8 个名额在更大的池子里不够分，那是要动参数或者要上向量的信号，不是故事写得不好。
 
-## 这份基线读出来的四件事
+## 这份基线读出来的五件事
 
-1. **每轮 8 个名额里，平均 ${current.avgNonGoldSlots} 条不是这一问该答的。**
-   这不是 bug，是 rankMemories 的补位设计——相关项不够时用最近的凑，宁可多给也不让这一轮完全没有记忆可用。
+1. **每轮平均注入 ${current.avgInjectedItems} 条（上限 8，最少的一轮也注入了 ${minInjected} 条），
+   其中 ${current.avgNonGoldSlots} 条不是这一问该答的。**
+   名额是实实在在被填满的，不是照设计推出来的。补位逻辑（相关项不够就用最近的凑）
+   宁可多给也不让这一轮完全没有记忆可用。
    但它意味着 Precision@8 只有 ${current.precisionAt8}，而这是这一版里最便宜的收益点：
-   补位改成「只补分数大于 0 的」就能把噪声砍掉一大截，代价是有些轮会一条都不注入。要不要换，等 3c 铺到 30 个故事再定。
+   补位改成「只补分数大于 0 的」就能把噪声砍掉一大截，代价是有些轮会一条都不注入。要不要换，等 30 个故事铺完再定。
 2. **有 ${current.unreachableGold.length} 条标准答案关键词一次都没捞回**：${current.unreachableGold.join(', ') || '无'}。
    这一栏是下一次要不要上向量、要不要重开 RELATED_TO 的第一手依据，也是 3c 铺量时唯一值得盯的增长。
 3. **「该标低可信却没标」两臂都是 ${baseline.unmarkedLowConfidence} / ${current.unmarkedLowConfidence}，但这两个 0 不是一回事**：
@@ -177,6 +181,8 @@ ${perStoryTable(scores)}
 4. **违禁项泄漏现状 ${current.forbiddenInjections} 次、A2 ${baseline.forbiddenInjections} 次。**
    数字小主要因为大多数违禁项（被取代的、已失效的）根本不进候选池——那是 SQL 层的功劳，不是这次改动的功劳；
    真正属于读侧的那类（跨会话的敏感记忆）A2 泄漏、现状不泄漏，见 forgetting 一栏。
+5. **${zeroHit.length} 个提问一条标准答案都没命中**（共 ${current.probes} 个）——这一轮确实带了 8 条记忆进去，但没有一条是这件事。
+   这一栏比 Recall 总分难看，因为总分被那些「一问就答全」的故事抬着；要不要动召回，先看下面「没答上的提问」那一节。
 
 ## 逐问明细（复核用这一张表）
 
@@ -216,7 +222,11 @@ harness 测不到，也不假装测得到。
 1. fixture 是 Agent 编的，池子也是编的。它能证明「相对 A2 有收益且不退化」，
    **不能证明线上真实用户的召回质量**。
 2. 标准答案由 Agent 起草，尚未逐条人工复核；复核完成前，上面所有分类别通过率都算「待确认」。
-3. ${STORIES.length} 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的铺量过程；样本量还不足以定正式阈值，
+3. **精确率那一栏有 fixture 自己的影子**：补位是「按最近时间倒序填」，而语料里贴着评测时刻的那几行
+   恰好是家务和琐事（s8 的四条「我把 X 做了一遍」、s3 的重新开始拉琴），于是它们几乎出现在每一个兜底列表里。
+   换一个真实用户，垫底的会是他的日常闲聊——「兜底捞到的是最近的琐事」这个结论成立，
+   但 ${current.precisionAt8} 这个具体数字不能当成线上期望值。
+4. ${STORIES.length} 个故事、${current.probes} 个提问，是 7.1 要求 30 故事的铺量过程；样本量还不足以定正式阈值，
    7.4 末段要求「先运行基线，再根据结果设定正式阈值」，这份报告就是那条基线。
 `;
 }
