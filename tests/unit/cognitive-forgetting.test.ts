@@ -9,9 +9,8 @@ import { encryptString } from '@/lib/crypto';
  * 活着的那一行版本链就凭空断了。所以先把指向被删行的边摘开（previousId 置 null，
  * 该列本身可空），保住「这一版来自一次改口」这个事实，同时不留指向已删内容的指针。
  *
- * 派生数据当前有两种：演化边，以及「删掉的内容不许被自动记回来」的排除规则。
- * Embedding、图关系、时间线、反思、决策、认知任务都还没落地，
- * 等它们出现时这里要跟着加清理，测试也要跟着加断言。
+ * 派生数据当前有三种：演化边、排除规则，以及还没跑的认知任务（CognitiveTask）。
+ * Embedding、图关系、时间线、反思、决策都还没落地，等它们出现时这里要跟着加清理。
  */
 type Row = Record<string, unknown>;
 
@@ -20,6 +19,8 @@ const db = vi.hoisted(() => ({
   edges: [] as Row[],
   exclusions: [] as Row[],
   signals: [] as Row[],
+  /** 还没跑的认知任务（CognitiveTask 行）。删除要连带把它们撤掉。 */
+  tasks: [] as Row[],
   txOps: [] as string[],
   topOps: [] as string[],
   commits: 0,
@@ -98,6 +99,19 @@ function signalClient(sink: string[]) {
   };
 }
 
+/** CognitiveTask 表。撤欠账必须走事务客户端，所以 sink 由调用方给。 */
+function taskClient(sink: string[]) {
+  return {
+    deleteMany: ({ where }: { where: unknown }) => {
+      sink.push('task');
+      const kept = db.tasks.filter((task) => !matches(task, where));
+      const count = db.tasks.length - kept.length;
+      db.tasks = kept;
+      return Promise.resolve({ count });
+    }
+  };
+}
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: (run: (tx: unknown) => Promise<unknown>) =>
@@ -119,7 +133,8 @@ vi.mock('@/lib/prisma', () => ({
             Promise.resolve(detach(where, data, db.txOps))
         },
         memoryExclusion: exclusionClient(db.txOps),
-        memoryPolicySignal: signalClient(db.txOps)
+        memoryPolicySignal: signalClient(db.txOps),
+        cognitiveTask: taskClient(db.txOps)
       }).then((result) => {
         db.commits += 1;
         return result;
@@ -133,6 +148,7 @@ vi.mock('@/lib/prisma', () => ({
     },
     memoryExclusion: exclusionClient(db.topOps),
     memoryPolicySignal: signalClient(db.topOps),
+    cognitiveTask: taskClient(db.topOps),
     // 闸门在事务之外读一次偏好：null 走 getCognitivePreferences 的「没行＝全关」，
     // 抛错用来测「偏好读不出来」时学习层宁可什么都不学。
     cognitivePreference: {
@@ -185,10 +201,89 @@ beforeEach(() => {
   db.edges = [];
   db.exclusions = [];
   db.signals = [];
+  db.tasks = [];
   db.txOps = [];
   db.topOps = [];
   db.commits = 0;
   db.adaptiveEnabled = true;
+});
+
+/** 队列里还欠着的一条活：只带 id，所以撤它的理由永远是「归属」，不是内容。 */
+function task(id: string, overrides: Row = {}): Row {
+  return { id, userId: USER, chatId: 'chat-1', sourceMessageId: 'msg-1', kind: 'MEMORY', status: 'PENDING', ...overrides };
+}
+
+describe('删除要连带撤掉还没跑的欠账', () => {
+  it('删一条记忆 ⇒ 它来源那次对话的欠账一起撤，且在同一个事务里', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' })];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.txOps).toContain('task');
+    expect(db.topOps).toEqual([]);
+    expect(db.tasks.map((row) => row.id)).toEqual(['task-2']);
+  });
+
+  it('别人那次对话的欠账一条都不动（同 chatId 也不行，得连 userId 一起对）', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.tasks = [task('task-other', { userId: OTHER })];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.tasks.map((row) => row.id)).toEqual(['task-other']);
+  });
+
+  it('记忆不是从对话里来的（chatId 为空）⇒ 什么都不撤：不带 chatId 是按用户全撤', async () => {
+    db.rows.set('mem-1', row('mem-1', { chatId: null }));
+    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' })];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.tasks).toHaveLength(2);
+  });
+
+  it('按会话删 ⇒ 撤这个会话的欠账，别的会话留着', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.tasks = [
+      task('task-1'),
+      task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' }),
+      task('task-3', { chatId: 'chat-2', userId: OTHER, sourceMessageId: 'msg-3' })
+    ];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await expect(purgeMemoriesByChat('chat-1', USER)).resolves.toMatchObject({ purged: 1 });
+
+    expect(db.txOps).toContain('task');
+    expect(db.tasks.map((row) => row.id)).toEqual(['task-2', 'task-3']);
+  });
+
+  it('那次对话还没产出记忆（欠账还压在队列里）⇒ 撤账不能因为「没东西可删」就跳过', async () => {
+    db.tasks = [task('task-1')];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await expect(purgeMemoriesByChat('chat-1', USER)).resolves.toMatchObject({ purged: 0 });
+
+    // 用户说的是「忘记这次对话」，跑完再补记等于把这句话又塞回来。
+    expect(db.tasks).toEqual([]);
+  });
+
+  it('清空全部 ⇒ 按用户撤干净，别人的欠账一行不动，而且这条也走事务', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-2', row('mem-2', { chatId: 'chat-2' }));
+    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2' }), task('task-3', { userId: OTHER })];
+    const { purgeAllMemories } = await forgetting();
+
+    await expect(purgeAllMemories(USER)).resolves.toMatchObject({ purged: 2 });
+
+    expect(db.commits).toBe(1);
+    // 撤账走了事务客户端，就不能在事务外的连接上留下任何一次写入。
+    expect(db.topOps).toEqual([]);
+    expect(db.tasks.map((row) => row.id)).toEqual(['task-3']);
+  });
 });
 
 describe('永久删除一条', () => {

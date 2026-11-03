@@ -117,6 +117,22 @@ enum MemoryRevisionAction {
   RETRACTED
 }
 
+/// 后台任务干的是哪一类认知活（任务书 §6）。
+/// 只列真实存在的生产者：今天唯一入队的活是「这一轮的记忆写入」。
+/// 加一种活 = 一条 ALTER TYPE ADD VALUE + worker 的 MODULE_BY_TASK_KIND 一个条目。
+enum CognitiveTaskKind {
+  MEMORY
+}
+
+/// 没有 SUCCEEDED：跑完就把行删掉，这张表只装「还欠着的活」。
+/// 也没有 DISCARDED：模块开关关掉时的作废同样是删行，区别只留在日志事件名里。
+/// PENDING 且 availableAt 在未来 = 正在退避重试，所以也不需要 FAILED 态。
+enum CognitiveTaskStatus {
+  PENDING
+  RUNNING
+  DEAD
+}
+
 model User {
   id            String     @id @default(uuid())
   username      String     @unique @db.VarChar(32)
@@ -140,6 +156,7 @@ model User {
   memoryExclusions MemoryExclusion[]
   policySignals    MemoryPolicySignal[]
   memoryEvidences  MemoryEvidence[]
+  cognitiveTasks   CognitiveTask[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -177,11 +194,12 @@ model Chat {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider    AiProvider?  @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    AiProvider?     @relation(fields: [modelProviderId], references: [id], onDelete: SetNull)
   messages    Message[]
   attachments Attachment[]
   memories    MemoryItem[]
+  tasks       CognitiveTask[]
 
   @@index([userId, updatedAt])
   @@index([modelProviderId])
@@ -201,9 +219,10 @@ model Message {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  chat        Chat         @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chat        Chat            @relation(fields: [chatId], references: [id], onDelete: Cascade)
   attachments Attachment[]
-  memories    MemoryItem[] @relation("MemorySource")
+  memories    MemoryItem[]    @relation("MemorySource")
+  tasks       CognitiveTask[] @relation("CognitiveTaskSource")
 
   @@index([chatId, createdAt])
 }
@@ -524,4 +543,45 @@ model MemoryEvidence {
 
   @@unique([userId, memoryId, kind, sourceMessageId])
   @@index([userId, memoryId])
+}
+
+/// 认知后台任务队列（任务书 §6）。一行 = 「这一句话的认知写入还欠着」。
+///
+/// 这张表里没有任何正文：要重建这一轮，靠 sourceMessageId 把 Message 行解密出来——
+/// 用户那句话在落库时就是逐字的原文，所以 worker 拿到的 content 与请求体一字不差。
+/// 任务书 5.5 那条「不许出现明文」的红线在这里是结构上违反不了的：没有可以放正文的列。
+///
+/// 成功即删行，作废也删行（区别只在日志事件名）：这张表只装欠着的活，不是历史表，
+/// 所以门槛 2「删除要连带清理派生数据」的分母不会随着使用越滚越大。
+model CognitiveTask {
+  id              String              @id @default(uuid())
+  userId          String
+  /// 执行不需要它。留着是为了「忘记这次对话」能取消还没跑的活，以及让删会话顺手级联掉这一行。
+  chatId          String
+  /// 幂等锚点：一条消息的一类任务只欠一次，重复入队由库层唯一约束挡掉（任务书 5.1 要求库层兜住）。
+  sourceMessageId String
+  kind            CognitiveTaskKind
+  status          CognitiveTaskStatus @default(PENDING)
+  /// 已发起的执行次数。在领取时 +1，不是失败时 +1：崩在执行半路也要占掉一次，
+  /// 否则一个能把进程带死的任务可以无限重试。
+  attempts        Int                 @default(0)
+  /// 最早可被领取的时刻。新行 = now（立即可用），失败后退避 = 下次再试，
+  /// 有了它就不需要 FAILED 状态：待重试是「PENDING 且 availableAt 在未来」。
+  availableAt     DateTime            @default(now())
+  /// 租约。leaseOwner 同时是 fencing token：租约过年被（下一轮的自己或另一个进程）领走之后，
+  /// 上一任僵尸执行的所有完结写入都会因为 owner 不匹配而命中 0 行。
+  leaseOwner      String?             @db.VarChar(64)
+  leaseUntil      DateTime?
+  /// 只有错误码，永远没有报错原文（5.5）：模块抛出的信息里常常带着记忆正文。
+  lastErrorCode   String?             @db.VarChar(64)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat          Chat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sourceMessage Message @relation("CognitiveTaskSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceMessageId, kind])
+  @@index([status, availableAt])
+  @@index([userId, chatId])
 }

@@ -22,8 +22,7 @@ import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/li
 import { streamChatCompletion } from '@/lib/ai';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
-import { queueCognitiveWrites } from '@/lib/cognitive/manager';
-import { ensureCognitiveModules } from '@/lib/cognitive/memory-module';
+import { enqueueCognitiveTask } from '@/lib/cognitive/task-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -149,15 +148,18 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           imagesSkipped: imageSummary.skipped
         });
         controller.close();
-        // 字节已经全部交给客户端，才做这一轮的记忆抽取和写入：认知模块不在关键路径上，
-        // 慢或者坏都不影响这轮回答。只有成功回答的轮次才写，失败和取消的轮次不留记忆。
-        ensureCognitiveModules();
-        void queueCognitiveWrites({
+        // 字节已经全部交给客户端，才欠下这一轮的记忆：认知模块不在关键路径上，
+        // 慢或者坏都不影响这轮回答。只有成功回答的轮次才欠账，失败和取消的轮次不留记忆。
+        //
+        // 落库而不是当场跑——原来那句 `void queueCognitiveWrites(...)` 挂在请求尾巴上，
+        // 进程在这中间被杀掉，这一轮的记忆就永久丢了。现在它是一条欠账，worker 跑不完就还在。
+        // await 而不 void 是因为 enqueueCognitiveTask 自己不 reject（写失败只记日志），
+        // 而这一刻流已经关了，等一次 insert 的代价只落在审计上。
+        await enqueueCognitiveTask({
           userId: user.id,
           chatId,
-          content: body.content,
           sourceMessageId: userMessage.id,
-          occurredAt: userMessage.createdAt
+          kind: 'MEMORY'
         });
       } catch (err) {
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';

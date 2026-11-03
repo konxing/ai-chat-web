@@ -7,8 +7,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * ① 只要真的发起了这一轮就写审计，原先 `doneSent` 只在模型自己说 done 时才为真，
  *    于是失败、取消、以及模型没发 done 的轮次在审计里完全不存在。
  *
- * 只 mock 三个外围模块（prisma / auth / providers / ai），chats.ts 与 audit.ts 走真实代码，
+ * 只 mock 四个外围模块（prisma / auth / providers / ai），chats.ts 与 audit.ts 走真实代码，
  * 所以 ERROR 行的列名、加密 AAD、审计的 status/error 都是真实路径上产出的。
+ *
+ * 后半段管另一件事：答完之后那句入队。cognitiveTask 这个 delegate 必须在这儿——
+ * 缺了它，enqueueCognitiveTask 会把 `undefined.create` 的 TypeError 一起吞进自己的 catch，
+ * 于是这几条测试能在「欠账永远写不进去」的状态下绿着。
  */
 const ctx = vi.hoisted(() => ({
   behavior: 'success' as
@@ -20,6 +24,11 @@ const ctx = vi.hoisted(() => ({
     | 'already-aborted',
   rows: [] as Array<Record<string, any>>,
   audit: [] as Array<Record<string, any>>,
+  taskRows: [] as Array<Record<string, any>>,
+  // 入队那一步按住的开关：松开之前 create 的 promise 不落地，
+  // 于是「审计有没有排在它后面」就变成「路由到底 await 没 await」的证据。
+  holdTask: false,
+  releaseTask: null as null | (() => void),
   modelCalls: 0,
   abortRequest: null as null | (() => void),
   sawAbortedSignal: null as null | boolean
@@ -105,6 +114,18 @@ vi.mock('@/lib/prisma', async () => {
           return Promise.resolve(data);
         }
       },
+      // 欠账表。缺了这个 delegate，enqueueCognitiveTask 会把 `undefined.create` 的
+      // TypeError 一起吞进自己的 catch 里——那三条失败路径测试就会在「入队永远失败」
+      // 的状态下绿着，所以它必须在这儿。
+      cognitiveTask: {
+        create: ({ data }: { data: Record<string, any> }) => {
+          ctx.taskRows.push(data);
+          if (!ctx.holdTask) return Promise.resolve(data);
+          return new Promise((resolve) => {
+            ctx.releaseTask = () => resolve(data);
+          });
+        }
+      },
       $transaction: (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx)
     }
   };
@@ -182,6 +203,9 @@ describe('本轮失败时的落库与审计', () => {
     ctx.behavior = 'success';
     ctx.rows = [];
     ctx.audit = [];
+    ctx.taskRows = [];
+    ctx.holdTask = false;
+    ctx.releaseTask = null;
     ctx.modelCalls = 0;
     ctx.abortRequest = null;
     ctx.sawAbortedSignal = null;
@@ -288,5 +312,42 @@ describe('本轮失败时的落库与审计', () => {
     expect(ctx.audit[0].status).toBe('SUCCESS');
     // 上下文里没有 ERROR 行，窗口过滤条件同样带上了这轮的用户消息。
     expect(ctx.modelCalls).toBe(1);
+  });
+
+  it('成功轮次欠下一条待办，而且路由真的等到它落库才写审计', async () => {
+    ctx.behavior = 'success';
+    ctx.holdTask = true;
+
+    const { text } = await post();
+
+    expect(text).toContain('"type":"done"');
+    expect(ctx.taskRows).toHaveLength(1);
+    expect(ctx.taskRows[0]).toMatchObject({ userId: USER.id, chatId: CHAT_ID, kind: 'MEMORY' });
+    // 入队还没落地，收尾的审计就必须还排在其后：这一条证明路由 await 了它，不是又 void 掉。
+    expect(ctx.audit).toHaveLength(0);
+
+    ctx.releaseTask!();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(ctx.audit).toHaveLength(1);
+  });
+
+  it('欠账行里只有 id：用户那句话不在这张表上（任务书 5.5）', async () => {
+    ctx.behavior = 'success';
+
+    await post();
+
+    expect(ctx.taskRows).toHaveLength(1);
+    expect(Object.keys(ctx.taskRows[0]).sort()).toEqual(['chatId', 'kind', 'sourceMessageId', 'userId']);
+    // 欠的是「哪句话」，不是那句话本身：正文靠这个 id 从消息行解密重建。
+    expect(ctx.taskRows[0].sourceMessageId).toBe(ctx.rows.find((row) => row.role === 'USER')?.id);
+    expect(JSON.stringify(ctx.taskRows)).not.toContain('今天天气如何');
+  });
+
+  it('失败的轮次不欠账：只有答完的那一轮才记', async () => {
+    ctx.behavior = 'throw';
+
+    await post();
+
+    expect(ctx.taskRows).toHaveLength(0);
   });
 });

@@ -4,6 +4,7 @@ import { decryptMemoryContent } from './memories';
 import { fromDbMemoryContext, type MemoryContext } from './policy';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
+import { cancelCognitiveTasks } from './task-queue';
 import type { Prisma } from '@prisma/client';
 
 /**
@@ -18,11 +19,14 @@ import type { Prisma } from '@prisma/client';
  * 保住「这一版来自一次改口」这个事实，同时不留任何指向已删内容的指针。
  * 至于 memoryId 指向被删行的边，那是在描述被删的这一行自己怎么来的，随外键一起消失是对的。
  *
- * 派生数据当前只有演化边和排除规则两种。Embedding、图关系、时间线派生、反思候选、
- * 决策关联、认知任务都还没落地（任务书 7.3 列了这些），等它们出现时这里要跟着加清理。
+ * 派生数据当前有三种：演化边、排除规则，以及还没跑的认知任务（任务书 §6 的 CognitiveTask）。
+ * 撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
+ * 用户看到的「忘记这次对话」会在下一次轮询时被 worker 推翻。
+ * Embedding、图关系、时间线派生、反思候选、决策关联都还没落地（任务书 7.3 列了这些），
+ * 等它们出现时这里要跟着加清理。
  *
  * 删记忆不删原会话：7.3 明确要求区分这两件事，用户只说「忘掉这条」时不许动聊天记录。
- * 反过来，删会话会连带删掉它产生的记忆——那是 MemoryItem.chat 上既有的 CASCADE。
+ * 反过来，删会话会连带删掉它产生的记忆和欠着的认知任务——那是各自 chat 外键上的 CASCADE。
  */
 
 interface PurgeTargetRow {
@@ -86,6 +90,9 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     await detachEdges(tx, userId, [memoryId]);
     const result = await tx.memoryItem.deleteMany({ where: { id: memoryId, userId } });
     await recordSources(tx, userId, [target]);
+    // 来源那次对话还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
+    // 挡不住换个说法的那一句。没有来源对话的记忆不去动别人的队列。
+    if (target.chatId) await cancelCognitiveTasks(tx, { userId, chatId: target.chatId });
     // 一次删除只算一条证据，哪怕这一条同时触发了排除和演化边清理。
     if (recordSignals) await recordPolicySignal(tx, userId, context);
     return { purged: result.count, contexts: [context] };
@@ -96,6 +103,9 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
 export async function purgeMemoriesByChat(chatId: string, userId: string): Promise<PurgeResult> {
   const recordSignals = await policyLearningEnabled(userId);
   return prisma.$transaction(async (tx) => {
+    // 撤账排在「有没有记忆可删」之前：这一轮可能刚说完，记忆还压在队列里没跑，
+    // 那时候行数是 0，但用户要忘记的是这次对话，等它跑完再补记就是把那句话塞回来。
+    await cancelCognitiveTasks(tx, { userId, chatId });
     const rows = (await tx.memoryItem.findMany({
       where: { userId, chatId }
     })) as unknown as PurgeTargetRow[];
@@ -120,8 +130,13 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
  * 更不是「这七个情境都记太多了」。一口气给每个情境记几十条证据，
  * 等于让学习层在一次点击之后把所有情境全部收紧，而那根本不是用户表达的意思。
  * 要禁止某句话被记回来、或者要收紧某个情境，用单条删除或按会话删除。
+ *
+ * 欠账要撤——它是按用户撤的，和「清空」这个动作的范围正好一致。
  */
 export async function purgeAllMemories(userId: string): Promise<PurgeResult> {
-  const result = await prisma.memoryItem.deleteMany({ where: { userId } });
-  return { purged: result.count, contexts: [] };
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.memoryItem.deleteMany({ where: { userId } });
+    await cancelCognitiveTasks(tx, { userId });
+    return { purged: result.count, contexts: [] };
+  });
 }

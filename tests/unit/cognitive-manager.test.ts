@@ -170,29 +170,34 @@ describe('认知模块的写侧', () => {
       }
     });
 
-    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({ failed: ['userModel'] });
+    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({
+      attempted: ['memory', 'userModel'],
+      failed: [{ module: 'userModel', reason: 'error' }]
+    });
     expect(written).toEqual(['user-a']);
     expect(emotionWrites).toBe(0);
     expect(JSON.stringify(db.warns)).not.toContain('画像写挂了');
   });
 
-  it('fire-and-forget 的那一层即使整条写链路挂了也不会 reject', async () => {
+  it('写侧同步抛错也算一条失败，harness 自己不 reject', async () => {
     const manager = await loadManager();
     db.row = { memoryEnabled: true };
     manager.registerCognitiveModule({
       key: 'memory',
       read: () => Promise.resolve([]),
-      // 同步抛错（而不是返回 rejected promise）才能穿过 runCognitiveWrites 的兜底：
-      // settle 那层还没挂上 rejection 处理器，调用方又是 void，没人接住就会变 unhandledRejection。
+      // 同步抛错（而不是返回 rejected promise）。以前靠外面那层 queueCognitiveWrites 接住，
+      // 现在入队改成落库，「永不 reject」这条契约归 runCognitiveWrites 自己——worker 直接 await 它。
       write: () => {
         throw new Error('写入失败，原文：我今天不太想聊工作');
       }
     });
 
-    await expect(manager.queueCognitiveWrites(turnFixture())).resolves.toBeUndefined();
-    expect(db.warns.map((entry) => entry[0])).toContain('cognitive.write_harness_failed');
-    const serialized = JSON.stringify(db.warns);
-    expect(serialized).not.toContain('我今天不太想聊工作');
+    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({
+      attempted: ['memory'],
+      failed: [{ module: 'memory', reason: 'error' }]
+    });
+    expect(db.warns.map((entry) => entry[0])).toContain('cognitive.write_failed');
+    expect(JSON.stringify(db.warns)).not.toContain('我今天不太想聊工作');
   });
 
   it('写成功时不打失败日志', async () => {
@@ -200,9 +205,41 @@ describe('认知模块的写侧', () => {
     db.row = { memoryEnabled: true };
     manager.registerCognitiveModule({ key: 'memory', read: () => Promise.resolve([]), write: () => Promise.resolve() });
 
-    await expect(manager.queueCognitiveWrites(turnFixture())).resolves.toBeUndefined();
+    await expect(manager.runCognitiveWrites(turnFixture())).resolves.toEqual({ attempted: ['memory'], failed: [] });
 
     expect(db.warns).toEqual([]);
+  });
+
+  it('写侧的截止由调用方给：后台任务等得起，读侧仍然卡一秒就放弃', async () => {
+    const manager = await loadManager();
+    vi.useFakeTimers();
+    try {
+      db.row = { memoryEnabled: true, emotionEnabled: true };
+      manager.registerCognitiveModule({
+        key: 'memory',
+        read: () => Promise.resolve([]),
+        write: () => new Promise(() => undefined)
+      });
+      manager.registerCognitiveModule({ key: 'emotion', read: () => new Promise(() => undefined) });
+
+      const writes = manager.runCognitiveWrites(turnFixture(), 20_000);
+      const reads = manager.runCognitiveReads(turnFixture());
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(await reads).toMatchObject({ failed: ['emotion'] });
+
+      let writeDone = false;
+      void writes.then(() => {
+        writeDone = true;
+      });
+      await vi.advanceTimersByTimeAsync(18_000);
+      expect(writeDone).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(writes).resolves.toMatchObject({ failed: [{ module: 'memory', reason: 'timeout' }] });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

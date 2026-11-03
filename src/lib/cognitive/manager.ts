@@ -36,11 +36,12 @@ export interface CognitiveModule {
 
 /**
  * 认知引擎挂在主聊天链路上：读侧在发问之前，卡住就等于整条对话变慢，
- * 所以给每个模块一个硬截止。写侧在回答之后，同一个数值够用了。
+ * 所以给每个模块一个硬截止。写侧由后台 worker 跑，等得起，截止由调用方给。
  */
 export const COGNITIVE_MODULE_DEADLINE_MS = 1000;
 
-const SWITCH: Record<CognitiveModuleKey, keyof CognitivePreferences> = {
+/** 模块键 → 用户偏好上的那个开关。worker 判断「这条欠账还要不要跑」用的也是这张表。 */
+export const MODULE_SWITCH: Record<CognitiveModuleKey, keyof CognitivePreferences> = {
   memory: 'memoryEnabled',
   userModel: 'userModelEnabled',
   emotion: 'emotionEnabled',
@@ -65,7 +66,7 @@ export async function runCognitiveReads(turn: CognitiveTurn): Promise<CognitiveR
   const enabled = await enabledModules(turn.userId);
   const blocks: CognitiveBlock[] = [];
   const failed: CognitiveModuleKey[] = [];
-  for (const outcome of await settleAll(enabled, (module) => module.read(turn))) {
+  for (const outcome of await settleAll(enabled, (module) => module.read(turn), COGNITIVE_MODULE_DEADLINE_MS)) {
     if (outcome.status === 'ok') blocks.push(...outcome.value);
     else {
       failed.push(outcome.module.key);
@@ -76,36 +77,37 @@ export async function runCognitiveReads(turn: CognitiveTurn): Promise<CognitiveR
   return { blocks, failed };
 }
 
+/** 一条失败：模块键 + 是抛错还是超时。worker 靠 reason 决定「退避重试」还是「判 DEAD」。 */
+export interface CognitiveWriteFailure {
+  module: CognitiveModuleKey;
+  reason: 'error' | 'timeout';
+}
+
 export interface CognitiveWriteResult {
-  failed: CognitiveModuleKey[];
+  /** 开关打开、确实跑了的模块。空数组意味着「这一轮没有模块要做」，和「都失败了」不是一回事。 */
+  attempted: CognitiveModuleKey[];
+  failed: CognitiveWriteFailure[];
 }
 
 /**
- * 请求收尾后异步跑写侧的入口，契约只有一条：返回的 promise 永不 reject。
- * 调用方 `void` 丢在身后，模块再怎么坏也不会变成 unhandledRejection 把进程带下去。
- * 代价和同一条路由里既有的 fire-and-forget 审计一样——进程在这中间被杀掉，这一轮的记忆就丢了。
+ * 跑这一轮的写侧。契约有两条：返回的 promise 永不 reject；截止由调用方给。
+ *
+ * 第二条是这一片新加的要求——后台 worker 一轮要解密一整池候选、写十来条语句，
+ * 拿对话读侧那 1 秒去卡它，只会把每条任务都判成超时。
  */
-export function queueCognitiveWrites(turn: CognitiveTurn): Promise<void> {
-  return runCognitiveWrites(turn).then(
-    () => undefined,
-    () => {
-      // 只记 id：模块的报错原文里常常带着记忆正文。
-      log.warn('cognitive.write_harness_failed', { userId: turn.userId, chatId: turn.chatId });
-      return undefined;
-    }
-  );
-}
-
-export async function runCognitiveWrites(turn: CognitiveTurn): Promise<CognitiveWriteResult> {
+export async function runCognitiveWrites(
+  turn: CognitiveTurn,
+  deadlineMs: number = COGNITIVE_MODULE_DEADLINE_MS
+): Promise<CognitiveWriteResult> {
   const enabled = (await enabledModules(turn.userId)).filter((module) => module.write);
-  const failed: CognitiveModuleKey[] = [];
-  for (const outcome of await settleAll(enabled, (module) => module.write!(turn))) {
+  const failed: CognitiveWriteFailure[] = [];
+  for (const outcome of await settleAll(enabled, (module) => module.write!(turn), deadlineMs)) {
     if (outcome.status !== 'ok') {
-      failed.push(outcome.module.key);
+      failed.push({ module: outcome.module.key, reason: outcome.reason });
       log.warn('cognitive.write_failed', { module: outcome.module.key, userId: turn.userId, reason: outcome.reason });
     }
   }
-  return { failed };
+  return { attempted: enabled.map((module) => module.key), failed };
 }
 
 /** 开关读不出来就当全关——认知引擎宁可什么都不做，也不能把对话带下水。 */
@@ -117,7 +119,7 @@ async function enabledModules(userId: string): Promise<CognitiveModule[]> {
     log.warn('cognitive.preferences_unavailable', { userId });
     return [];
   }
-  return [...registry.values()].filter((module) => preferences[SWITCH[module.key]] === true);
+  return [...registry.values()].filter((module) => preferences[MODULE_SWITCH[module.key]] === true);
 }
 
 type Outcome<T> =
@@ -126,15 +128,27 @@ type Outcome<T> =
 
 function settleAll<T>(
   modules: CognitiveModule[],
-  run: (module: CognitiveModule) => Promise<T>
+  run: (module: CognitiveModule) => Promise<T>,
+  deadlineMs: number
 ): Promise<Array<Outcome<T>>> {
-  return Promise.all(modules.map((module) => settle(module, run(module))));
+  return Promise.all(modules.map((module) => settle(module, () => run(module), deadlineMs)));
 }
 
-async function settle<T>(module: CognitiveModule, task: Promise<T>): Promise<Outcome<T>> {
+/**
+ * run 收的是函数不是 promise：模块函数**同步**抛错时，promise 根本还没诞生，
+ * 提前求值会让整条 settleAll 直接抛出来。以前外面还有一层 fire-and-forget 兜住，
+ * 现在调用方是 await 它的 worker，这条洞得在这儿补。
+ */
+async function settle<T>(module: CognitiveModule, run: () => Promise<T>, deadlineMs: number): Promise<Outcome<T>> {
+  let task: Promise<T>;
+  try {
+    task = run();
+  } catch {
+    return { status: 'failed', module, reason: 'error' };
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), COGNITIVE_MODULE_DEADLINE_MS);
+    timer = setTimeout(() => resolve('timeout'), deadlineMs);
   });
   // 先挂上 rejection 处理器，模块失败后再没人 await 会变成 unhandledRejection。
   const settled = task.then(
