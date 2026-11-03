@@ -35,7 +35,7 @@ const MAX_ERROR_BODY_BYTES = 8_192;
 /** 对面回来的包：safeFetch 的返回类型里取，避免和 DOM 的 Response 类型打架。 */
 type ProviderResponse = Awaited<ReturnType<typeof safeFetch>>['response'];
 
-async function readBodyCapped(
+export async function readBodyCapped(
   response: ProviderResponse,
   maxBytes: number
 ): Promise<{ text: string; truncated: boolean }> {

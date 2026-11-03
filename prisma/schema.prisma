@@ -452,6 +452,11 @@ model MemoryItem {
   context           MemoryContext
   origin            MemoryOrigin
   contentCiphertext String        @db.Text
+  /// 正文向量的密文（AES-256-GCM，AAD 绑到字段名 `memory-vector:v1:用户:记忆`）。
+  /// 和正文一样是密文，所以「存下来的 embedding 算不算明文记忆」这条红线按构造不成立。
+  embeddingCiphertext Bytes?
+  /// 算出它的那个模型：维度相同但模型不同的两串数不能比，读侧按这一列筛掉。
+  embeddingModel      String?
   confirmedAt       DateTime?
   version           Int           @default(1)
   supersededAt      DateTime?
