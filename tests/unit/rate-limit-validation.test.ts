@@ -35,6 +35,53 @@ describe('in-memory rate limiter', () => {
   });
 });
 
+/**
+ * key 空间的体积上限。`login:ip:` 与 `forgot:ip:` 的 key 取自 `x-client-ip`
+ * 头（`src/lib/http.ts:62`），只要有一个请求能绕过 nginx 直接打到 3000 端口，
+ * 这个头就是客户端说了算——每个假 IP 都留下一个活到窗口结束的桶，而正常清扫
+ * 有 60 秒的节流（`src/lib/rate-limit.ts:31`）。没有上限时这就是免费的内存放大。
+ *
+ * 淘汰只挑**最早到期**的桶：那些本来就在几十秒内会被正常清扫掉的计数，损失最小；
+ * 而 `login:id:` / `forgot:email:` 这类 15 分钟窗口的账号级桶会最后被碰到。
+ * 挡 IP 暴力这件事也不只靠这里的桶——同一份判断在 Postgres 的 `LoginLock` 表里
+ * （`prisma/schema.prisma:325`），淘汰内存桶动不到它。
+ *
+ * 三条用例只能拿 `rateLimit()` 的返回值拼，不新增任何内省导出：
+ * 「桶被淘汰」唯一的可观测形式就是它的计数消失。
+ */
+describe('限流桶的 key 数量上限', () => {
+  beforeEach(() => resetRateLimitForTests());
+
+  function flood(count: number, windowMs: number): void {
+    for (let i = 0; i < count; i++) rateLimit(`flood:${i}`, 5, windowMs);
+  }
+
+  it('正向对照：60 秒窗口的桶在 key 没撑满时不会被碰到', () => {
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(true);
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(false);
+    flood(3_000, 15 * 60_000);
+    // 远在上限之下 ⇒ 一个桶都不该被淘汰，计数仍然把请求挡着
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(false);
+  });
+
+  it('key 撑满后最早到期的桶被淘汰，计数随之消失', () => {
+    // 这个桶 60 秒后到期，比灌进来的 15 分钟窗口桶都早，所以它是第一个被淘汰的。
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(true);
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(false);
+    flood(60_000, 15 * 60_000);
+    // 桶被挤掉 ⇒ 计数归零 ⇒ 同一条 key 重新可用。这是上限的代价，也是它唯一的可观测形式。
+    expect(rateLimit('chat:user-9', 1, 60_000).ok).toBe(true);
+  });
+
+  it('淘汰先牺牲短窗口，15 分钟的账号级桶活下来', () => {
+    expect(rateLimit('login:id:konxing', 1, 15 * 60_000).ok).toBe(true);
+    expect(rateLimit('login:id:konxing', 1, 15 * 60_000).ok).toBe(false);
+    // 灌进来的全是 60 秒窗口——它们都比账号级桶先到期，所以该由它们去填淘汰名额。
+    flood(60_000, 60_000);
+    expect(rateLimit('login:id:konxing', 1, 15 * 60_000).ok).toBe(false);
+  });
+});
+
 describe('request validation schemas', () => {
   it('accepts valid usernames and emails', () => {
     expect(usernameSchema.safeParse('mira_2026').success).toBe(true);

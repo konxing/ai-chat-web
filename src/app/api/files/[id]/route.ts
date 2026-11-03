@@ -7,6 +7,7 @@ import {
   readAttachmentBuffer
 } from '@/lib/files';
 import { ApiError } from '@/lib/http';
+import { rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,13 @@ function contentDisposition(type: 'inline' | 'attachment', filename: string): st
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   return api(async () => {
     const { user } = await requireUser(req);
+    // 闸开在任何附件读之前：这个入口真正的代价是「整份文件读回内存 + 解密」，
+    // 放在 getAttachmentForUser 之后就只是把已经干完的活再拒一次。
+    // 600/分钟而不是照抄上传的 120：一页 60 条消息、每条最多 15 个附件，图片还是懒加载，
+    // 快速划过照片密集的历史就能上百次请求，而 429 落在 <img> 上只是一张坏图。
+    // 这条上限拦的是失控的循环和刷接口的脚本，不是人的浏览；它数的是次数，不是字节。
+    const limit = rateLimit(`download:${user.id}`, 600, 60 * 1000);
+    if (!limit.ok) throw new ApiError(429, 'RATE_LIMITED', '文件读取过于频繁，请稍后再试');
     const { id } = await ctx.params;
     const attachment = await getAttachmentForUser(id, user.id);
     // storageKey 是 UUID、行只删不改，内容事实上不可变：命中 ETag 就不必再读盘解密。
