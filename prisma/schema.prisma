@@ -133,6 +133,34 @@ enum CognitiveTaskStatus {
   DEAD
 }
 
+/// 任务书 5.5 的五个列表就是这五个状态，不另造词表。
+/// REJECTED 也是终态：被拒的候选留着是为了「同一条不再反复来问」，永远不会变成正式记录（7.4 门槛 8）。
+enum DecisionStatus {
+  PENDING_CONFIRM
+  CONFIRMED
+  AWAITING_REVIEW
+  OUTCOME_RECORDED
+  REJECTED
+}
+
+/// 任务书 5.1 的六类重要决策。普通聊天里的每个选择不算决策，类别词表就是第一道闸。
+enum DecisionCategory {
+  TECH_CHOICE
+  PROJECT_PLANNING
+  CAREER
+  LEARNING
+  PURCHASE
+  PERSONAL_GOAL
+}
+
+/// 结果与决策的关联默认只是候选：5.3 不许把结果好坏静默归因到某个单一选择上，
+/// 所以这条边要用户在界面上确认或解除后才算数。
+enum OutcomeLinkStatus {
+  CANDIDATE
+  LINKED
+  DETACHED
+}
+
 model User {
   id            String     @id @default(uuid())
   username      String     @unique @db.VarChar(32)
@@ -157,6 +185,8 @@ model User {
   policySignals    MemoryPolicySignal[]
   memoryEvidences  MemoryEvidence[]
   cognitiveTasks   CognitiveTask[]
+  decisions        DecisionRecord[]
+  decisionOutcomes DecisionOutcome[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -223,6 +253,8 @@ model Message {
   attachments Attachment[]
   memories    MemoryItem[]    @relation("MemorySource")
   tasks       CognitiveTask[] @relation("CognitiveTaskSource")
+  decisions   DecisionRecord[] @relation("DecisionSource")
+  outcomes    DecisionOutcome[] @relation("OutcomeSource")
 
   @@index([chatId, createdAt])
 }
@@ -589,4 +621,74 @@ model CognitiveTask {
   @@unique([sourceMessageId, kind])
   @@index([status, availableAt])
   @@index([userId, chatId])
+}
+
+/// 决策记忆（任务书 Phase 5）。一条 = 用户在对话里做出的一个重要决策。
+///
+/// 抽取出来时一律 PENDING_CONFIRM：未经用户确认不建立正式决策记录（7.4 门槛 8），
+/// 所以「正式记录」在库里的定义就是 status = CONFIRMED，不靠服务层记得判。
+///
+/// 九个内容列全是密文（5.2 要求敏感内容加密存储），复用 crypto.ts 的 AES-256-GCM，
+/// AAD 绑 userId + recordId + fieldName：把 A 用户的决策行搬到 B 用户名下会解不开。
+/// 可空的内容列对应任务书里「可选」的字段；主题和选择不可空，没有这两样就不成其为决策。
+model DecisionRecord {
+  id                      String           @id @default(uuid())
+  userId                  String
+  category                DecisionCategory
+  status                  DecisionStatus   @default(PENDING_CONFIRM)
+  topicCiphertext         String           @db.Text
+  choiceCiphertext        String           @db.Text
+  backgroundCiphertext    String?          @db.Text
+  constraintsCiphertext   String?          @db.Text
+  optionsCiphertext       String?          @db.Text
+  reasonCiphertext        String?          @db.Text
+  criteriaCiphertext      String?          @db.Text
+  expectedOutcomeCiphertext String?        @db.Text
+  risksCiphertext         String?          @db.Text
+  /// 决策发生的时间，不是记录时间：用户今天补说去年的决定时这两者不同（2.1 的口径）。
+  decidedAt               DateTime?
+  /// 可选的复盘时间。第一版只做站内徽标，不主动推送（5.5）。
+  reviewAfter             DateTime?
+  confirmedAt             DateTime?
+  sourceMessageId         String
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage Message         @relation("DecisionSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  outcomes        DecisionOutcome[]
+
+  /// 给 DecisionOutcome 的复合外键用的：(决策, 用户)  pair 唯一，
+  /// 于是结果行不可能指到别的用户的决策上（任务书 5.1 要求在库层兜住）。
+  @@unique([id, userId])
+  @@unique([sourceMessageId, category])
+  @@index([userId, status])
+}
+
+/// 决策的结果跟踪（任务书 5.3）。一条 = 用户后来主动提到的一个结果，和某条决策的关联。
+///
+/// linkStatus 默认 CANDIDATE：后台只敢提候选，确认或解除由用户在界面上做。
+/// 五个内容列全密文，口径同 DecisionRecord。
+model DecisionOutcome {
+  id                   String            @id @default(uuid())
+  userId               String
+  decisionId           String
+  linkStatus           OutcomeLinkStatus @default(CANDIDATE)
+  actualCiphertext     String            @db.Text
+  gapCiphertext        String?           @db.Text
+  ratingCiphertext     String?           @db.Text
+  missedFactorsCiphertext String?        @db.Text
+  lessonCiphertext     String?           @db.Text
+  sourceMessageId      String
+  recordedAt           DateTime          @default(now())
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage Message        @relation("OutcomeSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  /// 复合外键：references 的是 (id, userId) 而不是单 id，
+  /// 跨用户连边在数据库层就建不出来。
+  decision      DecisionRecord @relation(fields: [decisionId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([sourceMessageId, decisionId])
+  @@index([userId, decisionId])
+  @@index([userId, linkStatus])
 }
