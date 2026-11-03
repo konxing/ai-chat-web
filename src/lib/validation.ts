@@ -169,6 +169,20 @@ export const memoryRetractSchema = z.object({
   reason: z.string().trim().min(1, '撤回记忆要写明理由').max(500, '理由不能超过 500 字')
 });
 
+/** 决策的确认/拒绝（任务书 5.5）。动词只有这两个：别的动作在这一版不存在。 */
+export const decisionActionSchema = z.object({
+  action: z.enum(['confirm', 'reject'])
+});
+
+/** 列表的状态过滤白名单，和 DecisionStatus 枚举同词表。 */
+export const decisionStatusSchema = z.enum([
+  'PENDING_CONFIRM',
+  'CONFIRMED',
+  'AWAITING_REVIEW',
+  'OUTCOME_RECORDED',
+  'REJECTED'
+]);
+
 /**
  * 批量永久删除的范围。用可辨识联合而不是「chatId 可选」：
  * scope=chat 时 chatId 必须存在，这条约束由类型系统兜住，路由里就不用再补一次判断。
