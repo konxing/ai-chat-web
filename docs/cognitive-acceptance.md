@@ -87,11 +87,16 @@
 | `tests/run-integration.sh:427` `作废的任务不留在库里：这张表只装还欠着的活` | 真库（**本片区未跑过**） |
 
 **边界（四条，都得记住）**：
-- Embedding、图关系、反思候选、决策关联都还没落地，「所有派生数据」今天的分母就是上面三种。
+- 图关系还没落地；决策关联（`DecisionOutcome`）与反思（`ReflectionRecord` + `ReflectionCitation`）已经落库，
+  「所有派生数据」今天的分母因此比 11-03 那版大了两类。
   时间线派生（`src/lib/cognitive/timeline.ts`）已经落地，但它是**读时投影、不落库**，所以不进这个分母：
   删掉一行记忆，时间线上那条事件就跟着消失，没有第二份东西需要清理。
   **这句在 11-03 之前是半真话**：只删当前版本时，链上带 `supersededAt` 的旧行会作为孤立事件回到时间线上。
   「Phase 4 第四片」把 `purgeMemory` 改成沿版本链整条删之后，它才是全真（`src/lib/cognitive/forgetting.ts:95`、`:113`）。
+- **反思行是 6-E 才进这个分母的，而 `forgetting.ts` 还没接上它**：`grep reflectionRecord src/lib/cognitive/forgetting.ts` 无命中，
+  所以「清空全部记忆」撤得掉记忆、演化边、欠账，却**留下一整批洞察行**——正文引用的那句话已经被删了，洞察还挂在那里。
+  真库上 `ReflectionCitation.memoryId` 的外键是 `onDelete: Cascade`（`prisma/schema.prisma:815`），删记忆会把引用行一起带走，
+  洞察本体仍然留着，`dedupKey` 还占着那个主题位。这条缺的是**删除侧的一个入口**，不是措辞问题，Phase 6 收尾时必须补。
 - **撤销欠账只覆盖「还没被领走的行」**。租约还在、worker 正在跑的那一条撤不掉——它会在 20 秒截止内跑完并把记忆写回来。单测里 `attempts` 的领取语义有测，这个窗口没有测试，也没有对策（任务书 §6 只要「撤销还没跑的」）。
 - `MemoryItem.chatId` 的 `onDelete: Cascade`（`prisma/schema.prisma:465`，`:466` sourceMessage 同）**没有任何测试断言**——
   「删会话连带删记忆」这条方向目前只由 schema 声明保证，无人验证。`CognitiveTask` 的三个外键同理，只是它的级联在真库上形状验过（`tests/run-integration.sh:438` 的插入依赖 `chatId`/`sourceMessageId` 真实存在）。
@@ -119,13 +124,37 @@
 
 ### 4. 反思结论可追溯支持与反对证据
 
-**状态：无法验收——反思模块不存在。**
+**状态：部分验收——服务端证据链已验收；界面（6-F）没上，真库零行，端到端仍无法验收。**
 
-`src/lib/cognitive/` 共 19 个文件，没有 reflection / insight 的实现（唯一沾「decision」字样的是
-`write-decision.ts`，那是写入决策的纯函数，不是决策记忆模块）。
-证据账本本身的通用能力是有测试的（`tests/unit/cognitive-evidence.test.ts:125`、`:146`、`:153`，服务层），
-但**没有反思产物可被追溯**，所以这条门槛今天既不可能失败，也不可能通过。
-依赖 Phase 6。**不为它写一条假装满足的测试。**
+Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `reflection-evidence.ts`（反证搜索 + 措辞 + EvidenceCritic，纯）
+→ `reflection-sweep.ts`（落库 + 冷却 + 逐情境闸门）→ `reflections.ts`（读侧 + 状态机）。
+一条洞察落库时在**同一个事务**里写 `ReflectionCitation`：支持侧 `SUPPORTS`、反证侧 `CONTRADICTS`，
+每条引用要么指一行记忆、要么指一行决策（两列恰好一列为空），读侧按行把密文解回原话。
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-reflection-sweep.test.ts:445` `洞察的支持引用写 SUPPORTS 行，记忆与决策两种来源都允许但必须恰好一列非空` | 服务 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:461` `只有决策证据的洞察：引用行填 decisionId、memoryId 留 null，而且不会被 critic 误判成幽灵引用` | 服务 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:379` `写下去的洞察与引用行全部是同一个用户，引用只指自己读过的行` | 服务 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:614` `洞察写不进库 ⇒ 一条半截的引用都不留，并把这一轮标成失败` | 服务 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:519` `同主题里有一条被改过口的行 ⇒ counterHitCount 落库，正文带上余地那一句` | 服务 |
+| `tests/unit/cognitive-reflection-evidence.test.ts:72` `主题命中、带否定词而支持行一个都不带 ⇒ 这才是反证` | 纯 |
+| `tests/unit/cognitive-reflection-evidence.test.ts:98` `这条洞察已经引用过的行不再当成新反证：支持侧和反对侧都不许重复计数` | 纯 |
+| `tests/unit/cognitive-reflection-evidence.test.ts:293` `引用了池子里没有的行 ⇒ GHOST_CITATION` | 纯 |
+| `tests/unit/cognitive-reflections-service.test.ts:215` `支持证据解出记忆正文，反对证据标成 CONTRADICTS` | 服务 |
+| `tests/unit/cognitive-reflections-service.test.ts:251` `决策证据解出的是主题，不是整条决策` | 服务 |
+
+**边界（四条）**：
+- 「追溯」今天在**服务层**成立：`getReflectionWithCitations` 把引用行带回并解密，路由把这份形状原样发出
+  （`tests/unit/cognitive-reflections-route.test.ts:149`）。**用户看没看得见这条链，取决于 6-F 那一屏，今天还没有界面**——
+  所以这条门槛不能按 7.4 的字面判「已验收」。
+- **真库零行**：`reflectionEnabled` 默认关，且 `MemoryItem` 到今天实测 0 行，没有任何一条洞察在真库里存在过。
+  上面全部是内存求值器（`tests/unit/prisma-mock.ts`）上的证据。
+- 单测里「源记忆被删 ⇒ 引用还在、正文回 `text: null`」（`tests/unit/cognitive-reflections-service.test.ts:234`）
+  是**求值器形状**：真库那条外键是 `onDelete: Cascade`，删记忆会把引用行一起带走，界面上看到的是「引用少了一条」而不是「一条空引用」。
+  两种结果都诚实地说明了支撑变弱，但不是同一条代码路径，真库上没测过。
+- 正文里的数字与引用条数只有出处：`COUNT_MISMATCH` / `UNSOURCED_ASSERTION` 是 critic 的拒稿原因码
+  （`tests/unit/cognitive-reflection-evidence.test.ts:297`、`:338`），被拒的洞察不落库。
 
 ### 5. 高置信度洞察不允许出现无来源的确定性事实
 
@@ -142,8 +171,12 @@
 | `tests/unit/cognitive-memory-module.test.ts:769` `低档位的记忆带上「不得以确定性语气使用」` | 服务 |
 | `tests/unit/cognitive-memory-module.test.ts:802` `算不出置信度时按低档位处理，宁可多标一句也不冒充确定` | 服务 |
 
-**边界**：门槛说的是「洞察」，而洞察由反思产生——反思不存在（见门槛 4）。
-今天被验的是它的**前置机制**：任何注入给模型的记忆都带档位，低档位强制带禁用确定语气的标注。
+**边界**：门槛说的是「洞察」，而洞察由反思产生——反思的服务端已经在 11-04 落地（见门槛 4），
+所以这条今天验的是**两侧都对得上**：反思正文的措辞档位由 `reflectionConfidence` 按样本数、跨度、反证命中算出来，
+低档位不许用最肯定的那套话（`tests/unit/cognitive-reflection-evidence.test.ts:155`），
+拿不到原话时不许造引号（同文件 `:251`），正文出现因果断言就被 critic 拒稿不落库（同文件 `:297`）。
+仍缺的是**用户那一侧的目测**：那一屏要到 6-F，真库也还没有一行洞察。
+上表那六条仍是这条门槛的**前置机制**：任何注入给模型的记忆都带档位，低档位强制带禁用确定语气的标注。
 
 ### 6. 模糊时间不得被伪造为确定日期
 
@@ -174,27 +207,51 @@
 
 ### 7. 未确认洞察不得写入已确认画像
 
-**状态：无法验收——画像模块不存在。**
+**状态：部分验收——洞察侧「不写入」已经钉死；画像模块仍不存在，门槛的正面陈述无从验收。**
 
-最接近的两条真代码事实：写入决策层明确禁止不持久化内容进入画像/反思/关联
-（`tests/unit/cognitive-write-decision.test.ts:168`，纯函数），
-以及 origin 不许被推断冒充确认（`tests/unit/cognitive-memories.test.ts:263`，服务层）。
-策略表里的 `allowUserProfile` 字段存在于 schema 与 `policy.ts`，**全仓无读取方**。
-依赖 Phase 5/6。
+6-B 立项时定下的甲方案是「采纳只翻状态，一个字都不多写」。它现在有三条互相独立的证据：
+
+| 证据 | 层 |
+|---|---|
+| `tests/unit/cognitive-reflections-service.test.ts:284` `accept ⇒ 只改状态和 decidedAt，一条记忆都不新增` | 服务 |
+| `tests/unit/cognitive-reflection-states.test.ts:71` `reflections.ts 不建记忆、不写画像、不注册模块` | 静态（读源码） |
+| `tests/unit/cognitive-reflection-states.test.ts:84` `除了两条洞察路由，没有任何代码读它（6-E 不往提示词里塞东西）` | 静态（全仓 import 扫描） |
+
+外加门槛 7 本身要求的「每个状态都有生产者」那一条，6-E 一并补齐了：
+`tests/unit/cognitive-reflection-states.test.ts:55` 拿 `prisma/schema.prisma` 的 `enum ReflectionStatus`
+和一张生产者表逐一对账——schema 里多一个状态而这张表说不出谁写它，测试就红。
+生产者分布是：`PENDING`/`EXPIRED` 由 `reflection-sweep.ts` 写（落库与到期收割），
+`ACCEPTED`/`REJECTED`/`EDITED`/`SNOOZED` 由 `reflections.ts` 写（用户动作）；
+`SNOOZED` 到期同样由 sweep 放回 `PENDING`，不留只进不出的死状态。
+
+**边界**：`allowUserProfile` 依然**全仓无读取方**，`userModel` 模块也没有实现——
+「写进了画像」这个动作今天根本不存在，所以门槛那句话仍然只能判到「机制上不可能」，不是「验过它没发生」。
+第二条边界：这三条证据都在**读侧/动作侧**；写侧（sweep）本来就不碰画像，但那条路依赖 `reflectionEnabled` 默认关这一事实，见门槛 9。
 
 ### 8. 未确认决策不得建立正式记录
 
-**状态：无法验收——决策记忆模块不存在；但「决策情境先问再记」已验收。**
+**状态：部分验收——决策记录模块已落地，写入仍然只从确认走。**
+
+前四条守的是**前置**：分类为 decisionMaking 的内容在用户确认前一行记忆都不落。
+5-A…5-F 之后 `DecisionRecord` 这张正式档案真的存在了，所以门槛那句话有了对象，
+它靠的是同一套口径的两端：`status` 默认 `PENDING_CONFIRM`，接口只认 confirm/reject 两个动词，
+`DecisionOutcome` 只挂到已确认的记录上。
 
 | 证据 | 层 |
 |---|---|
 | `tests/unit/cognitive-memory-policy.test.ts:123` `决策情境默认落库但必须先经用户确认` | 服务 |
 | `tests/unit/cognitive-write-decision.test.ts:100` `决策情境允许落库，但必须先经用户确认` | 纯 |
-| `tests/unit/cognitive-memory-module.test.ts:215` `决策情境默认要先问用户确认，这一片不假装确认过：不落库` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:243` `决策情境默认要先问用户确认，这一片不假装确认过：不落库` | 服务 |
 | `tests/unit/cognitive-write-decision.test.ts:217` `UPDATE 不能插队：要先确认或本来不落库的情境，即使撞上旧记忆也不动历史` | 纯 |
+| `tests/unit/cognitive-decisions-service.test.ts:81` `确认只命中「自己 + 待确认」的行，并盖上确认时间` | 服务 |
+| `tests/unit/cognitive-decisions-service.test.ts:100` `行不存在是 404，不是待确认是 409` | 服务 |
+| `tests/unit/cognitive-decisions-route.test.ts:80` `开关关着：GET 直接 409，且一次列表查询都不发` | 路由 |
+| `tests/unit/cognitive-decision-outcomes-route.test.ts:72` `开关关着：详情和链接确认都不发服务层调用` | 路由 |
 
-**边界**：门槛 8 说的是「决策**记录**」（decisionMemory 模块的正式档案），那东西不存在。
-今天守住的是它的**前置**：分类为 decisionMaking 的内容在用户确认前一行都不落库。
+**边界**：`PENDING_CONFIRM` 的行**已经在库里**——门槛字面说的是「不得建立正式记录」，
+今天的实现读成「不得当作已确认的决策来用」：一行待确认的候选如果不落库，用户就没有东西可确认。
+这句解释写在这里，不是把既成事实说成合规。界面入口在 5-F 已经接上；
+真库上判这条，得等 `decisionMemoryEnabled` 打开、表里真有行之后看那一屏说什么。
 
 ### 9. 关闭功能后不得继续执行对应模块
 
@@ -213,6 +270,10 @@
 | `tests/unit/cognitive-task-worker.test.ts:232` `开关打开 ⇒ 写这一轮跑一次，截止用的是后台的宽期限` | 服务 |
 | `tests/unit/cognitive-timeline-route.test.ts:117` `timelineEnabled 关着时返回 MODULE_DISABLED，一次记忆查询都不发` | 路由 |
 | `tests/unit/cognitive-timeline-route.test.ts:130` `开关读不出来时按关闭处理：拿不准就不读用户的记忆` | 路由 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:235` `reflectionEnabled 关着 ⇒ 什么都不做，也不给反思扫描盖时间戳` | 服务 |
+| `tests/unit/cognitive-reflection-sweep.test.ts:787` `开关关着 ⇒ 一行都不收割：后台不许替关掉反思的用户改状态` | 服务 |
+| `tests/unit/cognitive-reflections-route.test.ts:99` `开关关着：列表 409，且一次查询都不发` | 路由 |
+| `tests/unit/cognitive-reflections-route.test.ts:112` `偏好读不出来按关闭处理` | 路由 |
 
 **这一条今天有两个必须写清的事实**：
 
@@ -229,8 +290,12 @@
    不是被测出来的。现在 `timeline` 不再是那六个之一：`src/app/api/account/cognitive/timeline/route.ts:29`
    在捞记忆行**之前**读 `timelineEnabled`，读不出来当关，这条有两条新用例钉着（上面那两行）。
    注意它**不走 `manager.ts` 的注册表**——时间线是对话之外的只读接口，不参与上下文注入，所以那道闸门和
-   `MODULE_SWITCH` 是两处独立代码，口径相同（读不出来 = 关）但不会互相提醒。剩下五个键
-   （`userModel` / `emotion` / `association` / `reflection` / `decisionMemory`）仍是平凡成立，等模块实现才真正吃紧。
+   `MODULE_SWITCH` 是两处独立代码，口径相同（读不出来 = 关）但不会互相提醒。
+   **11-04 之后又少了两个「平凡成立」的键**：`decisionMemory`（5-A…5-F：`decisions.ts` + 三条路由 + 设置页面板）
+   和 `reflection`（6-A…6-E：`reflection-sweep.ts` 一天一轮的后台扫描 + `reflections.ts` 读写两侧），
+   它们和 `timeline` 一样**不走注册表**——都是对话之外的接口或后台任务，所以闸门同样是独立代码，
+   上表那四行洞察用例就是它们的证据。剩下三个键（`userModel` / `emotion` / `association`）
+   到今天仍然没有任何实现读它们，「关了不执行」还是平凡成立，不是被测出来的。
 3. **后台任务这一侧的闸门是三值的，不是开关/关闭两值**：`on` 正常跑、`off` 删行作废、**读偏好失败当 `unknown`，只退避不删行**
    （`tests/unit/cognitive-task-worker.test.ts:220`）。这条是给数据库抖动留的——一次读不出来就把用户排队的活清空，
    比多跑一次严重得多。真库上「默认全关 → 欠账被作废删行」这条出口写进了集成断言（`tests/run-integration.sh:409-427`），
@@ -241,6 +306,9 @@
 `timelineEnabled`（`src/components/settings/timeline-panel.tsx:84-115`，控件渲染在 `:199`）——后者是 4-T1 才有的，
 因为开关得先真有消费者，才轮得到它有一个控件。`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
 这不是遗漏：`memory-policy-panel.tsx:24-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
+**11-04 起这一句要改口径**：`reflectionEnabled`（模块开关）与策略表的 `allowReflection`（逐情境，
+`reflection-sweep.ts:436` 是它第一个服务端读取方）现在**都有真消费者了**，按同一立场就该有控件——
+洞察那一屏和策略面板里那一列是 6-F 的活，不是可选装饰。
 
 ### 10. 新增模块全部关闭时，原有聊天功能回归通过
 
@@ -667,3 +735,60 @@
 - 界面**没有浏览器验证**：本机不起他的服务，面板只过了 typecheck；
   他下次起服务打开「决策」tab 时才是第一次真渲染。
 - 7.2 的 D 臂仍缺：评测语料没有决策字段，探针只是单元级的「该连连、不该连不连」。
+
+## Phase 6 判词（主动洞察，11-04 落到 6-E；6-F 那一屏还没做）
+
+- **数据模型（6-A）**：`prisma/schema.prisma:744`（ReflectionRecord）与 `:804`（ReflectionCitation）。
+  标题、正文、竞争解释、反证关键词四列全密文，AAD 和决策一样带字段名
+  （`reflection:v1:${userId}:${id}:${field}`，`src/lib/cognitive/reflections.ts:42`）。
+  `@@unique([userId, dedupKey])` 让同主题的第二条**在库层插不进来**，去重不靠应用层记着。
+  迁移 `20261104110000_proactive_reflection` 由 migrate diff 生成，**尚未在任何库上应用**。
+- **规则层（6-B，零模型调用）**：七类 `ReflectionType`（`schema.prisma:165`）都有出题函数与写成常量的阈值
+  （`reflection-planner.ts:29-43`：`PATTERN_MIN_SAMPLES=3`、`PATTERN_MIN_CHATS=3`、`PATTERN_MIN_SPAN_DAYS=14`、
+  `UNRESOLVED_MIN_AGE_DAYS=60`、`INTEREST_SHIFT_MEDIAN_GAP_DAYS=30`、`TOPIC_MIN_OVERLAP=2`），
+  凑不齐阈值的主题进 `plan.insufficient` 并只记类型和两个计数进日志——**证据不足不硬写一条**。
+  成簇是并查集，`dedupKey = TYPE:sha1(主题词)`。
+- **措辞与自查（6-C）**：反证只认「主题命中 + 带否定词（`不/没/无/别`）+ 支持行自己不带这个否定词」，
+  已被取代或已撤回的行算反证，已引用过的行不重复计数（`reflection-evidence.ts:104`）。
+  置信度按样本数、跨度、反证命中算（`reflectionConfidence`），反证扣分有上限；
+  `importance` 是**不扣反证**的那一份证据量——两个数各说各的事。
+  EvidenceCritic（`reflection-evidence.ts:218`）五种拒稿码：`GHOST_CITATION` / `UNSOURCED_ASSERTION` /
+  `COUNTER_UNMENTIONED` / `COUNT_MISMATCH` / `HYPOTHESIS_DROPPED`，被拒的洞察**不落库**。
+- **落库与冷却（6-D）**：`reflection-sweep.ts:63-72` 四个常量——一天一轮、一轮最多三条、没人理的活 30 天、单轮硬截止 15 秒。
+  冷却用条件 UPDATE 抢（和 task-queue 领任务行同一协议），先抢后跑。逐情境闸门读策略表的 `allowReflection`
+  （`reflection-sweep.ts:436`），这是那个字段在服务端的第一个读取方。
+- **状态机与读侧（6-E）**：六个状态的生产者说得出名字（门槛 7 的静态对账，
+  `tests/unit/cognitive-reflection-states.test.ts:55` 直接拿 schema 的 enum 和这张表对账，多一个状态就红）：
+  `PENDING`/`EXPIRED` 归 sweep，`ACCEPTED`/`REJECTED`/`EDITED`/`SNOOZED` 归用户动作。
+  「过期」有两处判：sweep 每天收割一次，读侧在 `expiresAt` 已过时当场派生成 `EXPIRED`
+  （`reflections.ts:93`），否则 30 天的 TTL 在界面上要拖到下一次扫描才生效；
+  动作侧同样拒过期行（409），界面和库里不会各说一套。
+  `SNOOZED` 到期由 sweep 放回 `PENDING`，不留只进不出的死状态。
+- **三条裁定都落在代码上**：甲（零模型，规则出题）、乙（采纳只翻状态——行为用例 + 源码禁写 + 全仓 import 扫描三道，
+  见门槛 7）、丙（v1 不做读侧提示注入：洞察除了两条自己的路由，全仓无人 import）。
+- **测试**：6 个反思文件共 157 条用例（planner 40 / evidence 40 / sweep 38 / 状态对账 3 / 读侧服务 21 / 路由 15）；
+  全量 `npx vitest run` 996 条通过，`npm run typecheck` 干净。
+  8 个变异探针逐个验证「破坏保证必有测试变红」：去掉动作的条件 `status: 'PENDING'`（1 红）、
+  accept 顺手写一行记忆（2 红）、snooze 改成删行（1 红）、闸门不读偏好（5 红）、
+  稍后天数不设限（1 红）、去掉 SNOOZED 收割（1 红）、关掉复活例外（2 红）、读侧不判过期（2 红）。
+  **第一条探针在探测前是没有覆盖的**——补了一条模拟交错的用例（读回 PENDING 之后、条件更新之前把行翻成 ACCEPTED），
+  它才红得起来；求值器不模拟行锁，这条钉的是「UPDATE 自己带状态条件」，不是「数据库会替你拦」。
+
+### Phase 6 仍然无法验收的部分
+
+- **6-F 那一屏不存在**：门槛 4 说的「用户能追溯支持与反对证据」今天只到服务层，
+  洞察对用户的可见性是 0——没有界面读取 `reflections` 这两条路由（`reflections.ts` 的唯一 importers 是路由本身）。
+  同理 `reflectionEnabled` 和策略表的 `allowReflection` 现在都有了服务端消费者却没有控件，
+  按「开关得先真有消费者才轮得到控件」的同一立场，6-F 必须补两个入口。
+- **真库零行**：`reflectionEnabled` 默认关，`MemoryItem` 实测 0 行，历史上没有任何一条洞察在真库里存在过；
+  上面全部是内存求值器上的证据。冷却、限量、逐情境闸门、复活这四件事都要等他起服务、开开关、聊出几十条记忆之后才谈得上目测。
+- **删除侧漏了洞察（门槛 2 的新缺口）**：`forgetting.ts` 全文不读 `reflectionRecord`，
+  「清空全部记忆」撤得掉记忆、演化边、欠账，却留下一整批洞察行——正文引用的那句话没了，洞察还挂着，
+  `dedupKey` 还占着那个主题位，下一次扫描因此也不会再提这个主题。这一条要的是删除侧的一个入口，Phase 6 收尾时必须补。
+- **复活判据是从实测里重推出来的，不是原判据**：他批的语义是「这条洞察的支持证据里有 decidedAt 之后新记的记忆」，
+  实测证明这个条件恒为 false——CONTRADICTION 的支持证据固定是相抵那两句的代表，第三句同话题的话根本进不去。
+  现在实现的是「池子里 decidedAt 之后新记的行，与这条洞察的主题词重合 ≥ 成簇阈值」（`reflection-sweep.ts:481`），
+  尺子和成簇同一把（`sharesTopicWith` 由 planner 导出）。副作用也测出来了：那第三句会另外撑出一条新洞察（PATTERN），
+  所以复活用例全部按行 id 找目标，不假设库里只有一行。
+  另外实测发现**复活写回的正文可能和原来一字不差**（finding 本身没变），所以那条用例钉的是
+  「密文重写 + 状态复位 + 引用整批替换」，不是「文字必须变」——这句要说给他听，因为原判据的意图正是「别用同一句话骚扰」。

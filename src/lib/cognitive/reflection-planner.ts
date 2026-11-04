@@ -203,6 +203,19 @@ function overlap(left: Set<string>, right: Set<string>): number {
   return count;
 }
 
+/**
+ * 这一句正文和那组主题词算不算「同一个话题」——用的就是成簇那把尺子（同一套分词、同一个
+ * `TOPIC_MIN_OVERLAP`），不是第二套标准。
+ *
+ * 导出它只有一个消费者：6-E 的复活判据要说「用户拒绝之后又记进了同类的一句」。
+ * 这条判断如果自己在 sweep 里重算一遍词，就会和成簇的口径慢慢漂移——
+ * 同一个词表两处解释，正是 prisma-mock 文件头写着要避免的那种事。
+ */
+export function sharesTopicWith(text: string, tokens: readonly string[]): boolean {
+  if (tokens.length === 0) return false;
+  return overlap(topicTokens(text), new Set(tokens)) >= TOPIC_MIN_OVERLAP;
+}
+
 function intersect(left: Set<string>, right: Set<string>): Set<string> {
   const out = new Set<string>();
   for (const token of left) if (right.has(token)) out.add(token);

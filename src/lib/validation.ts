@@ -188,6 +188,37 @@ export const decisionStatusSchema = z.enum([
   'REJECTED'
 ]);
 
+/** 洞察列表的状态过滤白名单，和 ReflectionStatus 枚举同词表。 */
+export const reflectionStatusSchema = z.enum([
+  'PENDING',
+  'ACCEPTED',
+  'REJECTED',
+  'EDITED',
+  'SNOOZED',
+  'EXPIRED'
+]);
+
+/**
+ * 洞察的四个动作（任务书 6.4 的状态机）。用可辨识联合：edit 必须带齐两段文字、snooze 必须带天数，
+ * 缺哪一样都是 400，而不是让服务层去猜用户按了哪个按钮。
+ * 3/7/30 这一组数字的领域真相是 reflections.ts 的 ReflectionSnoozeDays（服务层只接这三个字面量）；
+ * 这里再写一遍是因为 validation.ts 不 import 认知层模块，它是这条依赖链的叶子。
+ * 长度上限同口径：正文不许比系统写出来的还短，否则「改一下」会把长原话截断成另一句话。
+ */
+export const reflectionActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('accept') }),
+  z.object({ action: z.literal('reject') }),
+  z.object({
+    action: z.literal('edit'),
+    title: z.string().trim().min(1, '改标题不能留空').max(200, '标题不能超过 200 字'),
+    body: z.string().trim().min(1, '改正文不能留空').max(4000, '正文不能超过 4000 字')
+  }),
+  z.object({
+    action: z.literal('snooze'),
+    days: z.union([z.literal(3), z.literal(7), z.literal(30)])
+  })
+]);
+
 /**
  * 批量永久删除的范围。用可辨识联合而不是「chatId 可选」：
  * scope=chat 时 chatId 必须存在，这条约束由类型系统兜住，路由里就不用再补一次判断。

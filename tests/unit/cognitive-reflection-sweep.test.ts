@@ -686,3 +686,244 @@ describe('扫描的硬截止', () => {
     }
   });
 });
+
+/**
+ * 6-E 补的两件事：门槛 7 的两个缺口。
+ *
+ * 一、EXPIRED 和「稍后到期」这两个状态在此之前没有任何代码写过：洞察行带着 30 天的
+ *    expiresAt 落库后一直停在 PENDING，SNOOZED 更是个只进不出的死状态。甲方案的判法是
+ *    「抢到冷却后的第一件事」做一次条件 UPDATE——放在抢戳之后是因为开关关着的用户不该被后台改状态，
+ *    放在读池子之前是因为收割和聚类没有依赖关系，而它得是每轮必到的。
+ * 二、REJECTED 行的复活。去重键让一个被拒的主题永远进不来，于是「忽略」实际上变成了永久消音；
+ *    甲方案的判法是只有**决定之后新记的同话题证据**才允许它再来一次，而且写回同一行——
+ *    密文的 AAD 绑的就是那一行的 id，换新行等于换了加密口径。
+ *    「同话题」实测后从「这条洞察的 supportMemoryIds 里有新行」改成了「池子里决定之后新记的行
+ *    和这条洞察的主题词重合 ≥ 成簇阈值」：CONTRADICTION 的支持证据固定是相抵的那两句的代表，
+ *    第三句同类的话根本不会进去，原判据在任何池子下都恒为 false（等于没有复活这条路）。
+ *    改动带出的副作用也在这里钉住：第三句同话题的话本身会撑出一条新洞察（PATTERN），
+ *    所以这几条测试全部按行 id 找目标，不再假设库里只有一行。
+ */
+function existingReflection(id: string, overrides: Partial<Record<string, unknown>> = {}) {
+  const aad = (field: string) => `reflection:v1:${USER}:${id}:${field}`;
+  tables.get('reflectionRecord')!.seed({
+    id,
+    userId: USER,
+    type: 'CONTRADICTION',
+    status: 'PENDING',
+    dedupKey: `key-${id}`,
+    titleCiphertext: encryptString('旧标题', aad('title')),
+    bodyCiphertext: encryptString('旧正文', aad('body')),
+    alternativesCiphertext: null,
+    counterTokensCiphertext: encryptString('爬山', aad('counterTokens')),
+    counterHitCount: 1,
+    timeFrom: new Date('2026-09-01T00:00:00Z'),
+    timeTo: new Date('2026-09-20T00:00:00Z'),
+    timePrecision: 'DAY',
+    sampleCount: 2,
+    observationSpanDays: 19,
+    confidence: 0.5,
+    importance: 0.5,
+    generatedAt: new Date('2026-09-21T00:00:00Z'),
+    snoozedUntil: null,
+    expiresAt: null,
+    decidedAt: null,
+    ...overrides
+  });
+}
+
+describe('收割：过期与稍后到期都要有人写', () => {
+  it('PENDING 且 expiresAt 已过 ⇒ 置 EXPIRED 并计入 expired', async () => {
+    existingReflection('r-old', { expiresAt: new Date(NOW.getTime() - 1000) });
+    switchOn();
+
+    const outcome = await sweep();
+
+    expect(outcome.expired).toBe(1);
+    expect(tables.get('reflectionRecord')!.rows.get('r-old')!.status).toBe('EXPIRED');
+  });
+
+  it('SNOOZED 到期 ⇒ 回到 PENDING 并清空 snoozedUntil，计入 reactivated', async () => {
+    existingReflection('r-snooze', {
+      status: 'SNOOZED',
+      snoozedUntil: new Date(NOW.getTime() - 1000),
+      expiresAt: new Date(NOW.getTime() + 30 * DAY)
+    });
+    switchOn();
+
+    const outcome = await sweep();
+
+    expect(outcome.reactivated).toBe(1);
+    const row = tables.get('reflectionRecord')!.rows.get('r-snooze')!;
+    expect(row.status).toBe('PENDING');
+    expect(row.snoozedUntil).toBeNull();
+  });
+
+  it('SNOOZED 还没到期 ⇒ 一个字都不动（否则稍后就等于没按）', async () => {
+    existingReflection('r-snooze', {
+      status: 'SNOOZED',
+      snoozedUntil: new Date(NOW.getTime() + 3 * DAY)
+    });
+    switchOn();
+
+    const outcome = await sweep();
+
+    expect(outcome.reactivated).toBe(0);
+    expect(tables.get('reflectionRecord')!.rows.get('r-snooze')!.status).toBe('SNOOZED');
+  });
+
+  it('已经有人处理过的行不被过期带走：ACCEPTED 即使带着过去的 expiresAt 也照原样留着', async () => {
+    existingReflection('r-accepted', {
+      status: 'ACCEPTED',
+      expiresAt: new Date(NOW.getTime() - DAY)
+    });
+    switchOn();
+
+    const outcome = await sweep();
+
+    expect(outcome.expired).toBe(0);
+    expect(tables.get('reflectionRecord')!.rows.get('r-accepted')!.status).toBe('ACCEPTED');
+  });
+
+  it('开关关着 ⇒ 一行都不收割：后台不许替关掉反思的用户改状态', async () => {
+    existingReflection('r-old', { expiresAt: new Date(NOW.getTime() - DAY) });
+    tables.get('cognitivePreference')!.seed({ userId: USER, reflectionEnabled: false });
+
+    const outcome = await sweep();
+
+    expect(outcome.ran).toBe(false);
+    expect(tables.get('reflectionRecord')!.rows.get('r-old')!.status).toBe('PENDING');
+  });
+
+  it('收割数进摘要日志，但不带任何正文', async () => {
+    existingReflection('r-old', { expiresAt: new Date(NOW.getTime() - DAY) });
+    switchOn();
+
+    await sweep();
+
+    const summary = ctx.events.find(([event]) => event === 'cognitive.reflection_sweep');
+    expect(summary![1]).toMatchObject({ userId: USER, expired: 1 });
+    expect(JSON.stringify(summary![1])).not.toContain('旧正文');
+  });
+});
+
+describe('复活：被忽略的主题只在新证据下再来一次', () => {
+  /** 第一遍扫出那条洞察，然后按用户的动作把它改成 REJECTED。 */
+  async function rejectedFromFirstSweep(decidedAt: Date) {
+    contradictionPool();
+    switchOn();
+    const first = await sweep();
+    expect(first.generated).toBe(1);
+    const row = writtenRecords()[0]!;
+    tables.get('cognitivePreference')!.rows.get(USER)!.reflectionSweptAt = new Date(
+      decidedAt.getTime() - 25 * 3_600_000
+    );
+    row.status = 'REJECTED';
+    row.decidedAt = decidedAt;
+    return row;
+  }
+
+  it('拒绝之后又记进同类的新一句 ⇒ 回到 PENDING，且写回的是同一行 id', async () => {
+    const rejected = await rejectedFromFirstSweep(new Date('2026-10-01T00:00:00Z'));
+    const rejectedId = String(rejected.id);
+    const rejectedKey = String(rejected.dedupKey);
+    const ciphertextBefore = String(rejected.bodyCiphertext);
+    const expiresBefore = rejected.expiresAt as Date;
+    const citationIdsBefore = writtenCitations()
+      .filter((row) => row.reflectionId === rejectedId)
+      .map((row) => row.id);
+    memory('m3', '周末去爬山', {
+      recordedAt: new Date('2026-10-20T00:00:00Z'),
+      chatId: 'c3'
+    });
+
+    const outcome = await sweep(USER, new Date('2026-11-05T00:00:00Z'));
+
+    expect(outcome.revived).toBe(1);
+    // 第三句同话题的话自己撑出一条新洞察（PATTERN），那条算新生不算复活——两个计数各记各的。
+    expect(outcome.generated).toBe(1);
+
+    const row = tables.get('reflectionRecord')!.rows.get(rejectedId)!;
+    // 同一行：AAD 绑的就是这个 id，换了 id 老密文就再也解不开。
+    expect(row.dedupKey).toBe(rejectedKey);
+    expect(row.status).toBe('PENDING');
+    expect(row.decidedAt).toBeNull();
+    // 钉的是「整行重写过」，不是「文字必须变」：实测下来 CONTRADICTION 的支持证据固定是那两句的代表，
+    // 第三句同话题的话不会改进正文——复活改的是状态、时钟和证据，让同一句话重新排队一次。
+    expect(String(row.bodyCiphertext)).not.toBe(ciphertextBefore);
+    expect((row.expiresAt as Date).getTime()).toBeGreaterThan(expiresBefore.getTime());
+    // 老引用整批换掉：留着上一次的证据，等于让界面说出一个现在支撑不了的理由。
+    const citationsNow = writtenCitations().filter((row2) => row2.reflectionId === rejectedId);
+    expect(citationsNow.map((row2) => row2.id)).not.toEqual(citationIdsBefore);
+    expect(citationsNow.length).toBeGreaterThan(0);
+  });
+
+  it('没有新证据 ⇒ 按去重跳过，那一行原样不动', async () => {
+    const rejected = await rejectedFromFirstSweep(new Date('2026-10-01T00:00:00Z'));
+    const rejectedId = String(rejected.id);
+    const ciphertextBefore = String(rejected.bodyCiphertext);
+    const generatedAtBefore = (rejected.generatedAt as Date).getTime();
+
+    const outcome = await sweep(USER, new Date('2026-11-05T00:00:00Z'));
+
+    expect(outcome.revived).toBe(0);
+    expect(outcome.dedupSkipped).toBeGreaterThanOrEqual(1);
+    const row = tables.get('reflectionRecord')!.rows.get(rejectedId)!;
+    expect(row.status).toBe('REJECTED');
+    expect(String(row.bodyCiphertext)).toBe(ciphertextBefore);
+    expect((row.generatedAt as Date).getTime()).toBe(generatedAtBefore);
+  });
+
+  it('新记忆记在拒绝之前 ⇒ 不算新证据，不复活', async () => {
+    const rejected = await rejectedFromFirstSweep(new Date('2026-10-01T00:00:00Z'));
+    const rejectedId = String(rejected.id);
+    memory('m3', '周末去爬山', {
+      recordedAt: new Date('2026-09-25T00:00:00Z'),
+      chatId: 'c3'
+    });
+
+    const outcome = await sweep(USER, new Date('2026-11-05T00:00:00Z'));
+
+    expect(outcome.revived).toBe(0);
+    expect(tables.get('reflectionRecord')!.rows.get(rejectedId)!.status).toBe('REJECTED');
+  });
+
+  it('采纳过的主题永不复活：去重键还在就还是不写，这是 6.6 而不是 6.4', async () => {
+    contradictionPool();
+    switchOn();
+    await sweep();
+    const accepted = writtenRecords()[0]!;
+    const acceptedId = String(accepted.id);
+    accepted.status = 'ACCEPTED';
+    accepted.decidedAt = new Date('2026-10-01T00:00:00Z');
+    const ciphertextBefore = String(accepted.bodyCiphertext);
+    tables.get('cognitivePreference')!.rows.get(USER)!.reflectionSweptAt = new Date('2026-10-10T00:00:00Z');
+    memory('m3', '周末去爬山', { recordedAt: new Date('2026-10-20T00:00:00Z'), chatId: 'c3' });
+
+    const outcome = await sweep(USER, new Date('2026-11-05T00:00:00Z'));
+
+    expect(outcome.revived).toBe(0);
+    expect(outcome.dedupSkipped).toBeGreaterThanOrEqual(1);
+    const row = tables.get('reflectionRecord')!.rows.get(acceptedId)!;
+    expect(row.status).toBe('ACCEPTED');
+    expect(String(row.bodyCiphertext)).toBe(ciphertextBefore);
+  });
+
+  it('复活与新生共用同一份限量计数：一轮里落地的行不超过上限', async () => {
+    const { MAX_NEW_PER_SWEEP } = await reflectionSweepConstants();
+    expect(MAX_NEW_PER_SWEEP).toBe(3);
+    await rejectedFromFirstSweep(new Date('2026-10-01T00:00:00Z'));
+    memory('m3', '周末去爬山', {
+      recordedAt: new Date('2026-10-20T00:00:00Z'),
+      chatId: 'c3'
+    });
+
+    const outcome = await sweep(USER, new Date('2026-11-05T00:00:00Z'));
+
+    expect(outcome.revived).toBe(1);
+    // 复活和新生走的是同一个 prepared 数组、同一次 slice(0, MAX)，所以合计顶得上限。
+    // 上限真正咬住的那一幕（4 条候选只落 3 条）由「限量」那组测试钉，这里钉的是「复活也占名额」这个口径。
+    expect(outcome.generated + outcome.revived).toBeLessThanOrEqual(MAX_NEW_PER_SWEEP);
+    // 复活写回原有那一行，不新增行：库里的行数 = 复活前那一条 + 这一轮新生。
+    expect(writtenRecords()).toHaveLength(1 + outcome.generated);
+  });
+});

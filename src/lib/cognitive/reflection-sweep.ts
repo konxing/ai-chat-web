@@ -19,6 +19,7 @@ import {
 import {
   planReflections,
   REFLECTION_POOL_LIMIT,
+  sharesTopicWith,
   type PatternHypothesis,
   type ReflectableDecision,
   type ReflectableMemory,
@@ -43,6 +44,14 @@ import {
  * 四、反证只影响口气，不影响它值不值得占那一屏的三个位置：`confidence` 扣反证，
  *    `importance` 是不扣的那一份证据量。两个数各说各的事，界面才不会把「有争议」读成「没证据」。
  *
+ * 五、这一版起，扫描还是 `ReflectionStatus` 里两个状态的唯一生产者（门槛 7）：
+ *    抢到冷却后的第一件事把 `PENDING` 且已过 `expiresAt` 的行置 `EXPIRED`，把 `SNOOZED` 且
+ *    已到期（`snoozedUntil <= now`）的行放回 `PENDING` 并清空 `snoozedUntil`——没有这一句，
+ *    TTL 只是库里的一个日期，而 SNOOZED 是个只进不出的死状态。收割走在读池子之前：
+ *    到期处理和聚类没有依赖关系，池子读挂了也该把它做掉。
+ *    同一个循环里还开了 REJECTED 的口子：被拒的主题只在「决定之后新记过同话题的一句」时
+ *    写回**同一行**（密文 AAD 绑的就是那一行的 id），见 hasNewEvidence。
+ *
  * 冷却用条件 UPDATE 抢，和 task-queue.ts 领任务行是同一个协议：`reflectionSweptAt IS NULL
  * OR < cutoff` 那一半不能省——SQL 里 NULL 不参与比较，漏掉它第一次扫描永远排不上。
  * 先抢后跑：跑挂了也要等满冷却才重来，换掉的是「一次数据库抖动让每两秒重算一遍 O(n²) 聚类」。
@@ -54,7 +63,7 @@ import {
 export const REFLECTION_SWEEP_COOLDOWN_HOURS = 24;
 /** 一轮最多落三条：一屏放得下，而且「攒着一次倒五十条」不是提醒，是轰炸。 */
 export const MAX_NEW_PER_SWEEP = 3;
-/** 没人理的洞察活 30 天。EXPIRED 这个状态的生产者就是这一列——写库时不填，读侧永远判不出来（门槛 7）。 */
+/** 没人理的洞察活 30 天。这一列配上 sweepBody 的收割才让 EXPIRED 有个生产者（门槛 7）；读侧也按它提前判。 */
 export const REFLECTION_TTL_DAYS = 30;
 /**
  * 硬截止。扫描和写任务共用同一条串行的 worker 轮次，不限死它，一个用户的记忆池就能把别人排着的
@@ -84,9 +93,15 @@ export interface SweepOutcome {
   /** 这个主题已经存在了：应用层预筛和库层唯一约束两种命中都记在这里。 */
   dedupSkipped: number;
   insufficient: number;
+  /** 这一轮收割掉的过期洞察（PENDING 且 expiresAt 已过 → EXPIRED）。门槛 7 里 EXPIRED 的生产者。 */
+  expired: number;
+  /** 这一轮醒过来的稍后洞察（SNOOZED 且 snoozedUntil 已过 → 回到 PENDING）。 */
+  reactivated: number;
+  /** 这一轮因新证据而复活的被拒洞察：写回**同一行**，不新增。 */
+  revived: number;
   /** 撞上 REFLECTION_SWEEP_DEADLINE_MS：这一轮没跑完，已经算出来的计数还在。 */
   timedOut: boolean;
-  /** 这一轮被一次真实的失败中断：偏好读不出、抢戳失败、解密炸、写库报错。超时另记在 timedOut。 */
+  /** 这一轮被一次真实的失败中断：偏好读不出、抢戳失败、收割报错、解密炸、写库报错。超时另记在 timedOut。 */
   failed: boolean;
 }
 
@@ -97,6 +112,9 @@ const NOTHING_DONE: SweepOutcome = {
   criticRejected: 0,
   dedupSkipped: 0,
   insufficient: 0,
+  expired: 0,
+  reactivated: 0,
+  revived: 0,
   timedOut: false,
   failed: false
 };
@@ -110,6 +128,12 @@ interface Prepared {
   importance: number;
   /** 计划层的反证 + 这一轮现搜的反证，去重之后就是落库的 CONTRADICTS 引用行。 */
   counterIds: string[];
+  /**
+   * 有它就不是新写一条，而是把用户拒过的那一行**复活**：同一行 id 写回新正文。
+   * 必须同一行有两个理由——密文的 AAD 绑的就是那个 id，而且 `@@unique([userId, dedupKey])`
+   * 本来也不允许同一个主题存在两行。
+   */
+  reviveRowId?: string;
 }
 
 export async function runReflectionSweep(userId: string, input: { now: Date }): Promise<SweepOutcome> {
@@ -158,6 +182,9 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
     criticRejected: outcome.criticRejected,
     dedupSkipped: outcome.dedupSkipped,
     insufficient: outcome.insufficient,
+    expired: outcome.expired,
+    reactivated: outcome.reactivated,
+    revived: outcome.revived,
     timedOut: outcome.timedOut,
     failed: outcome.failed
   });
@@ -169,6 +196,27 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
  * 返回值是「有没有被一次真实失败打断」，超时由调用方判断。
  */
 async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Promise<boolean> {
+  // 收割排在读池子之前：门槛 7 要求 EXPIRED 有人写、SNOOZED 不是个只进不出的死状态，
+  // 而这两件事和「这个用户这一轮能不能扫出新洞察」没有依赖关系——池子读挂了也该把到期处理掉。
+  // 条件 UPDATE 的形状和抢戳、领任务行是同一个协议：只碰自己用户的行，且带着状态条件。
+  try {
+    outcome.expired = (
+      await prisma.reflectionRecord.updateMany({
+        where: { userId, status: 'PENDING', expiresAt: { lte: now } },
+        data: { status: 'EXPIRED' }
+      })
+    ).count;
+    outcome.reactivated = (
+      await prisma.reflectionRecord.updateMany({
+        where: { userId, status: 'SNOOZED', snoozedUntil: { lte: now } },
+        data: { status: 'PENDING', snoozedUntil: null }
+      })
+    ).count;
+  } catch {
+    log.warn('cognitive.reflection_sweep_failed', { userId, reason: 'reap_failed' });
+    return true;
+  }
+
   let pool: {
     memories: ReflectableMemory[];
     contextByMemoryId: Map<string, MemoryContext>;
@@ -203,7 +251,7 @@ async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Prom
   if (plan.findings.length === 0) return false;
 
   const policies = await getMemoryPolicies(userId);
-  const known = await existingDedupKeys(
+  const existing = await existingReflections(
     userId,
     plan.findings.map((finding) => finding.dedupKey)
   );
@@ -213,7 +261,13 @@ async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Prom
 
   const prepared: Prepared[] = [];
   for (const finding of plan.findings) {
-    if (known.has(finding.dedupKey)) {
+    const prior = existing.get(finding.dedupKey);
+    // 6.6 的去重：这个主题已经跟用户说过一次了。唯一的例外是「被拒过而且有了新证据」——
+    // 否则按下忽略就等于永久消音，而那不是 6.4 里 REJECTED 这个状态的意思。
+    if (
+      prior !== undefined &&
+      !(prior.status === 'REJECTED' && hasNewEvidence(prior.decidedAt, finding, pool))
+    ) {
       outcome.dedupSkipped += 1;
       log.debug('cognitive.reflection_dedup_skipped', { userId, type: finding.type, dedupKey: finding.dedupKey });
       continue;
@@ -263,7 +317,9 @@ async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Prom
       body: draft.body,
       confidence: score,
       importance: importanceOf(finding),
-      counterIds
+      counterIds,
+      // 走到这里还能带着 prior，就只有「被拒过 + 有新证据」这一种情况：写回那一行。
+      ...(prior ? { reviveRowId: prior.id } : {})
     });
   }
 
@@ -276,7 +332,9 @@ async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Prom
   for (const item of ranked.slice(0, MAX_NEW_PER_SWEEP)) {
     try {
       await writeReflection(userId, now, item);
-      outcome.generated += 1;
+      // 复活和新写都占那一屏的三个位置：分开的只是计数器，不是额度。
+      if (item.reviveRowId) outcome.revived += 1;
+      else outcome.generated += 1;
     } catch (err) {
       if (isDuplicateKey(err)) {
         // 并发里抢先后到：库层那条 @@unique([userId, dedupKey]) 才是 6.6 的最终出处。
@@ -393,20 +451,51 @@ function importanceOf(finding: ReflectionFinding): number {
   return Math.round(((samples + span) / 2) * 1000) / 1000;
 }
 
-/** 这些主题库里已经有行了吗：库层唯一约束兜并发，这一句只是别让它们白排一趟。 */
-async function existingDedupKeys(userId: string, dedupKeys: readonly string[]): Promise<Set<string>> {
-  if (dedupKeys.length === 0) return new Set();
+/**
+ * 这些主题库里已经有行了吗。除了「有没有」还要带回状态和决定时间，因为 6.6 的去重对
+ * 被拒的主题留了一个口子（见 hasNewEvidence）。库层唯一约束兜并发，这一句只是别让它们白排一趟。
+ */
+async function existingReflections(
+  userId: string,
+  dedupKeys: readonly string[]
+): Promise<Map<string, { id: string; status: string; decidedAt: Date | null }>> {
+  if (dedupKeys.length === 0) return new Map();
   const rows = await prisma.reflectionRecord.findMany({
     where: { userId, dedupKey: { in: [...dedupKeys] } },
-    select: { dedupKey: true }
+    select: { id: true, dedupKey: true, status: true, decidedAt: true }
   });
-  return new Set(rows.map((row) => row.dedupKey));
+  return new Map(rows.map((row) => [row.dedupKey, { id: row.id, status: row.status, decidedAt: row.decidedAt }]));
+}
+
+/**
+ * 被拒的洞察什么时候允许再来一次：拒绝之后又记进来了**同一话题**的一句。
+ *
+ * 「同一话题」用的是成簇那把尺子（planner 导出的 `sharesTopicWith`），不是这里的第二套标准——
+ * 一个词表两处解释迟早漂移。两个刻意的窄口径：
+ * 一、看的是这个用户新记下的行，不是这条洞察的 supportMemoryIds。实测过才发现后者不能用：
+ *    CONTRADICTION 那一类的支持证据固定是相抵的那两句的代表，第三句同类的话根本不会进去，
+ *    照 supportMemoryIds 判「有没有新证据」会永远判出「没有」，被拒的主题就再也醒不过来。
+ * 二、`decidedAt` 为空就不放行：这一版之前的老行说不出决定时间，「在这之后有新证据」证不出来，
+ *    那条主题就继续沉默；每天拿同一句话去骚扰用户，比少说一次更糟。
+ */
+function hasNewEvidence(
+  decidedAt: Date | null,
+  finding: ReflectionFinding,
+  pool: { memories: readonly ReflectableMemory[]; textByMemoryId: ReadonlyMap<string, string> }
+): boolean {
+  if (decidedAt === null) return false;
+  return pool.memories.some((memory) => {
+    if (memory.recordedAt.getTime() <= decidedAt.getTime()) return false;
+    const text = pool.textByMemoryId.get(memory.id);
+    return text !== undefined && sharesTopicWith(text, finding.topicTokens);
+  });
 }
 
 async function writeReflection(userId: string, now: Date, item: Prepared): Promise<void> {
   const { finding } = item;
   // id 先在应用层出来：字段 AAD 绑的就是它，等库生成就来不及了。
-  const id = randomUUID();
+  // 复活的场合直接沿用被拒那一行的 id——换了 id，那三段老密文就再也解不开。
+  const id = item.reviveRowId ?? randomUUID();
   const aad = (field: string) => aadFor(userId, id, field);
   const alternatives = finding.hypothesisKeys
     .map((key) => HYPOTHESIS_PHRASES[key as PatternHypothesis])
@@ -419,30 +508,37 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
   ];
   const contradicts = item.counterIds.map((memoryId) => ({ memoryId, decisionId: null as string | null }));
 
+  const columns = {
+    type: finding.type,
+    dedupKey: finding.dedupKey,
+    titleCiphertext: encryptString(item.title, aad('title')),
+    bodyCiphertext: encryptString(item.body, aad('body')),
+    alternativesCiphertext: alternatives === '' ? null : encryptString(alternatives, aad('alternatives')),
+    counterTokensCiphertext: encryptString(finding.topicTokens.join(' '), aad('counterTokens')),
+    counterHitCount: item.counterIds.length,
+    timeFrom: finding.timeFrom,
+    timeTo: finding.timeTo,
+    timePrecision: finding.timePrecision,
+    sampleCount: finding.sampleCount,
+    observationSpanDays: finding.observationSpanDays,
+    confidence: item.confidence,
+    importance: item.importance,
+    generatedAt: now,
+    expiresAt: new Date(now.getTime() + REFLECTION_TTL_DAYS * DAY_MS)
+  };
+
   await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    await tx.reflectionRecord.create({
-      data: {
-        id,
-        userId,
-        type: finding.type,
-        status: 'PENDING',
-        dedupKey: finding.dedupKey,
-        titleCiphertext: encryptString(item.title, aad('title')),
-        bodyCiphertext: encryptString(item.body, aad('body')),
-        alternativesCiphertext: alternatives === '' ? null : encryptString(alternatives, aad('alternatives')),
-        counterTokensCiphertext: encryptString(finding.topicTokens.join(' '), aad('counterTokens')),
-        counterHitCount: item.counterIds.length,
-        timeFrom: finding.timeFrom,
-        timeTo: finding.timeTo,
-        timePrecision: finding.timePrecision,
-        sampleCount: finding.sampleCount,
-        observationSpanDays: finding.observationSpanDays,
-        confidence: item.confidence,
-        importance: item.importance,
-        generatedAt: now,
-        expiresAt: new Date(now.getTime() + REFLECTION_TTL_DAYS * DAY_MS)
-      }
-    });
+    if (item.reviveRowId) {
+      // where 带着 userId：这条 UPDATE 只能碰这个用户自己的那一行。
+      await tx.reflectionRecord.updateMany({
+        where: { id, userId },
+        data: { ...columns, status: 'PENDING', decidedAt: null, snoozedUntil: null }
+      });
+      // 老引用整批换掉：留着上一次的证据，等于让界面说出一个现在支撑不了的理由。
+      await tx.reflectionCitation.deleteMany({ where: { reflectionId: id, userId } });
+    } else {
+      await tx.reflectionRecord.create({ data: { id, userId, status: 'PENDING', ...columns } });
+    }
     // 引用行必须跟洞察行同事务：门槛 4 要的是「这条洞察引用的那几行当时就在」，
     // 半截状态（有洞察没引用）比一条都不写更难解释。
     for (const citation of [
