@@ -84,7 +84,7 @@ export function rankMemories<T extends Retrievable>(
 }
 
 /** 关键词打分 + 排序，一整池返回（不截断）——rankMemories 和混合排序共用这一份口径。 */
-function scoreByKeyword<T extends Retrievable>(
+export function scoreByKeyword<T extends Retrievable>(
   query: string,
   memories: readonly T[]
 ): Array<{ memory: T; score: number }> {

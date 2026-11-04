@@ -5,6 +5,8 @@ import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { getCognitivePreferences } from './preferences';
+import { scoreByKeyword } from './retrieval';
+import type { CognitiveBlock } from './manager';
 import { matchOutcomes } from './outcome-extractor';
 
 /**
@@ -199,7 +201,6 @@ export async function getDecisionWithOutcomes(
 }
 
 export type OutcomeLinkAction = 'link' | 'detach';
-
 /** 候选链接的确认/解除。和决策确认同构：只从 CANDIDATE 出发，where 里带着状态。 */
 export async function setOutcomeLink(
   userId: string,
@@ -218,4 +219,52 @@ export async function setOutcomeLink(
   }
   const row = await prisma.decisionOutcome.findFirst({ where: { id: outcomeId, userId } });
   return toOutcomeDto(row!);
+}
+
+/**
+ * 决策经验的读侧（任务书 5.4）。发问时把「过去相似决策」送进上下文。
+ *
+ * 只送已确认的决策：候选和已拒绝的都不算经验。打分复用召回那套 IDF 加权覆盖率
+ * （scoreByKeyword），于是「这里连得上」和记忆召回是同一把尺子；零分一条都不送——
+ * 5.4 禁止盲目复制过去的选择，送一条不相干的决策比不送更坏。
+ *
+ * 措辞里那句「需结合当前约束重新分析」不是装饰：它是 5.4 的禁令在提示词里的形态，
+ * 模型拿到的是参考而不是指令。
+ */
+export const DECISION_READ_MAX_ITEMS = 2;
+export const DECISION_READ_MAX_CHARS = 600;
+export const DECISION_RECALL_POOL = 50;
+export const DECISION_BLOCK_HEADER =
+  '过去相似决策（仅供参考，需结合当前约束重新分析，不要照搬过去的选择）：';
+
+export async function readDecisionContext(turn: {
+  userId: string;
+  query: string;
+}): Promise<CognitiveBlock[]> {
+  if (turn.query.trim() === '') return [];
+  const rows = await prisma.decisionRecord.findMany({
+    where: { userId: turn.userId, status: 'CONFIRMED' },
+    orderBy: { createdAt: 'desc' },
+    take: DECISION_RECALL_POOL
+  });
+  if (rows.length === 0) return [];
+  const candidates = rows.map((row) => ({
+    id: row.id,
+    content: decryptString(row.topicCiphertext, aadFor(turn.userId, row.id, 'topic')),
+    choice: decryptString(row.choiceCiphertext, aadFor(turn.userId, row.id, 'choice')),
+    recordedAt: (row.decidedAt ?? row.createdAt).toISOString()
+  }));
+  const scored = scoreByKeyword(turn.query, candidates)
+    .filter((entry) => entry.score > 0)
+    .slice(0, DECISION_READ_MAX_ITEMS);
+  const lines: string[] = [];
+  let size = DECISION_BLOCK_HEADER.length;
+  for (const entry of scored) {
+    const line = `- ${entry.memory.content} → 当时选的是：${entry.memory.choice}`;
+    if (size + line.length > DECISION_READ_MAX_CHARS) break;
+    lines.push(line);
+    size += line.length;
+  }
+  if (lines.length === 0) return [];
+  return [{ module: 'decisionMemory', label: '决策经验', text: [DECISION_BLOCK_HEADER, ...lines].join('\n') }];
 }

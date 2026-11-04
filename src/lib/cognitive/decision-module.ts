@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { extractDecisionCandidates } from './decision-extractor';
-import { writeOutcomeCandidates } from './decisions';
+import { readDecisionContext, writeOutcomeCandidates } from './decisions';
 import type { CognitiveModule, CognitiveTurn } from './manager';
-
 /**
  * 决策记忆的写侧（任务书 Phase 5 的第一片行为）。
  *
@@ -44,7 +43,7 @@ export async function writeDecisionCandidates(turn: CognitiveTurn): Promise<void
 /** 读侧 5-E 才接：现在返回空块，开关开着也不会往上下文里塞任何东西。 */
 export const decisionModule: CognitiveModule = {
   key: 'decisionMemory',
-  read: async () => [],
+  read: (turn) => readDecisionContext({ userId: turn.userId, query: turn.content }),
   write: async (turn) => {
     await writeDecisionCandidates(turn);
     // 结果跟踪和候选抽取共用同一条欠账：一轮话里既可能做新决策，也可能在报旧决策的结果。
