@@ -448,6 +448,25 @@ describe('隔离', () => {
   });
 });
 
+/**
+ * 归档的记忆不再当反思的证据（任务书 7.2 的 ARCHIVE 撞上 Phase 6）。
+ * 反思扫描不读 listMemories，它自己 findMany 捞 500 行的池子，所以「收起来」这件事
+ * 必须在那一次查询里也成立——否则用户已经把这条藏好了，洞察还在正文里复述它。
+ * 正向对照（同一份池子不归档时确实出一条）在上面的引用隔离那条里已经钉过。
+ */
+describe('归档的记忆不再当反思的证据', () => {
+  it('打脸的两句里有一句已归档 ⇒ 这条冲突洞察不落地', async () => {
+    contradictionPool();
+    tables.get('memoryItem')!.rows.get('m2')!.archivedAt = new Date('2026-10-01T00:00:00Z');
+    switchOn();
+
+    const outcome = await sweep();
+
+    expect(outcome.generated).toBe(0);
+    expect(writtenRecords()).toEqual([]);
+  });
+});
+
 describe('落库的形状', () => {
   it('一条互相打脸的洞察：标题、正文、时间、计数、置信度全部来自 finding 与 6-C 的算式', async () => {
     contradictionPool();

@@ -18,6 +18,8 @@ const db = vi.hoisted(() => ({
   revisionCalls: [] as Array<{ id: string; userId: string }>,
   reviseCalls: [] as Array<Record<string, unknown>>,
   retractCalls: [] as Array<{ id: string; userId: string; reason: string }>,
+  archiveCalls: [] as Array<{ id: string; userId: string }>,
+  restoreCalls: [] as Array<{ id: string; userId: string }>,
   purgeCalls: [] as Array<{ id: string; userId: string }>,
   purgeChatCalls: [] as Array<{ chatId: string; userId: string }>,
   purgeAllCalls: [] as string[],
@@ -57,13 +59,19 @@ vi.mock('@/lib/audit', () => ({
 }));
 
 vi.mock('@/lib/cognitive/memories', () => ({
-  listMemories: (userId: string, filters?: unknown) => {
+  listMemories: (userId: string, filters?: { archivedOnly?: boolean }) => {
     db.listCalls.push({ userId, filters });
-    // 真实现只给「还没被取代、也没被撤回」的行；按同一语义筛，
-    // 否则「撤回后不再出现」这条用例测的是个空壳。
+    // 真实现只给「还没被取代、也没被撤回、也没归档」的行；按同一语义筛，
+    // 否则「撤回后不再出现」「归档后不再出现」这两条用例测的都是个空壳。
+    // archivedOnly 是「记忆」那一屏的恢复列表：同三个条件，只把归档反过来。
+    const archivedOnly = filters?.archivedOnly === true;
     return Promise.resolve(
       [...db.stored.values()].filter(
-        (row) => row.userId === userId && row.supersededAt === null && row.origin !== 'retracted'
+        (row) =>
+          row.userId === userId &&
+          row.supersededAt === null &&
+          row.origin !== 'retracted' &&
+          (archivedOnly ? row.archivedAt !== undefined && row.archivedAt !== null : !row.archivedAt)
       )
     );
   },
@@ -100,6 +108,20 @@ vi.mock('@/lib/cognitive/memories', () => ({
     const row = db.stored.get(`${userId}|${id}`);
     if (!row) return Promise.resolve(false);
     row.origin = 'retracted';
+    return Promise.resolve(true);
+  },
+  archiveMemory: (id: string, userId: string) => {
+    db.archiveCalls.push({ id, userId });
+    const row = db.stored.get(`${userId}|${id}`);
+    if (!row) return Promise.resolve(false);
+    row.archivedAt = '2026-11-05T10:00:00.000Z';
+    return Promise.resolve(true);
+  },
+  restoreMemory: (id: string, userId: string) => {
+    db.restoreCalls.push({ id, userId });
+    const row = db.stored.get(`${userId}|${id}`);
+    if (!row) return Promise.resolve(false);
+    delete row.archivedAt;
     return Promise.resolve(true);
   }
 }));
@@ -196,7 +218,7 @@ function store(row: Record<string, unknown>) {
   db.stored.set(`${row.userId}|${row.id}`, row);
 }
 
-/** path 是 URL 上 BASE 后面的那截：'' 列表、'/mem-1' 单条、'/mem-1/retract' 撤回。 */
+/** path 是 URL 上 BASE 后面的那截：'' 列表、'/mem-1' 单条、'/mem-1/retract' 撤回、'/mem-1/archive' 归档。 */
 async function call(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path = '', body?: unknown, query = '') {
   const request = new Request(`${BASE}${path}${query}`, {
     method,
@@ -205,7 +227,11 @@ async function call(method: 'GET' | 'PATCH' | 'POST' | 'DELETE', path = '', body
   });
   const route = path.endsWith('/retract')
     ? await import('@/app/api/account/cognitive/memories/[id]/retract/route')
-    : path.endsWith('/evidence')
+    : path.endsWith('/archive')
+      ? await import('@/app/api/account/cognitive/memories/[id]/archive/route')
+      : path.endsWith('/restore')
+        ? await import('@/app/api/account/cognitive/memories/[id]/restore/route')
+        : path.endsWith('/evidence')
       ? await import('@/app/api/account/cognitive/memories/[id]/evidence/route')
       : path === ''
         ? await import('@/app/api/account/cognitive/memories/route')
@@ -227,6 +253,8 @@ beforeEach(() => {
   db.revisionCalls = [];
   db.reviseCalls = [];
   db.retractCalls = [];
+  db.archiveCalls = [];
+  db.restoreCalls = [];
   db.purgeCalls = [];
   db.purgeChatCalls = [];
   db.purgeAllCalls = [];
@@ -420,6 +448,101 @@ describe('撤回', () => {
     // 查不到就是 404，不给「存在但不属于你」这种可以被枚举出答案的差别。
     expect(db.retractCalls).toEqual([{ id: 'mem-x', userId: 'user-a', reason: '删掉' }]);
     expect(db.audits).toEqual([]);
+  });
+});
+
+/**
+ * 任务书 7.2 的 ARCHIVE：「归档，仍可在允许范围内恢复」。
+ * 路由这一层钉四件事：谁能动（只有 session 用户）、动了什么（只一列）、审计里不许有正文，
+ * 以及「可逆」必须有个界面读得到的出口——GET 要把已归档那几行一起带回来，
+ * 否则归档就是一扇进得去出不来的门。
+ */
+describe('归档与恢复（任务书 7.2 的 ARCHIVE）', () => {
+  it('归档只按 session 用户那一行，请求体一个字都不需要', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+
+    const { payload } = await call('POST', '/mem-1/archive');
+
+    expect(db.archiveCalls).toEqual([{ id: 'mem-1', userId: 'user-a' }]);
+    expect(payload.data.archived).toBe(true);
+  });
+
+  it('归档过的行从当前列表里出去，出现在 archived 那一份里，正文照样是解过密的', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    await call('POST', '/mem-1/archive');
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.memories).toEqual([]);
+    expect(payload.data.archived.map((row: { id: string }) => row.id)).toEqual(['mem-1']);
+    expect(payload.data.archived[0].content).toBe('我在用 Prisma');
+  });
+
+  it('恢复把它放回当前有效那一份，已归档那一份跟着空掉', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    await call('POST', '/mem-1/archive');
+
+    const { payload } = await call('POST', '/mem-1/restore');
+    const list = await call('GET');
+
+    expect(db.restoreCalls).toEqual([{ id: 'mem-1', userId: 'user-a' }]);
+    expect(payload.data.restored).toBe(true);
+    expect(list.payload.data.memories.map((row: { id: string }) => row.id)).toEqual(['mem-1']);
+    expect(list.payload.data.archived).toEqual([]);
+  });
+
+  it('别人的 id：两条路都 404，条件里带的仍然是调用者自己的 userId，审计一个字都不写', async () => {
+    store(memoryDto({ userId: 'user-b', id: 'mem-b' }));
+
+    const archive = await call('POST', '/mem-b/archive');
+    const restore = await call('POST', '/mem-b/restore');
+
+    expect([archive.response.status, restore.response.status]).toEqual([404, 404]);
+    expect(db.archiveCalls).toEqual([{ id: 'mem-b', userId: 'user-a' }]);
+    expect(db.restoreCalls).toEqual([{ id: 'mem-b', userId: 'user-a' }]);
+    expect(db.audits).toEqual([]);
+  });
+
+  it('审计里只有动作、id 和 ip，正文一个字节都不落', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    await call('POST', '/mem-1/archive');
+    await call('POST', '/mem-1/restore');
+
+    expect(db.audits.map((audit) => audit.action)).toEqual(['user.memory_archive', 'user.memory_restore']);
+    expect(db.audits[0]).toMatchObject({ targetId: 'mem-1', targetType: 'memory' });
+    expect(JSON.stringify(db.audits)).not.toContain('Prisma');
+  });
+
+  it('未登录时两条路都是 401，一次服务调用都不发', async () => {
+    db.authThrows = true;
+
+    const archive = await call('POST', '/mem-1/archive');
+    const restore = await call('POST', '/mem-1/restore');
+
+    expect([archive.response.status, restore.response.status]).toEqual([401, 401]);
+    expect(db.archiveCalls).toEqual([]);
+    expect(db.restoreCalls).toEqual([]);
+  });
+
+  it('触发限流时两条路各回 429，服务函数和审计都不发', async () => {
+    store(memoryDto());
+    db.limiterOk = false;
+
+    const archive = await call('POST', '/mem-1/archive');
+    const restore = await call('POST', '/mem-1/restore');
+
+    expect([archive.response.status, restore.response.status]).toEqual([429, 429]);
+    expect(db.archiveCalls).toEqual([]);
+    expect(db.restoreCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
+  });
+
+  it('归档和恢复分桶：整理一屏记忆不该把「反悔」的那一路一起挡住', async () => {
+    store(memoryDto());
+    await call('POST', '/mem-1/archive');
+    await call('POST', '/mem-1/restore');
+
+    expect(db.limiterCalls.map((entry) => entry.key)).toEqual(['memory-archive:user-a', 'memory-restore:user-a']);
   });
 });
 

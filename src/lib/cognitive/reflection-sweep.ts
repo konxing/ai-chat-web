@@ -376,8 +376,10 @@ interface PoolRow {
 
 async function loadPool(userId: string) {
   // 最新的 500 条——planner 那个 O(n²) 上限在这里兑现。倒着取再翻回来，池子就是时间正序。
+  // 归档的行不进池子（任务书 7.2）：这一片不读 listMemories，得自己带上同一口径，
+  // 否则用户把记忆收起来了，洞察还在正文里复述它。
   const memoryRows = await prisma.memoryItem.findMany({
-    where: { userId },
+    where: { userId, archivedAt: null },
     orderBy: { recordedAt: 'desc' },
     take: REFLECTION_POOL_LIMIT
   });

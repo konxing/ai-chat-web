@@ -26,6 +26,9 @@ const PURGE_WINDOW_MS = 60 * 60 * 1000;
  * 这里不接任何过滤或翻页参数：多一个入口，就多一条通向别人账号的路，
  * 而当前有效的那几十条本来就一次读得完。
  *
+ * 已归档的那一份（任务书 7.2）跟着同一份响应回来：归档得有地方恢复，
+ * 否则这个动作就是一扇进得去出不来的门。
+ *
  * chats 和 confidence 都是旁表，不塞进每条记忆里：MemoryDto 是服务层的形状，
  * 不该为了一个界面在这里编字段；而且同一个会话标题会被多条记忆共用。
  *
@@ -36,6 +39,10 @@ export async function GET(req: Request) {
   return api(async () => {
     const { user } = await requireUser(req);
     const memories = await listMemories(user.id);
+    // 已归档那一份单独带回来越一次：没有它，归档就是一扇进得去出不来的门（任务书 7.2）。
+    // 不喂 chats，也不参与置信度——那一屏只要求「看清收起来的是什么，然后恢复」，
+    // 多算一份只是给一次点开付两批解密的钱。
+    const archived = await listMemories(user.id, { archivedOnly: true });
     const [chats, confidence] = await Promise.all([
       listChatTitles(
         user.id,
@@ -47,6 +54,7 @@ export async function GET(req: Request) {
     ]);
     return {
       memories,
+      archived,
       chats,
       confidence: Object.fromEntries(
         [...confidence].map(([id, entry]) => [id, { band: entry.band, factors: entry.factors }])

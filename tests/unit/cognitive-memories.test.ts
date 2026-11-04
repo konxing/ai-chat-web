@@ -784,6 +784,93 @@ describe('时间线的读侧接缝', () => {
   });
 });
 
+/**
+ * 任务书 7.2 的第四个动词：「ARCHIVE：归档，仍可在允许范围内恢复。」
+ *
+ * 钉的是它和三个邻居的区别，因为这三条路今天都已经有了：
+ * 撤回改的是 origin（原值覆写就回不去，而且界面没有恢复入口）、永久删除把行删掉（不可逆）、
+ * 保留期过期是**情境级**的策略（用户没法逐条收起某一件）。
+ * 所以归档只能是一行上多一个可逆的戳：正文、证据、演化边、向量全留着，只是退出「当前有效」。
+ * 「仍可在允许范围内恢复」这半句要求恢复必须回到归档前那一条本身——同一行、同一列以外的值。
+ */
+describe('归档：可逆的收起（任务书 7.2 的 ARCHIVE）', () => {
+  it('归档只写 archivedAt 这一列，正文和来源一个字节都不动', async () => {
+    const { archiveMemory, createMemory, listMemories } = await memories();
+    const memory = await createMemory(baseInput());
+
+    await archiveMemory(memory.id, USER);
+
+    expect(await listMemories(USER)).toEqual([]);
+    // 写进去的只有这一列：动到 origin 就回不去原值，动到正文就不是「可逆」。
+    expect(db.updates[db.updates.length - 1]!.data).toEqual({ archivedAt: expect.any(Date) });
+    const row = db.rows.get(memory.id)!;
+    expect(row.origin).toBe('EXPLICIT');
+    expect(row.contentCiphertext).toBeTypeOf('string');
+  });
+
+  it('恢复把这一列清回 null，同一条重新是当前有效记忆', async () => {
+    const { archiveMemory, createMemory, listMemories, restoreMemory } = await memories();
+    const memory = await createMemory(baseInput());
+    await archiveMemory(memory.id, USER);
+    expect(await listMemories(USER)).toEqual([]);
+
+    await restoreMemory(memory.id, USER);
+
+    const rows = await listMemories(USER);
+    expect(rows.map((row) => row.id)).toEqual([memory.id]);
+    expect(db.rows.get(memory.id)!.archivedAt).toBeNull();
+  });
+
+  it('归档和恢复的条件里都带调用者自己的 userId：别人的行一条都改不动', async () => {
+    const { archiveMemory, restoreMemory } = await memories();
+    db.rows.set('mem-theirs', { id: 'mem-theirs', userId: 'user-b', origin: 'EXPLICIT' });
+
+    expect(await archiveMemory('mem-theirs', USER)).toBe(false);
+    expect(await restoreMemory('mem-theirs', USER)).toBe(false);
+    for (const update of db.updates) {
+      expect(update.where).toMatchObject({ userId: USER });
+    }
+    expect(db.rows.get('mem-theirs')!.archivedAt).toBeUndefined();
+  });
+
+  it('归档既不写演化边也不记证据：它不是改口，也不是撤回', async () => {
+    const { archiveMemory, createMemory } = await memories();
+    const memory = await createMemory(baseInput());
+    db.edges = [];
+    db.evidence = [];
+
+    await archiveMemory(memory.id, USER);
+
+    expect(db.edges).toEqual([]);
+    expect(db.evidence).toEqual([]);
+  });
+
+  it('includeSuperseded 也不放宽归档：时间线照样看不见它（11-05 他判的甲）', async () => {
+    const { archiveMemory, createMemory, listMemories } = await memories();
+    const kept = await createMemory(baseInput({ content: '我在用 Prisma。' }));
+    const filed = await createMemory(baseInput({ content: '我以前住在广州。' }));
+    await archiveMemory(filed.id, USER);
+
+    const rows = await listMemories(USER, { includeSuperseded: true });
+
+    expect(rows.map((row) => row.id)).toEqual([kept.id]);
+  });
+
+  it('archivedOnly 只回归档的那几条：「记忆」那一屏的恢复入口要的就是这一份', async () => {
+    const { archiveMemory, createMemory, listMemories } = await memories();
+    const kept = await createMemory(baseInput({ content: '我在用 Prisma。' }));
+    const filed = await createMemory(baseInput({ content: '我以前住在广州。' }));
+    await archiveMemory(filed.id, USER);
+
+    const rows = await listMemories(USER, { archivedOnly: true });
+
+    expect(rows.map((row) => row.id)).toEqual([filed.id]);
+    expect(rows[0]!.content).toBe('我以前住在广州。');
+    // 默认那一份不受影响：有效列表里仍然只有没归档的那条。
+    expect((await listMemories(USER)).map((row) => row.id)).toEqual([kept.id]);
+  });
+});
+
 describe('给一行记忆挂上算好的向量', () => {
   const stored = { ciphertext: Buffer.from([1, 2, 3, 4]), model: 'embed-v1' };
 

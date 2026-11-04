@@ -18,9 +18,9 @@ export const CITATION_NOTE = '这只是这一轮随问题一起交给模型的�
 
 /**
  * 引用的那条已经不在了。这一行不许省：数字是注入那一刻算的，点开却是现在这一刻的列表，
- * 中间用户删过或改过口，两边就对不上——对不上要说清是对不上，而不是默默少列一条。
+ * 中间用户删过、改过口或收起来过，两边就对不上——对不上要说清是对不上，而不是默默少列一条。
  */
-export const CITATION_MISSING_LABEL = '这条记忆已不在你的有效记忆里（可能已被更新或删除）';
+export const CITATION_MISSING_LABEL = '这条记忆已不在你的有效记忆里（可能已被更新、删除或归档）';
 
 /** 收起态那一句。0 条给空串，让界面什么都不渲染，而不是摆一个点开是空的控件。 */
 export function citationHint(count: number): string {

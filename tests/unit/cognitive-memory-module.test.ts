@@ -265,6 +265,21 @@ describe('写侧：策略在服务端真的生效', () => {
     expect(db.creates).toEqual([]);
   });
 
+  /**
+   * 归档后再把同一句话说一遍，会落成新的第一条——这是他判的甲。
+   * 这里钉的是「写侧用的是默认口径」：归档的排除发生在服务层，
+   * 只要写侧不自己放宽过滤，那条排除就自动生效。证据薄，钉的是调用形状。
+   */
+  it('写侧读的是默认口径那一份，不自己把归档的行捞回匹配池', async () => {
+    db.memoryEnabled = true;
+
+    await write('我在用 Prisma。');
+
+    const call = db.listFilters[db.listFilters.length - 1] as { userId: string; filters?: unknown };
+    expect(call.userId).toBe('user-a');
+    expect(call.filters).toBeUndefined();
+  });
+
   it('一轮里最多落两条，防止一条长消息灌库', async () => {
     db.memoryEnabled = true;
 

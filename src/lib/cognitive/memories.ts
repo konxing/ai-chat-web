@@ -110,6 +110,11 @@ export interface MemoryListFilters {
   take?: number;
   /** 时间线要的是历史，不是「当前有效」：被新说法取代过的旧行也得进来，才能在派生层折叠。 */
   includeSuperseded?: boolean;
+  /**
+   * 只回归档的那几条（任务书 7.2）。默认不传＝反过来：归档行排除在外。
+   * 这个入口只为「记忆」那一屏的恢复列表存在——可逆得有个看得见的地方去逆。
+   */
+  archivedOnly?: boolean;
 }
 
 /** 更新一条记忆（任务书 2.3）：新写一行、旧行盖 supersededAt，绝不原地改正文。
@@ -325,8 +330,11 @@ export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
 export async function listMemories(userId: string, filters: MemoryListFilters = {}): Promise<MemoryDto[]> {
   const where: Record<string, unknown> = {
     userId,
-    origin: { notIn: [toStoredOrigin('retracted')] }
+    origin: { notIn: [toStoredOrigin('retracted')] },
+    // 归档的这条退出「当前有效」：对话注入、时间线、写侧去重全都走这个默认口径（任务书 7.2）。
+    archivedAt: null
   };
+  if (filters.archivedOnly) where.archivedAt = { not: null };
   // 默认只要当前有效的那批；时间线把被取代过的旧行也读回来，但折叠不折叠是派生层的事。
   if (!filters.includeSuperseded) where.supersededAt = null;
   if (filters.types?.length) where.type = { in: filters.types.map(toDbMemoryType) };
@@ -441,6 +449,33 @@ export async function retractMemory(memoryId: string, userId: string, reason: st
     });
     return true;
   });
+}
+
+/**
+ * 归档（任务书 7.2 的 ARCHIVE）：只写 archivedAt 这一列。
+ *
+ * 和两个邻居的区别是硬的：撤回把 origin 覆写成 RETRACTED，那个原值换不回来；永久删除把行删掉。
+ * 这里正文、证据、演化边、向量全留着，恢复就是清掉这一列——所以「仍可在允许范围内恢复」
+ * 回到的是归档前那一条本身，而不是一条重新造出来的记忆。
+ *
+ * 重复归档会把时间戳推后。不为此先读一次：这一列只用来判「在不在归档态」，界面不显示它，
+ * 多出来的代价是一个没人看的数。
+ */
+export async function archiveMemory(memoryId: string, userId: string): Promise<boolean> {
+  const result = await prisma.memoryItem.updateMany({
+    where: { id: memoryId, userId },
+    data: { archivedAt: new Date() }
+  });
+  return result.count > 0;
+}
+
+/** 恢复＝把这一列清回 null，除此以外什么都不动。归档前是什么状态，恢复后还是什么状态。 */
+export async function restoreMemory(memoryId: string, userId: string): Promise<boolean> {
+  const result = await prisma.memoryItem.updateMany({
+    where: { id: memoryId, userId },
+    data: { archivedAt: null }
+  });
+  return result.count > 0;
 }
 
 /** 这条记忆是被谁取代的、还是被谁撤回的：按调用者自己的 userId 取，别人的边一条也不给。 */

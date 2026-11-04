@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Brain, History, Pencil, Scale, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Brain, History, Pencil, Scale, Trash2, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
 import {
@@ -20,18 +20,23 @@ import type { EvidenceDto } from '@/lib/cognitive/evidence';
 import type { ConfidenceBand, ConfidenceFactor } from '@/lib/cognitive/confidence';
 
 /**
- * 记忆管理那一屏：看到系统记住了什么，并逐条更正、撤回、永久删除。
+ * 记忆管理那一屏：看到系统记住了什么，并逐条更正、归档、撤回、永久删除。
  *
- * 三条约束决定了这里的形状：
- * 一、一屏只有一个展开区。列表行上五个按钮——更正 / 撤回 / 版本 / 证据 / 永久删除——
+ * 五条约束决定了这里的形状：
+ * 一、一屏只有一个展开区。列表行上五个按钮——更正 / 归档 / 版本 / 证据 / 永久删除——
  *    各自打开自己的表单，同时只开一个，否则页面上会堆出好几套输入框，
  *    谁也说不清哪套是当前要提交的。
  * 二、版本链点一次往前取一版。服务端的边只回答「这一版是怎么来的」，
  *    所以全链要一格一格走，不该在这里假设链很短就一次拉完。
- * 三、撤回和永久删除是两个动作，都留着：撤回是可逆的「不再使用」，正文仍在库里；
- *    永久删除是不可逆的「这条从来没存在过」。界面上必须能看出这两者的区别。
+ * 三、归档、撤回和永久删除是三个不同强度的动作，界面上必须能看出区别：
+ *    归档是任务书 7.2 的 ARCHIVE——只盖一个 archivedAt，正文、版本、证据、向量全留着，
+ *    下面的「已归档」区块里随时恢复；撤回覆写的是来源标记，这一屏没有恢复的入口；
+ *    永久删除是不可逆的「这条从来没存在过」。
+ *    所以行上的按钮位给了归档，撤回收在它的展开区里作为一个链接——可逆的排在前面。
  * 四、永久删除过的内容会进排除表，不会被自动记回来。那张表必须看得见、撤得掉，
  *    否则就成了一条没有任何入口能解开的静默封禁——用户只会发现 AI 再也记不住某些话。
+ * 五、归档也必须有回来的入口。「已归档」区块和排除表同一职责：一个动作能不能逆，
+ *    看的是界面给不给逆的地方，不是服务端有没有留着那一列。
  */
 
 interface ChainEntry {
@@ -39,7 +44,10 @@ interface ChainEntry {
   revisions: MemoryRevisionDto[];
 }
 
-type Panel = { kind: 'edit' | 'retract' | 'history' | 'purge' | 'evidence'; id: string } | null;
+/** 一屏只开一个展开区，所以这些形态得是一份类型：加一栏只许改一处。 */
+type PanelKind = 'edit' | 'archive' | 'retract' | 'history' | 'purge' | 'evidence';
+
+type Panel = { kind: PanelKind; id: string } | null;
 
 /** 置信度旁表：只有档位和因子，分数不出服务端。 */
 interface ConfidenceEntry {
@@ -63,6 +71,8 @@ export function MemoryPanel() {
   const [flagBusy, setFlagBusy] = useState(false);
 
   const [memories, setMemories] = useState<MemoryDto[]>([]);
+  /** 归档的那一份（任务书 7.2）：和当前有效的那一份分开显示，恢复只有在这里才有入口。 */
+  const [archived, setArchived] = useState<MemoryDto[]>([]);
   const [chats, setChats] = useState<Record<string, string>>({});
   const [confidence, setConfidence] = useState<Record<string, ConfidenceEntry>>({});
   const [evidence, setEvidence] = useState<EvidenceDto[]>([]);
@@ -88,10 +98,12 @@ export function MemoryPanel() {
     try {
       const data = await apiFetch<{
         memories: MemoryDto[];
+        archived: MemoryDto[];
         chats: Record<string, string>;
         confidence: Record<string, ConfidenceEntry>;
       }>('/api/account/cognitive/memories');
       setMemories(data.memories);
+      setArchived(data.archived ?? []);
       setChats(data.chats);
       setConfidence(data.confidence ?? {});
       setLoadError('');
@@ -153,7 +165,7 @@ export function MemoryPanel() {
   }
 
   /** 再点同一个按钮收起；点别的按钮就换到那一栏——同时只有一个展开区。 */
-  function reopen(kind: 'edit' | 'retract' | 'history' | 'purge' | 'evidence', memory: MemoryDto) {
+  function reopen(kind: PanelKind, memory: MemoryDto) {
     if (panel && panel.kind === kind && panel.id === memory.id) {
       close();
       return false;
@@ -235,6 +247,40 @@ export function MemoryPanel() {
       await load();
     } catch (err) {
       setFormError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /** 归档不要理由：它是「先收起来」，不是「这条说错了」——要写理由的那两个是更正和撤回。 */
+  async function submitArchive(memory: MemoryDto) {
+    setBusyId(memory.id);
+    try {
+      await apiFetch(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}/archive`, {
+        method: 'POST'
+      });
+      push('已归档，这条不再进入对话');
+      close();
+      await load();
+    } catch (err) {
+      setFormError(errorMessage(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  /** 恢复只清 archivedAt 这一列，回来的正是当初收起来的那一条。 */
+  async function submitRestore(memory: MemoryDto) {
+    if (busyId) return;
+    setBusyId(memory.id);
+    try {
+      await apiFetch(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}/restore`, {
+        method: 'POST'
+      });
+      push('已恢复，这条重新作为当前有效记忆');
+      await load();
+    } catch (err) {
+      push(errorMessage(err), 'error');
     } finally {
       setBusyId('');
     }
@@ -351,7 +397,7 @@ export function MemoryPanel() {
         <div>
           <h2 className="text-[16px] font-semibold text-white">长期记忆</h2>
           <p className="mt-1 text-[12.5px] text-white/40">
-            下面是系统关于你记住的内容。更正会留下旧版本，撤回只是不再使用，两种操作都要写理由。
+            下面是系统关于你记住的内容。更正会留下旧版本，归档随时可以恢复；永久删除不可恢复。
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-[13px] text-white/70">
@@ -367,7 +413,7 @@ export function MemoryPanel() {
       </div>
       {enabled === false ? (
         <Alert tone="info" className="mt-4">
-          关闭只停止新的读写，已存下的记忆仍在下面这份列表里。要逐条停掉，用「撤回」。
+          关闭只停止新的读写，已存下的记忆仍在下面这份列表里。要逐条停掉，用「归档」。
         </Alert>
       ) : null}
 
@@ -384,6 +430,7 @@ export function MemoryPanel() {
         ) : (
           memories.map((memory) => {
             const isEdit = panel?.kind === 'edit' && panel.id === memory.id;
+            const isArchive = panel?.kind === 'archive' && panel.id === memory.id;
             const isRetract = panel?.kind === 'retract' && panel.id === memory.id;
             const isHistory = panel?.kind === 'history' && panel.id === memory.id;
             const isPurge = panel?.kind === 'purge' && panel.id === memory.id;
@@ -459,9 +506,9 @@ export function MemoryPanel() {
                     <button
                       type="button"
                       className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
-                      onClick={() => reopen('retract', memory)}
+                      onClick={() => reopen('archive', memory)}
                     >
-                      <X className="h-3.5 w-3.5" /> 撤回
+                      <Archive className="h-3.5 w-3.5" /> 归档
                     </button>
                     <button
                       type="button"
@@ -517,6 +564,36 @@ export function MemoryPanel() {
                         onClick={() => void submitEdit(memory)}
                       >
                         {busyId === memory.id ? <Spinner /> : null} 保存新版本
+                      </button>
+                      <button type="button" className="btn-ghost !px-3 !py-1.5 !text-[12px]" onClick={close}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {isArchive ? (
+                  <div className="mt-3 space-y-2.5 border-t border-white/[0.06] pt-3">
+                    <div className="text-[12.5px] font-medium text-white/70">把这条收起来？</div>
+                    <p className="text-[11.5px] leading-relaxed text-white/35">
+                      收起后这条不再进入对话，也不会再被当作洞察的证据。正文和版本都留着，随时可以恢复。
+                    </p>
+                    <button
+                      type="button"
+                      className="block text-[11.5px] text-white/35 underline-offset-2 hover:text-white/60 hover:underline"
+                      onClick={() => reopen('retract', memory)}
+                    >
+                      撤回这条（写明理由，这一屏没有恢复入口）
+                    </button>
+                    {formError ? <Alert tone="error">{formError}</Alert> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn-primary !px-3 !py-1.5 !text-[12px]"
+                        disabled={busyId === memory.id}
+                        onClick={() => void submitArchive(memory)}
+                      >
+                        {busyId === memory.id ? <Spinner /> : <Archive className="h-3.5 w-3.5" />} 确认归档
                       </button>
                       <button type="button" className="btn-ghost !px-3 !py-1.5 !text-[12px]" onClick={close}>
                         取消
@@ -653,6 +730,36 @@ export function MemoryPanel() {
           })
         )}
       </div>
+
+      {/* 没有归档过就整块不渲染：一段「已归档」的空标题只会让人以为系统收起了什么自己看不到的东西。 */}
+      {archived.length > 0 ? (
+        <div className="mt-6 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+          <h3 className="text-[13.5px] font-medium text-white/85">已归档</h3>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-white/40">
+            这些内容不参与对话，也不会被当作洞察的证据。要重新使用，点「恢复」。
+          </p>
+          <ul className="mt-3 space-y-2.5">
+            {archived.map((memory) => (
+              <li key={memory.id} className="flex flex-wrap items-start justify-between gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-[12.5px] text-white/70">{memory.content}</span>
+                  <span className="mt-0.5 block text-[11px] text-white/30">
+                    已归档 · 记于 {timeAgo(memory.recordedAt)}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="btn-ghost shrink-0 !px-2.5 !py-1 !text-[12px]"
+                  disabled={Boolean(busyId)}
+                  onClick={() => void submitRestore(memory)}
+                >
+                  {busyId === memory.id ? <Spinner /> : <ArchiveRestore className="h-3.5 w-3.5" />} 恢复
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* 空表时整块不渲染：没有排除项却摆一段解释，只会让人以为系统在瞒着什么。 */}
       {exclusions.length > 0 ? (

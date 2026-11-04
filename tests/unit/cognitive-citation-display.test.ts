@@ -95,7 +95,7 @@ describe('citationRows', () => {
 describe('措辞逐字钉住', () => {
   it('展开区顶部那句说的是「带上了」，不是「模型依据它回答」', () => {
     expect(CITATION_NOTE).toBe('这只是这一轮随问题一起交给模型的资料，不代表模型按它回答了。');
-    expect(CITATION_MISSING_LABEL).toBe('这条记忆已不在你的有效记忆里（可能已被更新或删除）');
+    expect(CITATION_MISSING_LABEL).toBe('这条记忆已不在你的有效记忆里（可能已被更新、删除或归档）');
   });
 });
 

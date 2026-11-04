@@ -526,6 +526,10 @@ model MemoryItem {
   confirmedAt       DateTime?
   version           Int           @default(1)
   supersededAt      DateTime?
+  /// 归档（任务书 7.2 的 ARCHIVE「归档，仍可在允许范围内恢复」）。非空＝这行退出「当前有效」，
+  /// 但正文、证据、演化边、向量全留着：恢复只清这一列，所以回得去归档前那一条本身。
+  /// 不借 origin=RETRACTED 表达「收起」，因为那个原值一旦覆写就换不回来。
+  archivedAt        DateTime?
   validFrom         DateTime?
   validTo           DateTime?
   validPrecision    TimePrecision @default(UNKNOWN)
