@@ -66,8 +66,8 @@ const BOILERPLATE: readonly string[] = [
   '我是'
 ];
 
-/** 否定标记。单字子串匹配，误判方向是「多找一对矛盾」，所以宁可窄。 */
-const NEGATION_MARKERS: readonly string[] = ['不', '没', '无', '别'];
+/** 否定标记。单字子串匹配，误判方向是「多找一对矛盾」，所以宁可窄。措辞层判反证用的是同一张表。 */
+export const NEGATION_MARKERS: readonly string[] = ['不', '没', '无', '别'];
 
 /** 完成说法。MILESTONE 只认这些——「改成了 X」不是到达。 */
 const COMPLETION_MARKERS: readonly string[] = [
@@ -84,7 +84,9 @@ const COMPLETION_MARKERS: readonly string[] = [
 ];
 
 /** PATTERN 分不开 6.3 举例的那三种解释，于是一条都不选，把解释和各自缺的证据一起交出去。 */
-const PATTERN_HYPOTHESES: readonly string[] = ['LONG_TERM_INTEREST', 'STAGED_PROJECT', 'TEMPORARY_LEARNING'];
+export const PATTERN_HYPOTHESES = ['LONG_TERM_INTEREST', 'STAGED_PROJECT', 'TEMPORARY_LEARNING'] as const;
+/** 键的封闭集合：加一种解释而措辞层没给它句子，编译就过不去。 */
+export type PatternHypothesis = (typeof PATTERN_HYPOTHESES)[number];
 
 export interface ReflectableMemory {
   id: string;
