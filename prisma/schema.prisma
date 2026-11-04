@@ -767,7 +767,8 @@ model ReflectionRecord {
   /// INSUFFICIENT_EVIDENCE 的判据本身，界面上也要把它们摊开给用户看。
   sampleCount            Int
   observationSpanDays    Int
-  /// 置信度由 assessWithCounts 按引用的证据行算出来再落库，不接受任何口算数字。
+  /// 置信度由 reflection-evidence 的 reflectionConfidence 按样本数、跨度与反证命中算出来再落库，
+  /// 不接受任何口算数字。
   confidence             Float
   /// 重要程度：证据条数与时间跨度的档位分，只用于排序和「最多留 3 条」的取舍。
   importance             Float

@@ -112,6 +112,13 @@ vi.mock('@/lib/cognitive/memory-module', () => ({
   ensureCognitiveModules: ensureModules
 }));
 
+/** 6-D 的反思扫描：这一片只钉「什么时候触发、以哪个用户触发」，扫描自己在 reflection-sweep.test.ts。 */
+const reflectionSweep = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/cognitive/reflection-sweep', () => ({
+  runReflectionSweep: reflectionSweep
+}));
+
 const USER = 'user-a';
 const OTHER = 'user-b';
 const BASE = new Date('2026-11-03T08:00:00.000Z');
@@ -184,12 +191,14 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(BASE);
   ctx.warns = [];
-  taskTable().rows.clear();
-  messageTable().rows.clear();
-  chatTable().rows.clear();
+  // 每个用例换一批全新的表，而不是只清行：有用例直接替换表上的方法（claim_failed 那条把
+  // updateMany 改成抛错），只清行的话那个替身会留给后面的用例，让它们全都「领不到任务」。
+  tables.clear();
   writes.mockReset();
   preferences.mockReset();
   ensureModules.mockReset();
+  reflectionSweep.mockReset();
+  reflectionSweep.mockResolvedValue({ ran: true, generated: 0 });
 });
 
 describe('闸门：关掉就作废，读不出来一条都不删', () => {
@@ -498,5 +507,60 @@ describe('轮询：一个定时器、不重入、停机收尾', () => {
 
     expect(events()).toContain('cognitive.worker_tick_failed');
     expect(JSON.stringify(ctx.warns)).not.toContain('连接池断了');
+  });
+});
+
+describe('反思扫描的触发：跟着真正跑过活的 用户走', () => {
+  it('这一轮跑完了才扫，按任务上的用户触发，时刻从外面传进来', async () => {
+    enabled();
+    succeeded('memory');
+    taskTable().seed(waiting());
+    message('我住在杭州');
+
+    const { runCognitiveWorkerTick } = await worker();
+    await runCognitiveWorkerTick();
+
+    expect(reflectionSweep).toHaveBeenCalledTimes(1);
+    expect(reflectionSweep.mock.calls[0]![0]).toBe(USER);
+    expect((reflectionSweep.mock.calls[0]![1] as { now: Date }).now.getTime()).toBe(BASE.getTime());
+  });
+
+  it('队里没有活 ⇒ 不扫：空闲进程不该为一次扫描付钱', async () => {
+    enabled();
+
+    const { runCognitiveWorkerTick } = await worker();
+    const count = await runCognitiveWorkerTick();
+
+    expect(count).toBe(0);
+    expect(reflectionSweep).not.toHaveBeenCalled();
+  });
+
+  it('同一用户的两条欠账只触发一次扫描（成簇是 O(n²)，跑两遍没有意义）', async () => {
+    enabled();
+    succeeded('memory');
+    taskTable().seed(waiting({ id: 'task-1', sourceMessageId: 'msg-1' }));
+    taskTable().seed(waiting({ id: 'task-2', sourceMessageId: 'msg-2' }));
+    message('我住在杭州', 'msg-1');
+    message('我下个月搬家', 'msg-2');
+
+    const { runCognitiveWorkerTick } = await worker();
+    await runCognitiveWorkerTick();
+
+    expect(reflectionSweep).toHaveBeenCalledTimes(1);
+  });
+
+  it('两个用户的活 ⇒ 各扫一次，扫的是各自的用户', async () => {
+    enabled();
+    succeeded('memory');
+    taskTable().seed(waiting({ id: 'task-a', userId: USER, chatId: 'chat-1', sourceMessageId: 'msg-1' }));
+    taskTable().seed(waiting({ id: 'task-b', userId: OTHER, chatId: 'chat-2', sourceMessageId: 'msg-2' }));
+    chat('chat-2', OTHER);
+    message('我住在杭州', 'msg-1');
+    message('我下个月搬家', 'msg-2', { chatId: 'chat-2' });
+
+    const { runCognitiveWorkerTick } = await worker();
+    await runCognitiveWorkerTick();
+
+    expect(reflectionSweep.mock.calls.map((call) => call[0])).toEqual([USER, OTHER]);
   });
 });

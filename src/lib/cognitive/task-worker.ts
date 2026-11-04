@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { MODULE_SWITCH, runCognitiveWrites, type CognitiveTurn } from './manager';
 import { ensureCognitiveModules } from './memory-module';
 import { getCognitivePreferences } from './preferences';
+import { runReflectionSweep } from './reflection-sweep';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -95,11 +96,22 @@ export async function stopCognitiveWorker(): Promise<void> {
   if (pending) await pending;
 }
 
-/** 跑一轮：领一批、一个个跑完。返回值是这一轮处理的条数，只给测试和排障看。 */
+/**
+ * 跑一轮：领一批、一个个跑完，然后扫一遍这一轮真正做过活的用户的洞察。
+ * 返回值是这一轮处理的条数，只给测试和排障看。
+ */
 export async function runCognitiveWorkerTick(): Promise<number> {
   try {
     const tasks = await claimCognitiveTasks(COGNITIVE_WORKER_ID);
     for (const task of tasks) await settleTask(task);
+    // 反思跟着「这一轮有活的 user」走，不单独起定时器：空闲进程不该为一次扫描付钱，
+    // 而 6.6 的「一天一次」由 reflection-sweep 自己那道条件 UPDATE 保证，这里只负责触发。
+    // 串行 await 而不是 fire-and-forget：pollOnce 的 drain 锁就是靠「一轮跑完才进下一轮」
+    // 成立的，放出去两次扫描会同时对同一个池子做 O(n²) 聚类。拖住下一批欠账的代价
+    // 由扫描自己那 15 秒截止兜住。
+    for (const userId of new Set(tasks.map((task) => task.userId))) {
+      await runReflectionSweep(userId, { now: new Date() });
+    }
     return tasks.length;
   } catch {
     // 只记事件名：驱动的报错原文里会带上失败的字段值。

@@ -25,6 +25,18 @@ const aadFor = (userId: string, id: string, field: string) => `decision:v1:${use
 const outcomeAadFor = (userId: string, id: string, field: string) =>
   `decision-outcome:v1:${userId}:${id}:${field}`;
 
+/**
+ * 反思扫描只要 topic 那一列，不该为它把九个字段都解一遍。
+ * AAD 的出处仍然只有 `aadFor` 这一处，所以调用方拿不到第二份加密口径。
+ */
+export function decryptDecisionTopic(
+  row: Pick<DecisionRecord, 'id' | 'userId' | 'topicCiphertext'>,
+  viewerUserId: string
+): string {
+  if (row.userId !== viewerUserId) throw new ApiError(403, 'FORBIDDEN', '这条决策不属于当前用户');
+  return decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topic'));
+}
+
 export interface DecisionDto {
   id: string;
   category: string;
