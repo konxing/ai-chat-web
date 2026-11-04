@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   authThrows: false,
   timelineEnabled: false,
+  memoryEnabled: false,
   preferencesThrows: false,
   preferencesCalls: [] as string[],
   listCalls: [] as Array<{ userId: string; filters: unknown }>,
@@ -36,7 +37,7 @@ vi.mock('@/lib/cognitive/preferences', () => ({
   getCognitivePreferences: (userId: string) => {
     db.preferencesCalls.push(userId);
     if (db.preferencesThrows) return Promise.reject(new Error('数据库连接中断'));
-    return Promise.resolve({ timelineEnabled: db.timelineEnabled });
+    return Promise.resolve({ timelineEnabled: db.timelineEnabled, memoryEnabled: db.memoryEnabled });
   }
 }));
 
@@ -93,6 +94,7 @@ async function call(query = '') {
 beforeEach(() => {
   db.authThrows = false;
   db.timelineEnabled = true;
+  db.memoryEnabled = true;
   db.preferencesThrows = false;
   db.preferencesCalls = [];
   db.listCalls = [];
@@ -136,6 +138,36 @@ describe('闸门：开关关掉是真的不读', () => {
     expect(response.status).toBe(409);
     expect(payload.error.code).toBe('MODULE_DISABLED');
     expect(db.listCalls).toEqual([]);
+  });
+});
+
+/**
+ * 时间线是长期记忆的派生视图：`timelineEnabled` 开着、`memoryEnabled` 关着时，
+ * 这一屏不许再读任何一行记忆内容（任务书 1.1「关闭模块后不能继续执行对应的数据读取」）。
+ */
+describe('memoryEnabled 关着时时间线也不读', () => {
+  it('timelineEnabled 开着但 memoryEnabled 关着 ⇒ 409，一次记忆查询都不发', async () => {
+    db.timelineEnabled = true;
+    db.memoryEnabled = false;
+    db.memories = [memoryRow()];
+
+    const { response, payload } = await call();
+
+    expect(response.status).toBe(409);
+    expect(payload.error.code).toBe('MODULE_DISABLED');
+    expect(payload.error.message).toBe('长期记忆没有打开；时间线是它的派生视图，关掉后这里不读取记忆内容');
+    expect(db.listCalls).toEqual([]);
+    expect(db.edgeCalls).toEqual([]);
+    expect(db.titleCalls).toEqual([]);
+  });
+
+  it('两个开关都打开时才放行，且一次请求只读一遍偏好', async () => {
+    db.memories = [memoryRow()];
+
+    const { response } = await call();
+
+    expect(response.status).toBe(200);
+    expect(db.preferencesCalls).toEqual(['user-a']);
   });
 });
 

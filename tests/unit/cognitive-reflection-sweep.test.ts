@@ -115,11 +115,14 @@ function reflectionSweepConstants() {
   return import('@/lib/cognitive/reflection-sweep');
 }
 
-/** 开关：只有 reflectionEnabled 那一档和这一片有关，其余按库里的默认全关。 */
-function switchOn(userId = USER, sweptAt: Date | null = null) {
+/**
+ * 开关：只有 reflectionEnabled 和 memoryEnabled 两档和这一片有关，其余按库里的默认全关。
+ * memoryEnabled 默认打开是正向对照——洞察的证据来自记忆行，关掉它就该什么都不读。
+ */
+function switchOn(userId = USER, sweptAt: Date | null = null, memoryEnabled = true) {
   tables.get('cognitivePreference')!.seed({
     userId,
-    memoryEnabled: false,
+    memoryEnabled,
     userModelEnabled: false,
     emotionEnabled: false,
     associationEnabled: false,
@@ -282,6 +285,51 @@ describe('冷却与开关', () => {
 
     await expect(sweep()).resolves.toMatchObject({ ran: false, failed: true });
     expect(writtenRecords()).toEqual([]);
+  });
+});
+
+/**
+ * 后台扫描的证据就是记忆原文（pool 是 MemoryItem 行 + 逐行解密），所以
+ * `memoryEnabled` 关着时这一片一行都不该读（任务书 1.1「关闭模块后不能继续执行对应的数据读取、
+ * 生成和后台写入」）。但闸门落在**读池子之前、收割之后**：抢戳和收割只碰 ReflectionRecord
+ * 自己的列，把 SNOOZED 一起冻住会让「稍后」变成只进不出的死状态。
+ */
+describe('memoryEnabled 关着时后台不读记忆', () => {
+  it('reflectionEnabled 开着但 memoryEnabled 关着 ⇒ 不查记忆行、不写洞察', async () => {
+    contradictionPool();
+    switchOn(USER, null, false);
+    const readMany = vi.spyOn(tables.get('memoryItem')!, 'findMany');
+
+    const outcome = await sweep();
+
+    expect(readMany).not.toHaveBeenCalled();
+    expect(outcome.ran).toBe(true);
+    expect(outcome.generated).toBe(0);
+    expect(writtenRecords()).toEqual([]);
+  });
+
+  it('memoryEnabled 关着时戳照盖：抢冷却不该被记忆的闸门带走', async () => {
+    contradictionPool();
+    switchOn(USER, null, false);
+
+    await sweep();
+
+    expect(tables.get('cognitivePreference')!.rows.get(USER)!.reflectionSweptAt).toBeInstanceOf(Date);
+  });
+
+  it('memoryEnabled 关着时收割照跑：到期和稍后到点都有人写', async () => {
+    switchOn(USER, null, false);
+    existingReflection('r-old', { expiresAt: new Date(NOW.getTime() - DAY) });
+    existingReflection('r-snooze', {
+      status: 'SNOOZED',
+      snoozedUntil: new Date(NOW.getTime() - 1000),
+      expiresAt: new Date(NOW.getTime() + 30 * DAY)
+    });
+
+    const outcome = await sweep();
+
+    expect(outcome.expired).toBe(1);
+    expect(outcome.reactivated).toBe(1);
   });
 });
 

@@ -68,10 +68,10 @@ const DAY = 86_400_000;
 const aad = (id: string, field: string) => `reflection:v1:${USER}:${id}:${field}`;
 
 /** 偏好行按库里的形状整行塞：读侧要的是那一列，缺列会让 toPreferences 先炸掉。 */
-function switchOn(userId = USER, reflectionEnabled = true) {
+function switchOn(userId = USER, reflectionEnabled = true, memoryEnabled = true) {
   preferenceTable().seed({
     userId,
-    memoryEnabled: false,
+    memoryEnabled,
     userModelEnabled: false,
     emotionEnabled: false,
     associationEnabled: false,
@@ -146,6 +146,31 @@ describe('闸门：读侧只在开关打开时读库', () => {
     };
     const module = await service();
     expect(await module.reflectionModuleEnabled(USER)).toBe(false);
+  });
+
+  /**
+   * 单条详情的证据是记忆原文，所以那道闸门要两道都读：`reflectionEnabled` 管「能不能看洞察」，
+   * `memoryEnabled` 管「能不能解密这一行 MemoryItem」。一次调用读一遍偏好。
+   */
+  it('证据闸门：两个开关都开着才都放行', async () => {
+    switchOn();
+    const module = await service();
+    expect(await module.reflectionGates(USER)).toEqual({ reflectionEnabled: true, memoryEnabled: true });
+  });
+
+  it('证据闸门：memoryEnabled 关着 ⇒ 偏好里是 false，洞察开关不受牵连', async () => {
+    switchOn(USER, true, false);
+    const module = await service();
+    expect(await module.reflectionGates(USER)).toEqual({ reflectionEnabled: true, memoryEnabled: false });
+  });
+
+  it('证据闸门：偏好读不出来 ⇒ 两道都按关闭处理', async () => {
+    switchOn();
+    preferenceTable().findUnique = () => {
+      throw new Error('数据库连接中断');
+    };
+    const module = await service();
+    expect(await module.reflectionGates(USER)).toEqual({ reflectionEnabled: false, memoryEnabled: false });
   });
 });
 

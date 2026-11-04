@@ -12,6 +12,7 @@ import { GET as readOne, PATCH } from '@/app/api/account/cognitive/reflections/[
 const db = vi.hoisted(() => ({
   authThrows: false,
   enabled: false,
+  memoryEnabled: true,
   preferencesThrows: false,
   rateLimited: false,
   listCalls: [] as Array<{ userId: string; state?: string; nowIsDate: boolean }>,
@@ -34,7 +35,7 @@ vi.mock('@/lib/auth', async () => {
 vi.mock('@/lib/cognitive/preferences', () => ({
   getCognitivePreferences: () => {
     if (db.preferencesThrows) return Promise.reject(new Error('数据库连接中断'));
-    return Promise.resolve({ reflectionEnabled: db.enabled });
+    return Promise.resolve({ reflectionEnabled: db.enabled, memoryEnabled: db.memoryEnabled });
   }
 }));
 
@@ -87,6 +88,7 @@ describe('洞察接口', () => {
   beforeEach(() => {
     db.authThrows = false;
     db.enabled = false;
+    db.memoryEnabled = true;
     db.preferencesThrows = false;
     db.rateLimited = false;
     db.listCalls = [];
@@ -153,6 +155,46 @@ describe('洞察接口', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.citations).toEqual([{ id: 'c1', text: '我住在杭州' }]);
+  });
+
+  /**
+   * 洞察的证据就是记忆原文（ReflectionCitation.memoryId 指向 MemoryItem），
+   * 所以 `memoryEnabled` 关着时这一屏不许解密任何一行记忆。
+   * 拦在 GET 单条，不拦列表和动作：它们只碰 ReflectionRecord 自己的列，不读记忆行。
+   */
+  it('memoryEnabled 关着：单条读 409，一次服务层调用都不发', async () => {
+    db.enabled = true;
+    db.memoryEnabled = false;
+    db.found = { reflection: { id: 'r1' }, citations: [{ id: 'c1', text: '我住在杭州' }] };
+
+    const res = await getOne();
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe('MODULE_DISABLED');
+    expect(body.error.message).toBe('长期记忆没有打开；洞察的证据就是记忆原文，关掉后这里不读取证据正文');
+    expect(db.readCalls).toHaveLength(0);
+  });
+
+  it('memoryEnabled 关着不拦列表和动作：它们不读记忆行', async () => {
+    db.enabled = true;
+    db.memoryEnabled = false;
+    db.reflections = [{ id: 'r1', status: 'PENDING' }];
+
+    expect((await getList()).status).toBe(200);
+    expect((await patch({ action: 'accept' })).status).toBe(200);
+    expect(db.listCalls).toHaveLength(1);
+    expect(db.setCalls).toHaveLength(1);
+    expect(db.readCalls).toHaveLength(0);
+  });
+
+  it('memoryEnabled 关着：单条读读不出偏好也是 409', async () => {
+    db.enabled = true;
+    db.memoryEnabled = false;
+    db.preferencesThrows = true;
+
+    expect((await getOne()).status).toBe(409);
+    expect(db.readCalls).toHaveLength(0);
   });
 
   it('动作把整份形状交给服务层，now 由服务端盖', async () => {

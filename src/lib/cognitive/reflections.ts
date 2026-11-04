@@ -97,14 +97,27 @@ function deriveStatus(row: ReflectionRecord, now: Date): ReflectionStatus {
   return row.status;
 }
 
-/** 偏好读不出来按关闭处理，和 timeline / decisions 同一个口径。 */
-export async function reflectionModuleEnabled(userId: string): Promise<boolean> {
+/**
+ * 两道闸门一次读一遍偏好。
+ * `reflectionEnabled` 管「能不能看洞察」，`memoryEnabled` 管「能不能解密那一行 MemoryItem」——
+ * 单条详情的证据就是记忆原文，所以派生视图不能成为绕过长期记忆开关的后门（任务书 1.1）。
+ * 列表和动作只碰 ReflectionRecord 自己的列，用不到后一道。
+ */
+export async function reflectionGates(userId: string): Promise<{ reflectionEnabled: boolean; memoryEnabled: boolean }> {
   try {
     const preferences = await getCognitivePreferences(userId);
-    return preferences.reflectionEnabled === true;
+    return {
+      reflectionEnabled: preferences.reflectionEnabled === true,
+      memoryEnabled: preferences.memoryEnabled === true
+    };
   } catch {
-    return false;
+    return { reflectionEnabled: false, memoryEnabled: false };
   }
+}
+
+/** 偏好读不出来按关闭处理，和 timeline / decisions 同一个口径。 */
+export async function reflectionModuleEnabled(userId: string): Promise<boolean> {
+  return (await reflectionGates(userId)).reflectionEnabled;
 }
 
 /**

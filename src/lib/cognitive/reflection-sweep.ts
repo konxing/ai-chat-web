@@ -141,9 +141,11 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
 
   // 开关关着的用户不该被盖上时间戳：他 later 打开开关时，不该为一次根本没跑过的扫描再等一天。
   let reflectionEnabled: boolean;
+  let memoryEnabled: boolean;
   try {
     const preferences = await getCognitivePreferences(userId);
     reflectionEnabled = preferences.reflectionEnabled === true;
+    memoryEnabled = preferences.memoryEnabled === true;
   } catch {
     log.warn('cognitive.reflection_sweep_failed', { userId, reason: 'preferences_unavailable' });
     return { ...NOTHING_DONE, failed: true };
@@ -170,7 +172,7 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
   if (claimed === 0) return NOTHING_DONE;
 
   const outcome: SweepOutcome = { ...NOTHING_DONE, ran: true };
-  const settled = await runWithinDeadline(sweepBody(userId, now, outcome), REFLECTION_SWEEP_DEADLINE_MS);
+  const settled = await runWithinDeadline(sweepBody(userId, now, outcome, memoryEnabled), REFLECTION_SWEEP_DEADLINE_MS);
   outcome.timedOut = settled === 'timeout';
   outcome.failed = settled === 'failed';
   if (outcome.timedOut) log.warn('cognitive.reflection_sweep_timeout', { userId });
@@ -195,7 +197,12 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
  * 跑这一轮，把计数写在 `outcome` 上（超时中止时那些已经算出来的计数才留得下来）。
  * 返回值是「有没有被一次真实失败打断」，超时由调用方判断。
  */
-async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Promise<boolean> {
+async function sweepBody(
+  userId: string,
+  now: Date,
+  outcome: SweepOutcome,
+  memoryEnabled: boolean
+): Promise<boolean> {
   // 收割排在读池子之前：门槛 7 要求 EXPIRED 有人写、SNOOZED 不是个只进不出的死状态，
   // 而这两件事和「这个用户这一轮能不能扫出新洞察」没有依赖关系——池子读挂了也该把到期处理掉。
   // 条件 UPDATE 的形状和抢戳、领任务行是同一个协议：只碰自己用户的行，且带着状态条件。
@@ -216,6 +223,15 @@ async function sweepBody(userId: string, now: Date, outcome: SweepOutcome): Prom
     log.warn('cognitive.reflection_sweep_failed', { userId, reason: 'reap_failed' });
     return true;
   }
+
+  // 洞察的证据就是记忆原文，所以 `memoryEnabled` 关着时这一轮一行都不该读（任务书 1.1：
+  // 关闭模块后不能继续执行对应的数据读取、生成和后台写入）。
+  //
+  // 位置是挑过的：闸门落在收割**之后**、读池子之前。落在最前面会把 SNOOZED 变成只进不出的死状态
+  // ——用户关着长期记忆的期间点的「稍后」到期后没人把它放回 PENDING。代价写在这里：
+  // 这一轮仍然抢了冷却戳，所以他后来打开长期记忆时，最坏要再等一天才扫出新洞察；
+  // 「收割照跑」比「打开开关立刻能扫」更值得要，因为前者是状态机的正确性，后者只是等待。
+  if (!memoryEnabled) return false;
 
   let pool: {
     memories: ReflectableMemory[];

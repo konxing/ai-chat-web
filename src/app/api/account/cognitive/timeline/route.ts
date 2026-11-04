@@ -26,9 +26,12 @@ export const runtime = 'nodejs';
 export async function GET(req: Request) {
   return api(async () => {
     const { user } = await requireUser(req);
-    const enabled = await timelineModuleEnabled(user.id);
-    if (!enabled) {
+    const gates = await timelineGates(user.id);
+    if (!gates.timelineEnabled) {
       throw new ApiError(409, 'MODULE_DISABLED', '认知时间线没有打开；打开后这里才会读取并展示你的记忆');
+    }
+    if (!gates.memoryEnabled) {
+      throw new ApiError(409, 'MODULE_DISABLED', '长期记忆没有打开；时间线是它的派生视图，关掉后这里不读取记忆内容');
     }
 
     const [memories, edges] = await Promise.all([
@@ -44,11 +47,20 @@ export async function GET(req: Request) {
   });
 }
 
-async function timelineModuleEnabled(userId: string): Promise<boolean> {
+/**
+ * 两道闸门一次读完：时间线自己的开关，加上它读的那份数据的开关。
+ * 后者是 1.1「关闭模块后不能继续执行对应的数据读取」逼出来的——`timelineEnabled` 管不着
+ * 「能不能读 MemoryItem 的正文」，那是长期记忆模块的地盘，派生视图不能成为绕过它的后门。
+ * 一次请求读一遍偏好，不是两道闸门各读一遍。
+ */
+async function timelineGates(userId: string): Promise<{ timelineEnabled: boolean; memoryEnabled: boolean }> {
   try {
     const preferences = await getCognitivePreferences(userId);
-    return preferences.timelineEnabled === true;
+    return {
+      timelineEnabled: preferences.timelineEnabled === true,
+      memoryEnabled: preferences.memoryEnabled === true
+    };
   } catch {
-    return false;
+    return { timelineEnabled: false, memoryEnabled: false };
   }
 }
