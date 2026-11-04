@@ -38,6 +38,9 @@ import {
   X
 } from 'lucide-react';
 import { apiFetch, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
+import { CITATION_NOTE, citationHint, citationRows, type CitationRow } from '@/lib/cognitive/citation-display';
+import type { MemoryDto } from '@/lib/cognitive/memories';
+import type { ConfidenceBand } from '@/lib/cognitive/confidence';
 import { cn } from '@/lib/cn';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
@@ -105,6 +108,13 @@ const MAX_FILES_PER_MESSAGE = 15;
 // 服务端同时只解密一个上传、最多再排两个人，客户端并发 3 刚好填满这条队而不撞 429。
 const UPLOAD_CONCURRENCY = 3;
 
+/** /api/account/cognitive/memories 的读侧形状：记忆本体加两张旁表，正是 citationRows 的输入。 */
+interface CitationSource {
+  memories: MemoryDto[];
+  chats: Record<string, string>;
+  confidence: Record<string, { band: ConfidenceBand }>;
+}
+
 export function ChatWorkspace({
   user,
   settings,
@@ -144,6 +154,8 @@ export function ChatWorkspace({
   const [notice, setNotice] = useState('');
   const [showJump, setShowJump] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
+  /** 这一轮引用了哪几条记忆（任务书 8.2）：助手消息 id → 记忆 id。只活在这次会话里，刷新即清。 */
+  const [citations, setCitations] = useState<Record<string, string[]>>({});
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -157,6 +169,22 @@ export function ChatWorkspace({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickRef = useRef(true);
+
+  /**
+   * 引用清单点开时才读记忆列表，且整个会话只读一次：几条气泡可能带同一轮的引用，
+   * 它们要对齐的是同一份「现在的记忆」，逐条各发一次请求既慢又可能读到两个时刻。
+   * 读失败不留在缓存里——下次点开重试，免得一次网络抖动把清单永久变成错误文案。
+   */
+  const citationSourceRef = useRef<Promise<CitationSource> | null>(null);
+  const getCitationSource = useCallback(() => {
+    if (!citationSourceRef.current) {
+      citationSourceRef.current = apiFetch<CitationSource>('/api/account/cognitive/memories').catch((err) => {
+        citationSourceRef.current = null;
+        throw err;
+      });
+    }
+    return citationSourceRef.current;
+  }, []);
 
   const selectedProviderId = chat?.providerId ?? localProviderId;
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
@@ -480,6 +508,7 @@ export function ChatWorkspace({
               modelId?: string;
               imagesSent?: number;
               imagesSkipped?: number;
+              memoryIds?: string[];
             };
             try {
               event = JSON.parse(data);
@@ -522,6 +551,14 @@ export function ChatWorkspace({
                 );
                 setOptimisticUser(null);
                 setStreamText('');
+                const ids = event.memoryIds ?? [];
+                if (ids.length > 0) {
+                  // 只留 id，不留正文：正文得在点开那一刻从当前记忆列表现取，缓存旧快照会把
+                  // 「这条已经被你删掉了」读成「这条还在」。上一轮的快照因此作废。
+                  // 0 条不写进 map——界面上不摆一个点开是空的入口。
+                  citationSourceRef.current = null;
+                  setCitations((prev) => ({ ...prev, [savedAssistant.id]: ids }));
+                }
               }
               if (event.imagesSkipped) {
                 setNotice(
@@ -1043,10 +1080,17 @@ export function ChatWorkspace({
                 ) : null}
                 {messages.map((message) =>
                   message.role === 'SYSTEM' ? null : (
-                    <MessageBubble key={message.id} message={message} />
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      citationIds={citations[message.id]}
+                      getCitationSource={getCitationSource}
+                    />
                   )
                 )}
-                {optimisticUser ? <MessageBubble message={optimisticUser} optimistic /> : null}
+                {optimisticUser ? (
+                  <MessageBubble message={optimisticUser} optimistic getCitationSource={getCitationSource} />
+                ) : null}
                 {sending || streamText ? (
                   <div className="flex gap-3">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-aurora-400/10">
@@ -1266,10 +1310,14 @@ export function ChatWorkspace({
 
 const MessageBubble = memo(function MessageBubble({
   message,
-  optimistic
+  optimistic,
+  citationIds,
+  getCitationSource
 }: {
   message: ChatMessageDto;
   optimistic?: boolean;
+  citationIds?: string[];
+  getCitationSource: () => Promise<CitationSource>;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'USER';
@@ -1347,6 +1395,7 @@ const MessageBubble = memo(function MessageBubble({
           </button>
         </div>
         <Markdown>{message.content}</Markdown>
+        {citationIds?.length ? <CitationNote ids={citationIds} getSource={getCitationSource} /> : null}
         {(message.inputTokens || message.outputTokens) && (
           <div className="mt-2 text-[10px] text-white/15">
             {message.inputTokens ?? 0} tokens 输入 · {message.outputTokens ?? 0} tokens 输出
@@ -1356,3 +1405,82 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+/**
+ * 「这一轮带上了哪几条长期记忆」（任务书 8.2）。收起态只是一句提示，点开才去取记忆原文。
+ *
+ * 措辞停在「带上了」，不写成「AI 根据这些记忆回答」：服务端能证明的只有这几条进了那一刻的
+ * 提示词，模型用没用、怎么用，一个字都不知道。清单顶部把这句限制摆在最前面。
+ *
+ * 记忆正文按纯文本渲染，不走 Markdown——它是不可信数据，不该在界面里获得任何排版能力。
+ */
+function CitationNote({
+  ids,
+  getSource
+}: {
+  ids: string[];
+  getSource: () => Promise<CitationSource>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<CitationRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (!next) return;
+    // 每次展开都重算一次：引用是过去那一刻的事，清单是现在的记忆，中间用户可能已经改过口。
+    // 取数在 CitationNote 外面那个 promise 里缓存，重复展开不会多打一次请求。
+    try {
+      const source = await getSource();
+      setRows(
+        citationRows({ ids, memories: source.memories, chats: source.chats, confidence: source.confidence })
+      );
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => void toggle()}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[11px] text-white/30 transition hover:text-aurora-300/80"
+      >
+        <span>{citationHint(ids.length)}</span>
+        <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open ? (
+        <div className="mt-1.5 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3.5 py-2.5">
+          <p className="text-[11px] leading-relaxed text-white/35">{CITATION_NOTE}</p>
+          {failed ? (
+            <p className="mt-1.5 text-[11.5px] text-white/40">这条清单没读到，稍后再试试</p>
+          ) : rows ? (
+            <ul className="mt-1.5 space-y-2">
+              {rows.map((row) => (
+                <li key={row.id} className="min-w-0">
+                  <p
+                    className={cn(
+                      'break-words text-[12.5px] leading-relaxed',
+                      row.missing ? 'text-white/35' : 'text-white/70'
+                    )}
+                  >
+                    {row.text}
+                  </p>
+                  {row.meta ? <p className="mt-0.5 text-[10.5px] text-white/25">{row.meta}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mt-1.5 flex items-center gap-2">
+              <Spinner className="h-3 w-3" />
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}

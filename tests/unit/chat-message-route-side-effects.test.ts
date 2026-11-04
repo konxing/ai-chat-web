@@ -526,3 +526,29 @@ describe('出站上下文里的认知内容', () => {
     expect(outbound.map((message) => message.text).join('\n')).not.toContain('我在用 Prisma');
   });
 });
+
+/**
+ * 8.2 的最后一跳：引用清单要真的随那一帧回到浏览器，否则界面拿不到任何东西可点。
+ * 断的是 SSE 原文里的字节，不是某个中间函数的返回值——这条是端到端（路由层）的那一层证据。
+ */
+describe('done 帧里的引用清单', () => {
+  it('记忆开着的成功轮次：那一帧带着被注入的记忆 id', async () => {
+    cognitiveTables().preference.seed(preferenceRow({ memoryEnabled: true }));
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    const { text } = await post();
+
+    expect(text).toContain('"type":"done"');
+    expect(text).toContain('"memoryIds":["mem-1"]');
+  });
+
+  it('记忆关着时那一帧给的是空数组，不是缺字段', async () => {
+    cognitiveTables().preference.seed(preferenceRow());
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    const { text } = await post();
+
+    // 缺字段和空数组在界面上是两件事：前者永远等不到那一句提示。
+    expect(text).toContain('"memoryIds":[]');
+  });
+});

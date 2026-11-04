@@ -76,7 +76,7 @@ async function build() {
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z')
   } as unknown as AiProvider;
-  const out = await buildConversation({
+  const { messages: out } = await buildConversation({
     chatId: 'chat-1',
     userId: 'user-1',
     currentContent: '本轮新问题',

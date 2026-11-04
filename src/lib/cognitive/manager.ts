@@ -26,6 +26,12 @@ export interface CognitiveBlock {
   module: CognitiveModuleKey;
   label: string;
   text: string;
+  /**
+   * 这一块真正带进提示词的记忆 id（任务书 8.2 的引用提示据此说话）。
+   * 只有真的产出了记忆块的模块填它；填的必须是**进了 text 的那几条**，
+   * 被字符预算截掉的不在这里——否则界面会报出模型根本没读到的东西。
+   */
+  memoryIds?: readonly string[];
 }
 
 export interface CognitiveModule {

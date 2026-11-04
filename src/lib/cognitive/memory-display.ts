@@ -130,7 +130,8 @@ export function describePolicySummary(policy: PolicySummaryInput): string {
   return `允许保存 · 记 ${policy.allowedMemoryTypes.length} 种类型 · ${RETENTION_LABELS[policy.retention]}`;
 }
 
-function formatDate(value: string, precision: TimePrecision): string {
+/** 「年月日」这一套写法在项目里只有这一份（6-G 那次统一），聊天里的引用提示也走它。 */
+export function formatDate(value: string, precision: TimePrecision): string {
   const date = new Date(value);
   const ymd = `${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日`;
   if (precision === 'year') return `${date.getUTCFullYear()}年`;

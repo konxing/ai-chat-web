@@ -142,6 +142,8 @@ export function renderMemoryBlock(
   confidence: ReadonlyMap<string, Confidence>
 ): CognitiveBlock[] {
   const lines: string[] = [];
+  // 进了 text 的那几条才算引用（任务书 8.2）：报一条模型没读到的记忆，比少报一条更糟。
+  const used: string[] = [];
   let size = BLOCK_HEADER.length;
   for (const memory of memories) {
     const range = describeValidRange(memory);
@@ -153,10 +155,11 @@ export function renderMemoryBlock(
       `${memory.content}${suffix}${marker}`;
     if (size + line.length > MEMORY_READ_MAX_CHARS) break;
     lines.push(line);
+    used.push(memory.id);
     size += line.length;
   }
   if (lines.length === 0) return [];
-  return [{ module: 'memory', label: '长期记忆', text: [BLOCK_HEADER, ...lines].join('\n') }];
+  return [{ module: 'memory', label: '长期记忆', text: [BLOCK_HEADER, ...lines].join('\n'), memoryIds: used }];
 }
 
 async function writeMemory(turn: CognitiveTurn): Promise<void> {

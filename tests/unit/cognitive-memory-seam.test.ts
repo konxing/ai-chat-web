@@ -229,6 +229,24 @@ describe('renderMemoryBlock', () => {
   it('没有选中的记忆时不渲染空块', () => {
     expect(renderMemoryBlock([], new Map())).toEqual([]);
   });
+
+  it('块里带上真正进了提示词的记忆 id，顺序与文本一致（8.2 引用提示的唯一来源）', () => {
+    const block = renderMemoryBlock([row({ id: 'a', content: '我在用 Prisma' }), row({ id: 'b', content: '我周末跑步' })], new Map())[0];
+
+    expect(block?.memoryIds).toEqual(['a', 'b']);
+  });
+
+  it('预算截断时只列真进了那块字的，没进去的不许报成引用', () => {
+    const long = '很'.repeat(MEMORY_READ_MAX_CHARS - 40);
+    const block = renderMemoryBlock(
+      [row({ id: 'first', content: '我在用 Prisma' }), row({ id: 'second', content: long })],
+      new Map()
+    )[0];
+
+    // 说「带上了 2 条」而模型只读到 1 条，比少报一条更糟：那是界面对自己做了什么撒了谎。
+    expect(block?.memoryIds).toEqual(['first']);
+    expect(block?.text).not.toContain('很');
+  });
 });
 
 describe('assessWithCounts', () => {

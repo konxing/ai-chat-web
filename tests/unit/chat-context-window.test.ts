@@ -88,15 +88,14 @@ async function build(current = CURRENT) {
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z')
   } as unknown as AiProvider;
-  return texts(
-    await buildConversation({
-      chatId: 'chat-1',
-      userId: 'user-1',
-      currentContent: current,
-      attachments: [],
-      provider
-    })
-  );
+  const { messages } = await buildConversation({
+    chatId: 'chat-1',
+    userId: 'user-1',
+    currentContent: current,
+    attachments: [],
+    provider
+  });
+  return texts(messages);
 }
 
 describe('发给模型的历史窗口', () => {

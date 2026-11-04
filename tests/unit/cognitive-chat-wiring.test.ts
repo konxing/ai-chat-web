@@ -75,15 +75,25 @@ async function memoryRow(userId: string, id: string, content: string) {
 }
 
 async function build(userId = 'user-a') {
+  const { messages } = await rawBuild(userId);
+  return toOutboundTexts(messages);
+}
+
+async function rawBuild(userId = 'user-a') {
   const { buildConversation } = await import('@/lib/chats');
-  const messages = await buildConversation({
+  return buildConversation({
     chatId: 'chat-1',
     userId,
     currentContent: '帮我看下这段代码',
     attachments: [],
     provider: PROVIDER
   });
-  return toOutboundTexts(messages);
+}
+
+/** buildConversation 交回来的引用清单（8.2）：这一轮到底把哪几条记忆带进了提示词。 */
+async function cited(userId = 'user-a') {
+  const { citedMemoryIds } = await rawBuild(userId);
+  return citedMemoryIds;
 }
 
 beforeEach(() => {
@@ -140,5 +150,35 @@ describe('认知块进入对话上下文', () => {
 
     expect(messages).toHaveLength(2);
     expect(messages[0]?.text).toContain('家庭 AI 助手');
+  });
+});
+
+/**
+ * 8.2 引用提示的那个数从哪来：读侧注入完，得有人记住「这一轮到底把哪几条带了进去」。
+ * 断的是 buildConversation 交回的东西，不是界面——界面只消费这一个数组。
+ */
+describe('这一轮引用了哪几条记忆', () => {
+  it('开关打开且真的注入了记忆时，交回被带进提示词的那些 id', async () => {
+    db.memoryEnabled = true;
+    db.rows = [await memoryRow('user-a', 'mem-1', '我在用 Prisma')];
+
+    expect(await cited()).toEqual(['mem-1']);
+  });
+
+  it('开关关着时交回空数组：没注入就没有引用，界面也就没东西可列', async () => {
+    db.memoryEnabled = false;
+    db.rows = [await memoryRow('user-a', 'mem-1', '我在用 Prisma')];
+
+    expect(await cited()).toEqual([]);
+  });
+
+  it('记忆读失败时交回空数组，对话照旧跑完', async () => {
+    db.memoryEnabled = true;
+    db.failMemoryRead = true;
+
+    const messages = await build();
+
+    expect(messages).toHaveLength(2);
+    expect(await cited()).toEqual([]);
   });
 });

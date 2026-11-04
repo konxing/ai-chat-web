@@ -79,7 +79,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     providerId: provider.id,
     modelId: provider.modelId
   });
-  const messages = await buildConversation({
+  const { messages, citedMemoryIds } = await buildConversation({
     chatId,
     userId: user.id,
     currentContent: body.content,
@@ -145,7 +145,10 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           providerName: provider.name,
           modelId: provider.modelId,
           imagesSent: imageSummary.sent,
-          imagesSkipped: imageSummary.skipped
+          imagesSkipped: imageSummary.skipped,
+          // 引用清单（任务书 8.2）：这一轮真的进了提示词的那几条记忆 id。
+          // 只在成功帧里给——失败和中断的那一帧用户看到的是错误文案，不是一句「引用了什么」。
+          memoryIds: citedMemoryIds
         });
         controller.close();
         // 字节已经全部交给客户端，才欠下这一轮的记忆：认知模块不在关键路径上，

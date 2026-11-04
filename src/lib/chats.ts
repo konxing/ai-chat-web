@@ -350,13 +350,24 @@ export async function saveAssistantMessage(input: {
   });
 }
 
+/**
+ * 一轮对话发给模型的上下文，以及「这一轮把哪几条记忆带了进去」。
+ *
+ * 后面那一样是为界面那句引用提示（任务书 8.2）留的：它在服务端算，
+ * 因为「带上了」的唯一凭据就是这里拼出来的那份消息，前端无从复算。
+ */
+export interface ConversationContext {
+  messages: AiMessage[];
+  citedMemoryIds: string[];
+}
+
 export async function buildConversation(input: {
   chatId: string;
   userId: string;
   currentContent: string;
   attachments: Attachment[];
   provider: AiProvider;
-}): Promise<AiMessage[]> {
+}): Promise<ConversationContext> {
   // 按 userId 一起过滤：这里拿到的是要发给外部模型的内容，
   // 不能只依赖调用方先做过归属校验，否则越权会话会被整段发出去。
   const chat = await prisma.chat.findFirst({
@@ -394,6 +405,9 @@ export async function buildConversation(input: {
     content: input.currentContent
   });
   for (const block of cognitive.blocks) messages.push({ role: 'system', content: block.text });
+  // 引用清单（任务书 8.2）：只记真的进了上面那段提示词的记忆 id。
+  // 去重保序——同一个 id 只会来自一个块，但模块将来不止一个，这里不该靠这个假设。
+  const citedMemoryIds = [...new Set(cognitive.blocks.flatMap((block) => block.memoryIds ?? []))];
 
   let charBudget = 40_000;
   for (const message of trimmed) {
@@ -437,7 +451,7 @@ export async function buildConversation(input: {
   } else {
     messages.push({ role: 'user', content: parts });
   }
-  return messages;
+  return { messages, citedMemoryIds };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {
