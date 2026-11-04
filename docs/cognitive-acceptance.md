@@ -302,13 +302,15 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    但**没有「先开后关」的对照**：那片区域没有注入点能让真库跑到「开关打开、记忆真的写进 `MemoryItem`」那一步，
    所以「闸门开着会继续执行」这一半只有单测证据（`cognitive-task-worker.test.ts:232`）。
 
-界面暴露两个开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）和
-`timelineEnabled`（`src/components/settings/timeline-panel.tsx:84-115`，控件渲染在 `:199`）——后者是 4-T1 才有的，
+界面暴露四个模块开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）、
+`timelineEnabled`（`timeline-panel.tsx:84-115`，控件在 `:199`）、`decisionMemoryEnabled`
+（`decision-panel.tsx:87-110`，控件在 `:177`）、`reflectionEnabled`（`reflection-panel.tsx:102-124`，控件在 `:202`，
+闸门在 `:111`——关着时这一屏连列表请求都不发）——后两个是 5-F / 6-F 才补的，
 因为开关得先真有消费者，才轮得到它有一个控件。`adaptiveMemoryEnabled` 只能走 `/api/account/cognitive` 改。
-这不是遗漏：`memory-policy-panel.tsx:24-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
-**11-04 起这一句要改口径**：`reflectionEnabled`（模块开关）与策略表的 `allowReflection`（逐情境，
-`reflection-sweep.ts:436` 是它第一个服务端读取方）现在**都有真消费者了**，按同一立场就该有控件——
-洞察那一屏和策略面板里那一列是 6-F 的活，不是可选装饰。
+这不是遗漏：`memory-policy-panel.tsx:23-26` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
+11-04 的 6-F 按同一立场补上了策略表的 `allowReflection` 复选框（`memory-policy-panel.tsx:261`，
+消费者是 `reflection-sweep.ts:436`）；**画像与关联两列仍然不给控件**，因为 grep 全仓只摸得到存储与校验声明，
+没有任何运行时读取方（`allowUserProfile` / `allowAssociation` 各两处：validation.ts 与 schema）。
 
 ### 10. 新增模块全部关闭时，原有聊天功能回归通过
 
@@ -736,7 +738,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
   他下次起服务打开「决策」tab 时才是第一次真渲染。
 - 7.2 的 D 臂仍缺：评测语料没有决策字段，探针只是单元级的「该连连、不该连不连」。
 
-## Phase 6 判词（主动洞察，11-04 落到 6-E；6-F 那一屏还没做）
+## Phase 6 判词（主动洞察，11-04 六片落齐 6-A…6-F）
 
 - **数据模型（6-A）**：`prisma/schema.prisma:744`（ReflectionRecord）与 `:804`（ReflectionCitation）。
   标题、正文、竞争解释、反证关键词四列全密文，AAD 和决策一样带字段名
@@ -764,22 +766,42 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
   （`reflections.ts:93`），否则 30 天的 TTL 在界面上要拖到下一次扫描才生效；
   动作侧同样拒过期行（409），界面和库里不会各说一套。
   `SNOOZED` 到期由 sweep 放回 `PENDING`，不留只进不出的死状态。
+- **界面（6-F）**：设置页「洞察」tab（`src/components/settings/reflection-panel.tsx`）读那两条已有路由，
+  六个区就是六个状态（11-04 判的甲：全列，空区不渲染）；行内按钮只由 `isActionable` 决定，
+  状态机入口只有 `PENDING`，所以给已处理的行摆按钮等于摆一个必然 409 的控件。
+  展示词汇搬进纯模块 `src/lib/cognitive/reflection-display.ts`（只 `import type`，
+  否则 prisma 驱动会被拖进浏览器包——这条边界和 `memory-display.ts` 同一套）。
+  **时间按 `timePrecision` 降级**：只有年就不露月日，到日就不露时分，精度未知整行不显示（门槛 6 在界面上的落点）。
+  原话已经不了的引用不列（宁少不编，门槛 4）；一条都不剩时落进「这条洞察没有可展示的原始依据。」。
+  「改写」这一版**不给入口**（11-04 判的乙：服务端已实现并测过，界面不露）。
+  策略面板补了 `allowReflection` 复选框（11-04 判的第三个：只补这一个）——它的消费者是
+  `reflection-sweep.ts:436`；画像与关联两列至今 grep 到的只有存储与校验声明，没有任何运行时读取方，
+  所以仍然不给控件。
 - **三条裁定都落在代码上**：甲（零模型，规则出题）、乙（采纳只翻状态——行为用例 + 源码禁写 + 全仓 import 扫描三道，
   见门槛 7）、丙（v1 不做读侧提示注入：洞察除了两条自己的路由，全仓无人 import）。
-- **测试**：6 个反思文件共 157 条用例（planner 40 / evidence 40 / sweep 38 / 状态对账 3 / 读侧服务 21 / 路由 15）；
-  全量 `npx vitest run` 996 条通过，`npm run typecheck` 干净。
+- **测试**：8 个反思文件共 191 条用例（planner 40 / evidence 40 / sweep 38 / 状态对账 3 / 读侧服务 21 / 路由 15 /
+  展示纯函数 19 / 界面静态断言 15）；全量 `npx vitest run` 1030 条通过（77 个文件），`npm run typecheck` 干净。
   8 个变异探针逐个验证「破坏保证必有测试变红」：去掉动作的条件 `status: 'PENDING'`（1 红）、
   accept 顺手写一行记忆（2 红）、snooze 改成删行（1 红）、闸门不读偏好（5 红）、
   稍后天数不设限（1 红）、去掉 SNOOZED 收割（1 红）、关掉复活例外（2 红）、读侧不判过期（2 红）。
   **第一条探针在探测前是没有覆盖的**——补了一条模拟交错的用例（读回 PENDING 之后、条件更新之前把行翻成 ACCEPTED），
   它才红得起来；求值器不模拟行锁，这条钉的是「UPDATE 自己带状态条件」，不是「数据库会替你拦」。
+- **6-F 的八个界面探针（同样每个都弄红过一条测试才收）**：摘掉 `isActionable` 闸门（1 红）、面板里加出改写入口（1 红）、
+  采纳文案被「润色」成已记住（2 红）、时间降级失效让 YEAR 也显示到日（1 红）、设置页渲染分支被摘掉（1 红）、
+  给无消费者的画像列加控件（1 红）、面板改引带 prisma 的服务端模块（1 红）、闸门失效让关着也发请求（1 红）。
+  跑探针的脚本第一版有 bug：还原前又把已变异的文件二次备份，于是变异累积留在工作区——四个文件带着改动一路跑到 P8。
+  发现后逐处复原（typecheck + 43 条相关断言重跑全绿），脚本改成「改前留档、还原后按 md5 校验与原文一致」再重跑，
+  才有上面这八行。
 
 ### Phase 6 仍然无法验收的部分
 
-- **6-F 那一屏不存在**：门槛 4 说的「用户能追溯支持与反对证据」今天只到服务层，
-  洞察对用户的可见性是 0——没有界面读取 `reflections` 这两条路由（`reflections.ts` 的唯一 importers 是路由本身）。
-  同理 `reflectionEnabled` 和策略表的 `allowReflection` 现在都有了服务端消费者却没有控件，
-  按「开关得先真有消费者才轮得到控件」的同一立场，6-F 必须补两个入口。
+- **界面没有浏览器验证**：6-F 那一屏已经写好并接进设置页，但它**从未渲染过一次**——本机不起他的服务。
+  过的是 typecheck 加 34 条新断言（19 条纯函数 + 15 条静态），像素、点击、真实数据下的排布一律未验；
+  他下次起服务打开「洞察」tab 才是第一次真渲染。
+  没有 DOM 测试环境（vitest 跑在 node，仓库里没有 jsdom 和渲染器）是这套体系的既成事实，
+  所以这一屏能验的被推到「纯函数 + 源码静态断言」两层，剩下的只能目测——这一条不许算成已验收。
+  另有两处信息界面**故意没显示**，因为批准的文案表里没有对应的句子：行的生成时间、
+  以及列表截到 100 条（`REFLECTION_LIST_MAX_ROWS`）时的提示。要补就得先给文案。
 - **真库零行**：`reflectionEnabled` 默认关，`MemoryItem` 实测 0 行，历史上没有任何一条洞察在真库里存在过；
   上面全部是内存求值器上的证据。冷却、限量、逐情境闸门、复活这四件事都要等他起服务、开开关、聊出几十条记忆之后才谈得上目测。
 - **删除侧漏了洞察（门槛 2 的新缺口）**：`forgetting.ts` 全文不读 `reflectionRecord`，

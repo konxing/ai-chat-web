@@ -20,22 +20,26 @@ import type { PolicyLearningState } from '@/lib/cognitive/policy-learner';
 /**
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
  *
- * 只渲染真有代码在消费的四个字段：是否持久化、允许的类型、是否先问、保留期。
- * 同一张策略表里的「写入画像 / 反思 / 关联」三项没有消费者——那三个模块还不存在；
- * 偏好表里的八个开关也只有 memoryEnabled 是真的。把它们做成能拨的控件，
- * 就是任务书第八节点名禁止的「用假的交互代替」，所以一个都不放，接口和存储原样留着。
+ * 只渲染真有代码在消费的五个字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、保留期。
+ * 同一张策略表里的「写入画像 / 关联」两项至今没有消费者——grep 得到的只有存储和校验的字段声明，
+ * 没有任何运行时代码读它们；偏好表里的八个开关也一样，只有真接进链路的那些是真的。
+ * 把它们做成能拨的控件，就是任务书第八节点名禁止的「用假的交互代替」，所以一个都不放，接口和存储原样留着。
  *
- * 一屏同时只展开一张卡：七种情境各自四个控件，全摊开就是二十八控件同屏，
+ * 「允许反思」是 11-04 补上的：洞察扫描（reflection-sweep.ts）真按这一列过闸，
+ * 在它出现之前这一屏已经把三个模块（时间线、决策、洞察）的开关都摆出去了，唯独少这一个。
+ *
+ * 一屏同时只展开一张卡：七种情境各自五个控件，全摊开就是三十五控件同屏，
  * 谁也说不清刚才那一下点的是哪一条。这条规矩和「记忆」那一屏一致。
  */
 
 const POLICIES_URL = '/api/account/cognitive/policies';
 
-/** 只有这四个字段能被这一屏改动，草稿就只装这四个，免得把没消费者的字段一起回写。 */
+/** 只有这五个字段能被这一屏改动，草稿就只装这五个，免得把没消费者的字段一起回写。 */
 interface Draft {
   allowPersistence: boolean;
   allowedMemoryTypes: MemoryType[];
   requireConfirmation: boolean;
+  allowReflection: boolean;
   retention: MemoryRetention;
 }
 
@@ -44,6 +48,7 @@ function toDraft(policy: MemoryPolicy): Draft {
     allowPersistence: policy.allowPersistence,
     allowedMemoryTypes: [...policy.allowedMemoryTypes],
     requireConfirmation: policy.requireConfirmation,
+    allowReflection: policy.allowReflection,
     retention: policy.retention
   };
 }
@@ -52,6 +57,7 @@ function isSameDraft(left: Draft, right: Draft): boolean {
   return (
     left.allowPersistence === right.allowPersistence &&
     left.requireConfirmation === right.requireConfirmation &&
+    left.allowReflection === right.allowReflection &&
     left.retention === right.retention &&
     [...left.allowedMemoryTypes].sort().join(',') === [...right.allowedMemoryTypes].sort().join(',')
   );
@@ -244,6 +250,21 @@ export function MemoryPolicyPanel() {
                       </label>
                       <p className="mt-1.5 text-[11.5px] text-white/35">
                         打开后这种情境的内容不会自动落库。确认界面还没做，所以目前的效果等于「一律不记」。
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="flex items-start gap-2 text-[13px] text-white/75">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 accent-emerald-400"
+                          checked={draft.allowReflection}
+                          onChange={(e) => setDraft({ ...draft, allowReflection: e.target.checked })}
+                        />
+                        允许从这种情境里反思
+                      </label>
+                      <p className="mt-1.5 text-[11.5px] text-white/35">
+                        关掉后，这种情境里记下的内容不再作为洞察的依据。
                       </p>
                     </div>
 

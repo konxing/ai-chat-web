@@ -11,6 +11,7 @@ import {
   History,
   KeyRound,
   Laptop,
+  Lightbulb,
   Lock,
   LogOut,
   Mail,
@@ -42,6 +43,7 @@ import { MemoryPanel } from './memory-panel';
 import { MemoryPolicyPanel } from './memory-policy-panel';
 import { DecisionPanel } from './decision-panel';
 import { TimelinePanel } from './timeline-panel';
+import { ReflectionPanel } from './reflection-panel';
 
 interface AccountUser {
   id: string;
@@ -73,7 +75,16 @@ const CAPS: Array<{ key: ProviderDto['capabilities'][number]; label: string }> =
   { key: 'embedding', label: '语义向量' }
 ];
 
-type Tab = 'profile' | 'security' | 'models' | 'memory' | 'policy' | 'timeline' | 'decisions' | 'about';
+type Tab =
+  | 'profile'
+  | 'security'
+  | 'models'
+  | 'memory'
+  | 'policy'
+  | 'timeline'
+  | 'decisions'
+  | 'reflections'
+  | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
   return (
@@ -335,6 +346,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['policy', '记忆策略', SlidersHorizontal],
               ['timeline', '认知时间线', History],
               ['decisions', '决策', Scale],
+              ['reflections', '洞察', Lightbulb],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -740,6 +752,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'timeline' ? <TimelinePanel /> : null}
 
           {tab === 'decisions' ? <DecisionPanel /> : null}
+
+          {tab === 'reflections' ? <ReflectionPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">
