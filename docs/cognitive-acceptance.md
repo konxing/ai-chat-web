@@ -6,7 +6,7 @@
 其余每一条的证据都止于内存替身——没有一条认知单测走过真实数据库。
 把这些写清楚比凑一个「10/10」有用——下一次争论「这个增强要不要上」时，这里是共同的事实基线。
 
-核对时间：2026-11-05（7.2 的 ARCHIVE 落地之后），基线 HEAD `419b0e1`（8.2：聊天里的引用提示）。
+核对时间：2026-11-05（7.2 的 ARCHIVE 落地、且 `20261105000000_memory_archive` 已由他执行之后），基线 HEAD `6b8ea63`（7.2：ARCHIVE 可逆归档）。
 全量单测 **78 个文件 1097 条用例**通过（`npx vitest run`），`npx tsc --noEmit` 干净。
 Phase 4 之后新增的认知文件把 58 个文件 / 734 条推到 77 / 1066；**Phase 4—6 的界面那几半一条组件测试都没加**——
 这个项目没有组件测试，能测的部分搬进纯函数模块，剩下那句话在各片边界表里单独写着。
@@ -1113,7 +1113,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 环节 | 位置 | 只干什么 |
 |---|---|---|
 | 数据列 | `prisma/schema.prisma:529-532` | `MemoryItem` 多一个可空 `archivedAt`，注释写明为什么不走 `origin` |
-| 迁移 | `prisma/migrations/20261105000000_memory_archive/migration.sql` | 一条 `ALTER TABLE ... ADD COLUMN`。**只加列不加索引**：读侧永远先按 `userId` 筛，现有的 `(userId, supersededAt)` 前导列已覆盖，且列表本身有 200 行硬上限。**这一支还没执行**，见下面边界第一条 |
+| 迁移 | `prisma/migrations/20261105000000_memory_archive/migration.sql` | 一条 `ALTER TABLE ... ADD COLUMN`。**只加列不加索引**：读侧永远先按 `userId` 筛，现有的 `(userId, supersededAt)` 前导列已覆盖，且列表本身有 200 行硬上限。**这一支已于 11-05 由他执行**（`npx prisma migrate status` 报 15 支 up to date），见下面边界第一条 |
 | 服务 | `src/lib/cognitive/memories.ts:464`（归档）/ `:473`（恢复） | 各一条 `updateMany`，条件里带 `userId`；除此之外一个字节都不写 |
 | 读侧默认口径 | `src/lib/cognitive/memories.ts:335`（`archivedAt: null`）+ `:337`（`archivedOnly` 反过来） | 对话注入、记忆管理、时间线、写侧去重池**共用这一个漏斗**，所以一处改完四处都收 |
 | 读侧漏在漏斗外的第五处 | `src/lib/cognitive/reflection-sweep.ts:381-382` | 反思池自己 `findMany`，不读 `listMemories`——得自己带上同一口径，否则用户收起来了，洞察还在正文里复述它 |
@@ -1177,11 +1177,9 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 ### 这一片的边界
 
-- **迁移没执行，所以这片今天不可用**：`20261105000000_memory_archive` 只写到文件。`prisma generate` 已经让生成出来的客户端认识
-  `archivedAt`（`node_modules/.prisma/client/index.d.ts` 里 65 处，`npx tsc --noEmit` 因此是干净的），但**真库那一列还不存在**。
-  在他执行之前，任何带 `archivedAt` 条件的读都会 P2022：对话注入那一路被 manager 的闸门隔离成「这一轮不带记忆」，
-  「记忆」那一屏显示 `loadError`，时间线和洞察屏同样读不出来。要落地需要他的一句话，命令是 `npx prisma migrate deploy`
-  （我不碰他的库，也不起他的服务；`prisma generate` 这次只重生成客户端，没有动数据库）。
+- **迁移已由他执行**：`20261105000000_memory_archive` 于 11-05 用 `npx prisma migrate deploy` 落地，`npx prisma migrate status` 报
+  15 支 up to date，`MemoryItem.archivedAt` 真库已有这一列。此条从「这片不可用」降级为只剩两条未闭合：**界面没有真渲染验收**（下一条），
+  以及**真库上归档前后的行为没实测过**（库里那 2 行有没有被归档过、恢复后 `supersededAt`/证据/演化边是否原样，都得他起服务点一遍才算数）。
 - **界面没有真渲染验收**：`memory-panel.tsx` 只过了类型检查。这个项目没有组件测试，「点归档 → 行掉到已归档区块 → 点恢复 → 回到当前有效」
   这三步今天是推断，不是实测。要变成实测得他起服务。
 - **归档行的置信度不变**：证据与演化边一条都没动，`assessMemories` 的账还是那本账；恢复后档位与因子和归档前一致。
