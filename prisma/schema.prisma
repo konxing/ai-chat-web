@@ -161,6 +161,35 @@ enum OutcomeLinkStatus {
   DETACHED
 }
 
+/// 主动反思的类型（任务书 6.1），词表照抄不另造。
+enum ReflectionType {
+  PATTERN
+  GOAL_DRIFT
+  UNRESOLVED
+  INTEREST_SHIFT
+  CONTRADICTION
+  MILESTONE
+  DECISION_LESSON
+}
+
+/// 一条反思引用的记忆相对它的位置（任务书 6.4 的主要证据 / 反对证据）。
+enum ReflectionCitationKind {
+  SUPPORTS
+  CONTRADICTS
+}
+
+/// 反思的生命周期（任务书 6.4）。六个状态都得有真实生产者：
+/// ACCEPTED / REJECTED / EDITED / SNOOZED 由用户动作产生，EXPIRED 由读侧按 expiresAt 判出，
+/// PENDING 是生成时的唯一初值。
+enum ReflectionStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EDITED
+  SNOOZED
+  EXPIRED
+}
+
 model User {
   id            String     @id @default(uuid())
   username      String     @unique @db.VarChar(32)
@@ -187,6 +216,8 @@ model User {
   cognitiveTasks   CognitiveTask[]
   decisions        DecisionRecord[]
   decisionOutcomes DecisionOutcome[]
+  reflections      ReflectionRecord[]
+  reflectionCitations ReflectionCitation[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -426,6 +457,9 @@ model CognitivePreference {
   decisionMemoryEnabled Boolean             @default(false)
   adaptiveMemoryEnabled Boolean             @default(false)
   emotionTransparency   EmotionTransparency @default(IMPLICIT)
+  /// 上一次跑反思规则的时刻。反思不能挂在每条消息上重算整个记忆池（任务书 6.6 的冷却），
+  /// 所以这一列是后台那趟扫描的节流标记，不是用户设置项。
+  reflectionSweptAt     DateTime?
   createdAt             DateTime            @default(now())
   updatedAt             DateTime            @updatedAt
 
@@ -506,7 +540,13 @@ model MemoryItem {
   revisions       MemoryRevision[] @relation("MemoryRevisionNew")
   replacedByEdges MemoryRevision[] @relation("MemoryRevisionPrevious")
   evidences       MemoryEvidence[]
+  /// 反思对这条记忆的引用（Phase 6）。
+  reflectionCitations ReflectionCitation[] @relation("ReflectionCitationMemory")
 
+  /// 给 ReflectionCitation 的复合外键用的：(记忆, 用户) 这一对唯一，
+  /// 于是别的用户的反思不可能引用到这条记忆上（任务书 5.1 要求在库层兜住）。
+  /// id 已经是主键，这条约束在已有数据上必然成立，加它不改任何行。
+  @@unique([id, userId])
   @@index([userId, supersededAt])
   @@index([userId, type])
 }
@@ -691,4 +731,82 @@ model DecisionOutcome {
   @@unique([sourceMessageId, decisionId])
   @@index([userId, decisionId])
   @@index([userId, linkStatus])
+}
+
+/// 主动反思的一条洞察（任务书 Phase 6）。
+///
+/// 这一版由规则出题、规则措辞，正文里每个断言都对应 ReflectionCitation 引着的那几行记忆，
+/// 所以「无来源的确定事实」在这张表上是写不出来的（7.4 门槛 5）。
+///
+/// 状态默认且只能以 PENDING 落地：一条推断在用户点它之前只是候选，
+/// 不改画像、不覆盖记忆、不触发动作（任务书 6.5、门槛 7）。
+model ReflectionRecord {
+  id                     String           @id @default(uuid())
+  userId                 String
+  type                   ReflectionType
+  status                 ReflectionStatus @default(PENDING)
+  /// 同主题去重键（任务书 6.6）：type + 主题词集的稳定摘要。
+  /// 库里 @@unique([userId, dedupKey]) 让重复主题的第二条根本插不进来，不是靠应用层记着。
+  dedupKey               String           @db.VarChar(80)
+  titleCiphertext        String           @db.Text
+  bodyCiphertext         String           @db.Text
+  /// 竞争解释（任务书 6.3）：规则分不开「长期兴趣 / 阶段性项目 / 临时学习」这类情形时，
+  /// 把几种解释和各自还缺什么证据一起列出来，一条都不选。
+  alternativesCiphertext String?          @db.Text
+  /// 反证搜索用过的关键词集合本身也是记忆正文的派生物，按同样的口径加密。
+  counterTokensCiphertext String         @db.Text
+  /// 反证命中了几条。0 也要留行：门槛 4 要的是「搜过反证」这件事有凭据，
+  /// 而不只是「找到了反证」。
+  counterHitCount        Int
+  /// 时间范围按原样保留精度：模糊时间不许伪造成精确日期（7.4 门槛 6）。
+  timeFrom               DateTime?
+  timeTo                 DateTime?
+  timePrecision          TimePrecision    @default(UNKNOWN)
+  /// 样本数量与观察时间跨度（任务书 4.3、6.3）：数据不足时这两个数就是
+  /// INSUFFICIENT_EVIDENCE 的判据本身，界面上也要把它们摊开给用户看。
+  sampleCount            Int
+  observationSpanDays    Int
+  /// 置信度由 assessWithCounts 按引用的证据行算出来再落库，不接受任何口算数字。
+  confidence             Float
+  /// 重要程度：证据条数与时间跨度的档位分，只用于排序和「最多留 3 条」的取舍。
+  importance             Float
+  generatedAt            DateTime         @default(now())
+  /// SNOOZED 到什么时候才允许重新摆到用户面前。
+  snoozedUntil           DateTime?
+  /// 过了这一刻，读侧把 PENDING 判成 EXPIRED（任务书 6.4 的最后一个状态）。
+  expiresAt              DateTime?
+  /// 用户做出动作（采纳/忽略/改/稍后）的时刻。
+  decidedAt              DateTime?
+  updatedAt              DateTime         @updatedAt
+
+  user      User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  citations ReflectionCitation[]
+
+  /// 给自己的引用行的复合外键用的：(洞察, 用户) 这一对唯一。
+  @@unique([id, userId])
+  @@unique([userId, dedupKey])
+  @@index([userId, status])
+  @@index([userId, generatedAt])
+}
+
+/// 一条反思引用了哪条记忆、站在支持还是反对的一侧（任务书 6.4 的主要证据 / 反对证据）。
+///
+/// 用连接表而不是把 id 串成一列写进正文列：这样跨用户引用在库层就建不出来，
+/// 而且记忆被永久删除时这条引用随行消失——Phase 7「删记忆要连带处理反思里的相关内容」
+/// 就是这一条 cascade，读侧再按剩下几条引用判这条洞察还该不该留着。
+model ReflectionCitation {
+  id           String                 @id @default(uuid())
+  userId       String
+  reflectionId String
+  memoryId     String
+  kind         ReflectionCitationKind
+  createdAt    DateTime               @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reflection ReflectionRecord @relation(fields: [reflectionId, userId], references: [id, userId], onDelete: Cascade)
+  memory     MemoryItem       @relation("ReflectionCitationMemory", fields: [memoryId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([reflectionId, memoryId])
+  @@index([userId, reflectionId])
+  @@index([userId, memoryId])
 }

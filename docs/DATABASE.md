@@ -49,11 +49,12 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 
 ## 认知层表
 
-认知层的八张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
+认知层的十二张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
+其中四条边是**复合外键**（`(id, userId)` 成对引用）：`DecisionOutcome→DecisionRecord`、`ReflectionCitation→ReflectionRecord`、`ReflectionCitation→MemoryItem`，加上 `MemoryItem`/`ReflectionRecord` 为支撑它们而建的 `@@unique([id, userId])`。跨用户连边在库层就插不进去，不靠应用层记得校验。
 
 ### CognitivePreference
-`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、时间戳。
-**默认全关**：库里没有行时应用层补 `OFF`，开关由服务端在每个模块入口读取，前端传什么都不算。
+`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、`reflectionSweptAt?`、时间戳。
+**默认全关**：库里没有行时应用层补 `OFF`，开关由服务端在每个模块入口读取，前端传什么都不算。`reflectionSweptAt` 不是设置项，是后台那趟反思扫描的节流标记。
 
 ### MemoryPolicy
 复合主键 `(userId, context)`，七个情境各一行。`allowPersistence`、`allowedMemoryTypes[]`、`requireConfirmation`、`retention`(SESSION_ONLY/…)、`allowUserProfile`、`allowReflection`、`allowAssociation`。
@@ -84,6 +85,22 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 `attempts` 在领取时 +1（不是失败时 +1），崩在执行半路也要占掉一次；`leaseOwner` 同时是 fencing token，租约过期被下一任领走后，上一任僵尸执行的所有完结写入都会因 owner 不匹配命中 0 行。待重试没有独立状态：那是「PENDING 且 `availableAt` 在未来」。
 成功即删行、作废也删行（区别只在日志事件名），所以这张表只装欠着的活，不是历史表；只有判死的 DEAD 行会留下，由 `npm run logs:prune` 按保留期清掉。
 
+### DecisionRecord
+`id`、`userId`、`category`(TECH_CHOICE/PROJECT_PLANNING/CAREER/LEARNING/PURCHASE/PERSONAL_GOAL)、`status`(PENDING_CONFIRM/CONFIRMED/AWAITING_REVIEW/OUTCOME_RECORDED/REJECTED)、九个内容列全密文（`topicCiphertext`、`choiceCiphertext` 必填，background/constraints/options/reason/criteria/expectedOutcome/risks 可空）、`decidedAt?`、`reviewAfter?`、`confirmedAt?`、`sourceMessageId`(必填)、时间戳。唯一 `(id, userId)`、`(sourceMessageId, category)`，索引 `(userId, status)`。
+**只有 CONFIRMED 才算正式决策记录**（7.4 门槛 8）：后台只写 PENDING_CONFIRM，确认由用户在界面做；REJECTED 是终态，留着只为「同一条不再反复来问」。AAD 形如 `decision:v1:用户:记录:字段名`，绑住字段名，所以一列的密文换不到另一列上。
+
+### DecisionOutcome
+`id`、`userId`、`decisionId`、`linkStatus`(CANDIDATE/LINKED/DETACHED)、五个内容列密文（`actualCiphertext` 必填，gap/rating/missedFactors/lesson 可空）、`sourceMessageId`、`recordedAt`。唯一 `(sourceMessageId, decisionId)`，索引 `(userId, decisionId)`、`(userId, linkStatus)`。
+`linkStatus` 默认 CANDIDATE：5.3 不许把结果好坏静默归因到某个单一选择上，关联要用户确认或解除才生效。`decision DecisionRecord @relation(fields: [decisionId, userId], references: [id, userId])`——复合外键，结果行不可能指到别人的决策上。
+
+### ReflectionRecord
+`id`、`userId`、`type`(任务书 6.1 的七类)、`status`(六态，默认且只能以 PENDING 落地)、`dedupKey`(VARCHAR(80))、`titleCiphertext`、`bodyCiphertext`、`alternativesCiphertext?`、`counterTokensCiphertext`、`counterHitCount`、`timeFrom?`、`timeTo?`、`timePrecision`、`sampleCount`、`observationSpanDays`、`confidence`、`importance`、`generatedAt`、`snoozedUntil?`、`expiresAt?`、`decidedAt?`、`updatedAt`。唯一 `(id, userId)`、`(userId, dedupKey)`，索引 `(userId, status)`、`(userId, generatedAt)`。
+`dedupKey` 上的库层唯一让同主题的第二条插不进来（6.6 的合并不是靠应用层记着）。`counterTokensCiphertext` 是反证搜索用过的关键词集合——它同样是记忆正文的派生物，所以按同一口径加密；`counterHitCount=0` 也要留行，门槛 4 要的是「搜过反证」有凭据。`sampleCount`/`observationSpanDays` 摊在界面上，是数据不足（INSUFFICIENT_EVIDENCE）的判据本身。
+
+### ReflectionCitation
+`id`、`userId`、`reflectionId`、`memoryId`、`kind`(SUPPORTS/CONTRADICTS)、`createdAt`。唯一 `(reflectionId, memoryId)`，索引 `(userId, reflectionId)`、`(userId, memoryId)`。两侧都是复合外键。
+一条洞察引用了哪条记忆、站在支持还是反对的一侧。用连接表而不是把 id 串成文本写进洞察里，为的是记忆被永久删除时这条引用随行消失（任务书 7.3 的派生清理），读侧再按剩下几条判这条洞察还该不该留着。
+
 ## ER 图
 
 ```mermaid
@@ -110,6 +127,12 @@ erDiagram
   AiProvider ||--o{ Chat : selected
   MemoryItem ||--o{ MemoryRevision : evolves
   MemoryItem ||--o{ MemoryEvidence : supportedBy
+  User ||--o{ DecisionRecord : decides
+  Message ||--o{ DecisionRecord : sourceOf
+  DecisionRecord ||--o{ DecisionOutcome : trackedBy
+  User ||--o{ ReflectionRecord : reflects
+  ReflectionRecord ||--o{ ReflectionCitation : evidencedBy
+  MemoryItem ||--o{ ReflectionCitation : citedBy
 ```
 
 ## 隔离与权限规则
