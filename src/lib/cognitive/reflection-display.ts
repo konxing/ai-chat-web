@@ -7,7 +7,8 @@ import type { ReflectionCitationKind, ReflectionStatus, ReflectionType, TimePrec
  * 客户端组件只要拿几个标签，直接引用就会把数据库驱动拖进浏览器包。所以这里只放纯函数和常量，
  * 类型全部走 `import type`（编译期抹掉）。边界由 tests/unit/cognitive-reflection-display.test.ts 钉住。
  *
- * 文案是 2026-11-04 批准的逐字表。改这里就是改用户看到的句子，要重新批准。
+ * 文案主体是 2026-11-04 批准的逐字表；「生成于 …」和「洞察比这一屏多…」两句是他同日让我自拟的，
+ * 日期口径同日统一到时间线那一屏的「年月日」。改这里就是改用户看到的句子，要重新批准。
  */
 
 export const REFLECTION_TYPE_LABELS: Record<ReflectionType, string> = {
@@ -59,11 +60,13 @@ function formatAt(value: string, precision: TimePrecision): string {
   const mo = date.getUTCMonth() + 1;
   const d = date.getUTCDate();
   // 每低一档就只输出到那一档，绝不显示比当初记录更精确的时间（任务书 4.2、门槛 6）。
-  if (precision === 'YEAR') return `${y} 年`;
-  if (precision === 'MONTH') return `${y} 年 ${mo} 月`;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const ymd = `${y}-${pad(mo)}-${pad(d)}`;
+  // 写法与 memory-display.ts 的 formatDate 同一套「年月日」：11-04 判的统一，同一项目里
+  // 同一种精度不该在两屏上长得不一样。
+  if (precision === 'YEAR') return `${y}年`;
+  if (precision === 'MONTH') return `${y}年${mo}月`;
+  const ymd = `${y}年${mo}月${d}日`;
   if (precision !== 'TIMESTAMP') return ymd;
+  const pad = (n: number) => String(n).padStart(2, '0');
   return `${ymd} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 
@@ -96,6 +99,28 @@ export function describeAlternatives(alternatives: string | null): string {
 /** 「已推迟到 {日期}」里的日期：推迟按整天计，所以到日为止，不露时分。 */
 export function formatSnoozeDate(snoozedUntil: string): string {
   const date = new Date(snoozedUntil);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+  return `${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日`;
+}
+
+/**
+ * 这条洞察是什么时候生成的一行说明。
+ *
+ * `generatedAt` 是系统盖的时间戳，精度本来就是完整的，所以到日不违反门槛 6——那条禁的是
+ * 把粗精度说成细，反过来说细的没有意义，只会让卡片变吵。
+ */
+export function describeGeneratedAt(generatedAt: string): string {
+  const date = new Date(generatedAt);
+  return `生成于 ${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日`;
+}
+
+/**
+ * 列表被 `REFLECTION_LIST_MAX_ROWS` 截断时的说明。不截断就不留一行空话。
+ *
+ * 条数取**实际列出的行数**而不是把服务端那个常量抄一份到界面：抄的那一份会先过期，
+ * 而且被截断时两者必然相等。这一句存在的理由和时间线那屏的 `capped` 一样——不说出来，
+ * 用户会把「这里没有更早的」读成「更早的没发生过」，那正是门槛 4 最不想看到的读法。
+ */
+export function describeListCap(capped: boolean, shownCount: number): string {
+  if (!capped) return '';
+  return `洞察比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
 }

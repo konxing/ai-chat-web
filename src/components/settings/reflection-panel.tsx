@@ -12,6 +12,8 @@ import {
   describeAlternatives,
   describeCounterEvidence,
   describeEvidenceVolume,
+  describeGeneratedAt,
+  describeListCap,
   describeReflectionTime,
   formatSnoozeDate,
   isActionable
@@ -76,6 +78,7 @@ export function ReflectionPanel() {
   const [flagBusy, setFlagBusy] = useState(false);
 
   const [reflections, setReflections] = useState<ReflectionDto[]>([]);
+  const [capped, setCapped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -86,8 +89,9 @@ export function ReflectionPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch<{ reflections: ReflectionDto[] }>(REFLECTIONS_URL);
+      const data = await apiFetch<{ reflections: ReflectionDto[]; capped: boolean }>(REFLECTIONS_URL);
       setReflections(data.reflections);
+      setCapped(data.capped);
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -187,6 +191,9 @@ export function ReflectionPanel() {
   // 一条都不剩时落进「这条洞察没有可展示的原始依据。」那句。
   const shownCitations = citations.filter((citation) => citation.text !== null);
 
+  // 服务端拿满 100 行才算截断；这句必须说出来，否则「这里没有更早的」会被读成「更早的没发生过」。
+  const capNote = describeListCap(capped, reflections.length);
+
   return (
     <section className="panel p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -217,6 +224,7 @@ export function ReflectionPanel() {
       {enabled === true ? (
         <div className="mt-5 space-y-5">
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
+          {capNote ? <Alert tone="info">{capNote}</Alert> : null}
           {loading ? (
             <LoadingBlock label="加载洞察" />
           ) : reflections.length === 0 ? (
@@ -257,6 +265,9 @@ export function ReflectionPanel() {
                             {timeLine ? (
                               <span className="text-[11.5px] text-white/35">{timeLine}</span>
                             ) : null}
+                            <span className="text-[11px] text-white/25">
+                              {describeGeneratedAt(reflection.generatedAt)}
+                            </span>
                           </div>
                           <p className="mt-2 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-white/85">
                             {reflection.title}

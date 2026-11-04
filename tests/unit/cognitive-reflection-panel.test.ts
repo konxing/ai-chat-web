@@ -114,6 +114,24 @@ describe('闸门与日志口径', () => {
   });
 });
 
+describe('6-G：被截断要说出来，每行要说是哪天生成的', () => {
+  it('capped 不再是读进来就扔掉——它必须渲染成一句说明', () => {
+    expect(PANEL).toContain('capped: boolean');
+    expect(PANEL).toContain('setCapped(data.capped)');
+    expect(PANEL).toContain('const capNote = describeListCap(capped, reflections.length);');
+    expect(PANEL).toContain('{capNote ? <Alert tone="info">{capNote}</Alert> : null}');
+  });
+
+  it('生成时间摆在类型 chip 那一行，只到日', () => {
+    expect(PANEL).toContain('describeGeneratedAt(reflection.generatedAt)');
+  });
+
+  it('界面里不许自己拼日期字符串：日期口径只有 reflection-display 一处（11-04 判的统一）', () => {
+    expect(PANEL_CODE).not.toMatch(/getUTCFullYear/);
+    expect(PANEL_CODE).not.toMatch(/new Date\(/);
+  });
+});
+
 describe('客户端包边界', () => {
   it('面板只许引用 reflection-display，不许把带 prisma 的服务端模块拖进浏览器包', () => {
     // 按 from 子句取模块名，不按行首 import：多行 import 的模块名不在 import 那一行上，

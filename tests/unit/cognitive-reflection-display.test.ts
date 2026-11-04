@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest';
  * 粗粒度时间会不会被显示成精确到日（门槛 6）、已经处理过的行会不会还挂着按钮（状态机只有
  * PENDING 一个入口）。这三件事全是纯函数，先在纯函数上红一次。
  *
- * 文案是 11-04 批准的逐字表，改动要重新批准；这里断言的是字面量本身，不是「差不多」。
+ * 文案主体是 11-04 批准的逐字表；生成时间与截断提示两句是他 11-04 让我自拟后补的，
+ * 日期口径同日统一到时间线那一屏的「年月日」。这里断言的是字面量本身，不是「差不多」。
  */
 import {
   CITATION_KIND_LABELS,
@@ -21,6 +22,8 @@ import {
   describeAlternatives,
   describeCounterEvidence,
   describeEvidenceVolume,
+  describeGeneratedAt,
+  describeListCap,
   describeReflectionTime,
   formatSnoozeDate,
   isActionable
@@ -96,26 +99,40 @@ describe('时间按精度降级（门槛 6）', () => {
   });
 
   it('只有年就不许露出月和日', () => {
-    expect(describeReflectionTime(at, null, 'YEAR')).toBe('2026 年');
+    expect(describeReflectionTime(at, null, 'YEAR')).toBe('2026年');
   });
 
   it('到月就不许露出日', () => {
-    expect(describeReflectionTime(at, null, 'MONTH')).toBe('2026 年 9 月');
+    expect(describeReflectionTime(at, null, 'MONTH')).toBe('2026年9月');
   });
 
   it('到日就不许露出时分', () => {
-    expect(describeReflectionTime(at, null, 'DAY')).toBe('2026-09-01');
+    expect(describeReflectionTime(at, null, 'DAY')).toBe('2026年9月1日');
   });
 
   it('时间戳才到分钟', () => {
-    expect(describeReflectionTime(at, null, 'TIMESTAMP')).toBe('2026-09-01 08:30');
+    expect(describeReflectionTime(at, null, 'TIMESTAMP')).toBe('2026年9月1日 08:30');
   });
 
   it('有区间就两端同精度拼起来，缺终点就不留分隔符', () => {
     expect(describeReflectionTime('2026-09-01T00:00:00.000Z', '2026-10-05T00:00:00.000Z', 'DAY')).toBe(
-      '2026-09-01～2026-10-05'
+      '2026年9月1日～2026年10月5日'
     );
     expect(describeReflectionTime(at, null, 'TIMESTAMP')).not.toContain('～');
+  });
+
+  it('日期口径和时间线/记忆那两屏一致——同一个项目里同一套精度不该有两种写法', () => {
+    const memoryDisplay = readFileSync(
+      path.resolve(process.cwd(), 'src/lib/cognitive/memory-display.ts'),
+      'utf8'
+    );
+    expect(memoryDisplay).toContain('`${date.getUTCFullYear()}年${date.getUTCMonth() + 1}月${date.getUTCDate()}日`');
+    const mine = readFileSync(
+      path.resolve(process.cwd(), 'src/lib/cognitive/reflection-display.ts'),
+      'utf8'
+    );
+    expect(mine).toContain('${y}年${mo}月${d}日');
+    expect(mine).not.toMatch(/-\$\{pad\(mo\)\}-\$\{pad\(d\)\}/);
   });
 });
 
@@ -141,6 +158,17 @@ describe('证据量、反证与竞争解释', () => {
   });
 });
 
+describe('这一屏没说的两件事（11-04 他让我自拟文案后补上）', () => {
+  it('生成时间只到日：它是系统盖的时间戳，摆到分钟只是给一屏卡片增加噪声', () => {
+    expect(describeGeneratedAt('2026-11-04T21:37:00.000Z')).toBe('生成于 2026年11月4日');
+  });
+
+  it('列表被上限截断时必须说出来，否则用户会把「没有更早的」读成「更早的没发生过」', () => {
+    expect(describeListCap(false, 3)).toBe('');
+    expect(describeListCap(true, 100)).toBe('洞察比这一屏多：这里只列出最近 100 条，更早的没有读进来。');
+  });
+});
+
 describe('稍后的三档', () => {
   it('只有 3/7/30 三档，与服务端白名单同宽——任意天数会让推迟变成无限期推迟', () => {
     expect(REFLECTION_SNOOZE_OPTIONS).toEqual([
@@ -150,8 +178,8 @@ describe('稍后的三档', () => {
     ]);
   });
 
-  it('推迟到的日子按天显示，不露时分', () => {
-    expect(formatSnoozeDate('2026-11-07T15:00:00.000Z')).toBe('2026-11-07');
+  it('推迟到的日子按天显示，不露时分，日期口径同上一屏', () => {
+    expect(formatSnoozeDate('2026-11-07T15:00:00.000Z')).toBe('2026年11月7日');
   });
 });
 
