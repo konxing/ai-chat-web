@@ -24,11 +24,25 @@ import type { Prisma } from '@prisma/client';
  * 因为折叠不到后继而单独成事件（`timeline.ts:96-101`），于是用户删掉的内容换了一副样子回来。
  * 所以 purged 报的是行数不是事件数，界面那句话得跟着说清。
  *
- * 派生数据当前有三种：演化边、排除规则，以及还没跑的认知任务（任务书 §6 的 CognitiveTask）。
- * 撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
+ * 派生数据当前有五种：演化边、排除规则、还没跑的认知任务（任务书 §6 的 CognitiveTask）、
+ * 引用了被删记忆的洞察（ReflectionRecord 加它的 ReflectionCitation），以及某次对话产生的决策
+ * （DecisionRecord）。撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
  * 用户看到的「忘记这次对话」会在下一次轮询时被 worker 推翻。
- * Embedding、图关系、时间线派生、反思候选、决策关联都还没落地（任务书 7.3 列了这些），
- * 等它们出现时这里要跟着加清理。
+ *
+ * 洞察按 11-04 判的甲处理：**整条删掉**，连同它全部的引用行。只靠外键级联是最坏的结果——
+ * `ReflectionCitation.memoryId` 级联带走的是引用行，洞察那一行原样活着，于是用户看到一条
+ * 「标题和正文都在、证据一条不剩」的洞察。引用不分 SUPPORTS / CONTRADICTS（他同日判的「1算」）：
+ * 反证也是这条洞察的证据，抽掉之后它的置信度和反证命中数就成了假数字。
+ * 删掉洞察等于把 `@@unique([userId, dedupKey])` 那个主题位腾出来，之后的收割可以从剩下的
+ * 证据里重新提出同主题——这是甲的已知代价，不是漏洞。
+ *
+ * 决策行只在「忘记这次对话」和「清空全部」里收（他同日判的「2一起收」）：单条删除**不动**它，
+ * 「忘掉这条记忆」和「忘记这次对话」是两件事（7.3）。决策的结果行（DecisionOutcome）由它自己
+ * 那条指向 DecisionRecord 的外键级联带走，不用显式删——它是那条决策的附属，没有独立意义。
+ * Embedding 是 MemoryItem 自己的一个密文列（embeddingCiphertext），随行一起消失；
+ * 图关系和时间线派生还没落地，等它们出现时这里要跟着加清理。
+ *
+ * 派生删除不报给用户（他同日判的「3不要报」）：`PurgeResult` 不加计数，界面文案不加句子。
  *
  * 删记忆不删原会话：7.3 明确要求区分这两件事，用户只说「忘掉这条」时不许动聊天记录。
  * 反过来，删会话会连带删掉它产生的记忆和欠着的认知任务——那是各自 chat 外键上的 CASCADE。
@@ -84,6 +98,75 @@ async function detachEdges(tx: Prisma.TransactionClient, userId: string, ids: st
 }
 
 /**
+ * 这批判掉的内容牵着哪几条洞察（11-04 判的甲 +「1算」）。
+ *
+ * 必须在删记忆**之前**读：`ReflectionCitation.memoryId` 是 `onDelete: Cascade`，
+ * 记忆一删，引用行就被库层带走了，那时候再问「谁引用过它」就查无此据——洞察正好留在原地。
+ * kind 不参与条件：反证（CONTRADICTS）也是这条洞察的证据，抽掉它剩下的置信度是假的。
+ * decisionIds 传空数组就是「这一轮不收决策」——单条删除走的就是这条路（口径边界）。
+ */
+async function insightIdsCiting(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  memoryIds: string[],
+  decisionIds: string[]
+): Promise<string[]> {
+  const found = new Set<string>();
+  if (memoryIds.length > 0) {
+    const rows = await tx.reflectionCitation.findMany({
+      where: { userId, memoryId: { in: memoryIds } },
+      select: { reflectionId: true }
+    });
+    for (const row of rows) found.add(row.reflectionId);
+  }
+  if (decisionIds.length > 0) {
+    const rows = await tx.reflectionCitation.findMany({
+      where: { userId, decisionId: { in: decisionIds } },
+      select: { reflectionId: true }
+    });
+    for (const row of rows) found.add(row.reflectionId);
+  }
+  return [...found];
+}
+
+/**
+ * 删洞察：先删它的引用行，再删洞察行。
+ *
+ * 反过来在真库上也会被 `ReflectionCitation.reflectionId` 的级联带走，但显式删的两层意思：
+ * 一是这一屏不该留下「指向已删洞察的引用行」哪怕一瞬间，二是**测试只看得见显式删**——
+ * 替身不做级联，靠库层兜住的清理等于没被验收过（门槛 2 要的是行为）。
+ * 空列表不发消息：没有洞察要死时，这一轮一条多余的写都不该有。
+ */
+async function deleteInsights(tx: Prisma.TransactionClient, userId: string, reflectionIds: string[]): Promise<void> {
+  if (reflectionIds.length === 0) return;
+  await tx.reflectionCitation.deleteMany({ where: { userId, reflectionId: { in: reflectionIds } } });
+  await tx.reflectionRecord.deleteMany({ where: { userId, id: { in: reflectionIds } } });
+}
+
+/**
+ * 这次对话产生的决策行（11-04 判的「2一起收」）。
+ *
+ * 只能顺着消息找：`DecisionRecord` 上没有 chatId，它的来源是**一条消息**（sourceMessageId 非空）。
+ * 不用记忆的 sourceMessageId 凑——那条路会漏掉「抽出一句决定但没落地成记忆」的消息，
+ * 而用户说的是「忘记这次对话」。
+ * Message 上没有 userId，所以这一头的读取本身不分用户：把别人的 chatId 塞进来，
+ * 它一样会返回那会话里的消息 id。隔离全靠下一层——`decisionRecord` 的条件始终带着 userId，
+ * 别人的消息 id 牵不动我的决策，我也就不可能删掉别人的决策行。
+ * 路由不校验会话归属（`memories/route.ts` 的 DELETE 只把查询串里的 chatId 原样传进来），
+ * 所以「读不分用户、写按用户」这句得写在明面上，不能假装上游替我挡过了。
+ * 只 select id：正文列（contentCiphertext）不经过这条路径，日志和返回值里也就没有它。
+ */
+async function decisionIdsByChat(tx: Prisma.TransactionClient, userId: string, chatId: string): Promise<string[]> {
+  const messages = await tx.message.findMany({ where: { chatId }, select: { id: true } });
+  if (messages.length === 0) return [];
+  const rows = await tx.decisionRecord.findMany({
+    where: { userId, sourceMessageId: { in: messages.map((message) => message.id) } },
+    select: { id: true }
+  });
+  return rows.map((record) => record.id);
+}
+
+/**
  * 这一条事件占着哪几行：顺着「这一版是改口来的」那条边往回走。
  *
  * 排序和折叠口径跟 `memories.ts:479` 的 `listRevisionEdges` 一致（`createdAt asc`、一个版本只认第一条边），
@@ -124,6 +207,9 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     })) as unknown as PurgeTargetRow[];
     const contexts = [...new Set(rows.map((row) => fromDbMemoryContext(row.context)))];
     await detachEdges(tx, userId, ids);
+    // 洞察先于删记忆：等引用行被外键级联带走，就找不到「谁引用过它」了（甲 +「1算」）。
+    // 这一条**不碰决策行**——「忘掉这条记忆」不是「忘记这次对话」（7.3 的两件事）。
+    await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, []));
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
     await recordSources(tx, userId, rows);
     // 来源那次对话还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
@@ -143,11 +229,19 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
     // 撤账排在「有没有记忆可删」之前：这一轮可能刚说完，记忆还压在队列里没跑，
     // 那时候行数是 0，但用户要忘记的是这次对话，等它跑完再补记就是把那句话塞回来。
     await cancelCognitiveTasks(tx, { userId, chatId });
+    // 「一起收」排在「有没有记忆可删」之前，理由和撤账同一句：这一轮可能刚说完，
+    // 记忆还压在队列里没跑，但这次对话已经决定了的那些选择是实打实落在这张表里的。
+    const decisionIds = await decisionIdsByChat(tx, userId, chatId);
     const rows = (await tx.memoryItem.findMany({
       where: { userId, chatId }
     })) as unknown as PurgeTargetRow[];
-    if (rows.length === 0) return { purged: 0, contexts: [] };
     const ids = rows.map((row) => row.id);
+    // 洞察的证据可能是这批记忆、也可能是这轮要删的决策，两样都查完再删（甲 +「1算」）。
+    await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, decisionIds));
+    if (decisionIds.length > 0) {
+      await tx.decisionRecord.deleteMany({ where: { userId, id: { in: decisionIds } } });
+    }
+    if (rows.length === 0) return { purged: 0, contexts: [] };
     const contexts = [...new Set(rows.map((row) => fromDbMemoryContext(row.context)))];
     await detachEdges(tx, userId, ids);
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
@@ -174,6 +268,11 @@ export async function purgeAllMemories(userId: string): Promise<PurgeResult> {
   return prisma.$transaction(async (tx) => {
     const result = await tx.memoryItem.deleteMany({ where: { userId } });
     await cancelCognitiveTasks(tx, { userId });
+    // 洞察和决策按同一个范围清：「清空全部」删的是系统记住的一切，
+    // 留下几条证据已经不在的洞察，等于把用户刚清掉的东西换个样子摆回他眼前（甲）。
+    await tx.reflectionCitation.deleteMany({ where: { userId } });
+    await tx.reflectionRecord.deleteMany({ where: { userId } });
+    await tx.decisionRecord.deleteMany({ where: { userId } });
     return { purged: result.count, contexts: [] };
   });
 }
