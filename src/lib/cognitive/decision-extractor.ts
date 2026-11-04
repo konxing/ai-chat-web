@@ -54,7 +54,7 @@ const VERBS: readonly string[] = [
 ];
 
 /** 保留句尾标点地切句；问句整句不算决策候选。 */
-function splitSentences(text: string): string[] {
+export function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[。！？!?\n])/)
     .map((piece) => piece.trim())
