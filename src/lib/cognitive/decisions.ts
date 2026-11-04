@@ -1,9 +1,11 @@
-import type { DecisionRecord, DecisionStatus } from '@prisma/client';
+import type { DecisionOutcome, DecisionRecord, DecisionStatus, OutcomeLinkStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { ApiError } from '@/lib/http';
-import { decryptString } from '@/lib/crypto';
+import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { getCognitivePreferences } from './preferences';
+import { matchOutcomes } from './outcome-extractor';
 
 /**
  * 决策记忆的读写服务层（任务书 Phase 5）。
@@ -18,6 +20,8 @@ import { getCognitivePreferences } from './preferences';
 export const DECISION_LIST_MAX_ROWS = 100;
 
 const aadFor = (userId: string, id: string, field: string) => `decision:v1:${userId}:${id}:${field}`;
+const outcomeAadFor = (userId: string, id: string, field: string) =>
+  `decision-outcome:v1:${userId}:${id}:${field}`;
 
 export interface DecisionDto {
   id: string;
@@ -107,4 +111,111 @@ export async function setDecisionStatus(
   }
   const row = await prisma.decisionRecord.findFirst({ where: { id, userId } });
   return toDto(row!);
+}
+
+/**
+ * 结果跟踪（任务书 5.3）。后台在同一轮欠账里顺手跑：拿该用户已确认的决策做匹配，
+ * 连出来的行一律 linkStatus = CANDIDATE——归因要用户在界面上点头才算数。
+ * 重复投递由 (sourceMessageId, decisionId) 唯一约束挡掉。
+ */
+export async function writeOutcomeCandidates(input: {
+  userId: string;
+  content: string;
+  sourceMessageId?: string;
+}): Promise<void> {
+  if (!input.sourceMessageId) return;
+  const rows = await prisma.decisionRecord.findMany({
+    where: { userId: input.userId, status: 'CONFIRMED' }
+  });
+  if (rows.length === 0) return;
+  const matches = matchOutcomes(
+    input.content,
+    rows.map((row) => ({
+      id: row.id,
+      topic: decryptString(row.topicCiphertext, aadFor(input.userId, row.id, 'topic'))
+    }))
+  );
+  if (matches.length === 0) return;
+  const sourceMessageId = input.sourceMessageId;
+  const data = matches.map((match) => {
+    const id = randomUUID();
+    return {
+      id,
+      userId: input.userId,
+      decisionId: match.decisionId,
+      linkStatus: 'CANDIDATE' as const,
+      actualCiphertext: encryptString(match.actual, outcomeAadFor(input.userId, id, 'actual')),
+      sourceMessageId
+    };
+  });
+  await prisma.decisionOutcome.createMany({ data, skipDuplicates: true });
+}
+
+export interface OutcomeDto {
+  id: string;
+  decisionId: string;
+  linkStatus: OutcomeLinkStatus;
+  actual: string;
+  gap: string | null;
+  rating: string | null;
+  missedFactors: string | null;
+  lesson: string | null;
+  sourceMessageId: string;
+  recordedAt: string;
+}
+
+function toOutcomeDto(row: DecisionOutcome): OutcomeDto {
+  const plain = (field: string, ciphertext: string | null) =>
+    ciphertext === null ? null : decryptString(ciphertext, outcomeAadFor(row.userId, row.id, field));
+  return {
+    id: row.id,
+    decisionId: row.decisionId,
+    linkStatus: row.linkStatus,
+    actual: decryptString(row.actualCiphertext, outcomeAadFor(row.userId, row.id, 'actual')),
+    gap: plain('gap', row.gapCiphertext),
+    rating: plain('rating', row.ratingCiphertext),
+    missedFactors: plain('missedFactors', row.missedFactorsCiphertext),
+    lesson: plain('lesson', row.lessonCiphertext),
+    sourceMessageId: row.sourceMessageId,
+    recordedAt: row.recordedAt.toISOString()
+  };
+}
+
+export async function listOutcomes(userId: string, decisionId: string): Promise<OutcomeDto[]> {
+  const rows = await prisma.decisionOutcome.findMany({
+    where: { userId, decisionId },
+    orderBy: { recordedAt: 'asc' }
+  });
+  return rows.map(toOutcomeDto);
+}
+
+export async function getDecisionWithOutcomes(
+  userId: string,
+  id: string
+): Promise<{ decision: DecisionDto; outcomes: OutcomeDto[] } | null> {
+  const row = await prisma.decisionRecord.findFirst({ where: { id, userId } });
+  if (!row) return null;
+  return { decision: toDto(row), outcomes: await listOutcomes(userId, id) };
+}
+
+export type OutcomeLinkAction = 'link' | 'detach';
+
+/** 候选链接的确认/解除。和决策确认同构：只从 CANDIDATE 出发，where 里带着状态。 */
+export async function setOutcomeLink(
+  userId: string,
+  decisionId: string,
+  outcomeId: string,
+  action: OutcomeLinkAction
+): Promise<OutcomeDto> {
+  const updated = await prisma.decisionOutcome.updateMany({
+    where: { id: outcomeId, userId, decisionId, linkStatus: 'CANDIDATE' },
+    data: { linkStatus: action === 'link' ? 'LINKED' : 'DETACHED' }
+  });
+  if (updated.count === 0) {
+    const existing = await prisma.decisionOutcome.findFirst({ where: { id: outcomeId, userId } });
+    if (!existing) throw new ApiError(404, 'OUTCOME_NOT_FOUND', '这条结果记录不存在');
+    throw new ApiError(409, 'OUTCOME_NOT_CANDIDATE', '这条结果已经处理过了，不能再确认或解除');
+  }
+  const row = await prisma.decisionOutcome.findFirst({ where: { id: outcomeId, userId } });
+  return toOutcomeDto(row!);
 }

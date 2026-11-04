@@ -174,6 +174,11 @@ export const decisionActionSchema = z.object({
   action: z.enum(['confirm', 'reject'])
 });
 
+/** 结果链接的确认/解除（任务书 5.3）。候选才允许动，状态机在服务层再兜一次。 */
+export const outcomeLinkSchema = z.object({
+  action: z.enum(['link', 'detach'])
+});
+
 /** 列表的状态过滤白名单，和 DecisionStatus 枚举同词表。 */
 export const decisionStatusSchema = z.enum([
   'PENDING_CONFIRM',
