@@ -697,6 +697,7 @@ model DecisionRecord {
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   sourceMessage Message         @relation("DecisionSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
   outcomes        DecisionOutcome[]
+  reflectionCitations ReflectionCitation[] @relation("ReflectionCitationDecision")
 
   /// 给 DecisionOutcome 的复合外键用的：(决策, 用户)  pair 唯一，
   /// 于是结果行不可能指到别的用户的决策上（任务书 5.1 要求在库层兜住）。
@@ -789,24 +790,33 @@ model ReflectionRecord {
   @@index([userId, generatedAt])
 }
 
-/// 一条反思引用了哪条记忆、站在支持还是反对的一侧（任务书 6.4 的主要证据 / 反对证据）。
+/// 一条反思引用的证据、站在支持还是反对的一侧（任务书 6.4 的主要证据 / 反对证据）。
 ///
 /// 用连接表而不是把 id 串成一列写进正文列：这样跨用户引用在库层就建不出来，
-/// 而且记忆被永久删除时这条引用随行消失——Phase 7「删记忆要连带处理反思里的相关内容」
+/// 而且来源被永久删除时这条引用随行消失——Phase 7「删记忆要连带处理反思里的相关内容」
 /// 就是这一条 cascade，读侧再按剩下几条引用判这条洞察还该不该留着。
+///
+/// 来源可以是记忆，也可以是决策：6.1 的 DECISION_LESSON 和「决策落定」那一类 MILESTONE
+/// 的证据本来就是 DecisionRecord 那两行，硬把它们转写成记忆 id 就是造假。
+/// **恰好一列非空**由服务层保证（写这一行的只有 reflection 生成那一条代码路径）：
+/// Prisma 表达不了 CHECK，而在迁移里手写一条 CHECK 会让下一次 migrate diff 想把它删掉。
 model ReflectionCitation {
   id           String                 @id @default(uuid())
   userId       String
   reflectionId String
-  memoryId     String
+  memoryId     String?
+  decisionId   String?
   kind         ReflectionCitationKind
   createdAt    DateTime               @default(now())
 
-  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   reflection ReflectionRecord @relation(fields: [reflectionId, userId], references: [id, userId], onDelete: Cascade)
-  memory     MemoryItem       @relation("ReflectionCitationMemory", fields: [memoryId, userId], references: [id, userId], onDelete: Cascade)
+  memory     MemoryItem?      @relation("ReflectionCitationMemory", fields: [memoryId, userId], references: [id, userId], onDelete: Cascade)
+  decision   DecisionRecord?  @relation("ReflectionCitationDecision", fields: [decisionId, userId], references: [id, userId], onDelete: Cascade)
 
   @@unique([reflectionId, memoryId])
+  @@unique([reflectionId, decisionId])
   @@index([userId, reflectionId])
   @@index([userId, memoryId])
+  @@index([userId, decisionId])
 }

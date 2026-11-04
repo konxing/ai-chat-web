@@ -98,8 +98,9 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 `dedupKey` 上的库层唯一让同主题的第二条插不进来（6.6 的合并不是靠应用层记着）。`counterTokensCiphertext` 是反证搜索用过的关键词集合——它同样是记忆正文的派生物，所以按同一口径加密；`counterHitCount=0` 也要留行，门槛 4 要的是「搜过反证」有凭据。`sampleCount`/`observationSpanDays` 摊在界面上，是数据不足（INSUFFICIENT_EVIDENCE）的判据本身。
 
 ### ReflectionCitation
-`id`、`userId`、`reflectionId`、`memoryId`、`kind`(SUPPORTS/CONTRADICTS)、`createdAt`。唯一 `(reflectionId, memoryId)`，索引 `(userId, reflectionId)`、`(userId, memoryId)`。两侧都是复合外键。
-一条洞察引用了哪条记忆、站在支持还是反对的一侧。用连接表而不是把 id 串成文本写进洞察里，为的是记忆被永久删除时这条引用随行消失（任务书 7.3 的派生清理），读侧再按剩下几条判这条洞察还该不该留着。
+`id`、`userId`、`reflectionId`、`memoryId?`、`decisionId?`、`kind`(SUPPORTS/CONTRADICTS)、`createdAt`。唯一 `(reflectionId, memoryId)`、`(reflectionId, decisionId)`，索引 `(userId, reflectionId)`、`(userId, memoryId)`、`(userId, decisionId)`。两侧来源都是复合外键。
+一条洞察引用了哪条证据、站在支持还是反对的一侧。来源可以是记忆，也可以是决策——6.1 的 DECISION_LESSON 和「决策落定」那一类 MILESTONE 的证据本来就是 `DecisionRecord` 那两行，硬转写成记忆 id 就是造假。**恰好一列非空由服务层保证**：Prisma 表达不了 CHECK，而手写进迁移的 CHECK 会让下一次 `migrate diff` 想把它删掉。
+用连接表而不是把 id 串成文本写进洞察里，为的是来源被永久删除时这条引用随行消失（任务书 7.3 的派生清理），读侧再按剩下几条判这条洞察还该不该留着。
 
 ## ER 图
 
@@ -133,6 +134,7 @@ erDiagram
   User ||--o{ ReflectionRecord : reflects
   ReflectionRecord ||--o{ ReflectionCitation : evidencedBy
   MemoryItem ||--o{ ReflectionCitation : citedBy
+  DecisionRecord ||--o{ ReflectionCitation : groundedIn
 ```
 
 ## 隔离与权限规则

@@ -43,7 +43,8 @@ CREATE TABLE "ReflectionCitation" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "reflectionId" TEXT NOT NULL,
-    "memoryId" TEXT NOT NULL,
+    "memoryId" TEXT,
+    "decisionId" TEXT,
     "kind" "ReflectionCitationKind" NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -69,7 +70,13 @@ CREATE INDEX "ReflectionCitation_userId_reflectionId_idx" ON "ReflectionCitation
 CREATE INDEX "ReflectionCitation_userId_memoryId_idx" ON "ReflectionCitation"("userId", "memoryId");
 
 -- CreateIndex
+CREATE INDEX "ReflectionCitation_userId_decisionId_idx" ON "ReflectionCitation"("userId", "decisionId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ReflectionCitation_reflectionId_memoryId_key" ON "ReflectionCitation"("reflectionId", "memoryId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ReflectionCitation_reflectionId_decisionId_key" ON "ReflectionCitation"("reflectionId", "decisionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "MemoryItem_id_userId_key" ON "MemoryItem"("id", "userId");
@@ -85,4 +92,7 @@ ALTER TABLE "ReflectionCitation" ADD CONSTRAINT "ReflectionCitation_reflectionId
 
 -- AddForeignKey
 ALTER TABLE "ReflectionCitation" ADD CONSTRAINT "ReflectionCitation_memoryId_userId_fkey" FOREIGN KEY ("memoryId", "userId") REFERENCES "MemoryItem"("id", "userId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReflectionCitation" ADD CONSTRAINT "ReflectionCitation_decisionId_userId_fkey" FOREIGN KEY ("decisionId", "userId") REFERENCES "DecisionRecord"("id", "userId") ON DELETE CASCADE ON UPDATE CASCADE;
 
