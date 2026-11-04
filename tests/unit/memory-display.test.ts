@@ -24,6 +24,8 @@ import {
   TYPE_LABELS,
   TYPE_ORDER,
   describeConfidenceFactor,
+  describeMemoryListCap,
+  describeArchivedListCap,
   describePolicySummary,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
@@ -168,6 +170,29 @@ describe('置信度的档位与因子说明', () => {
     expect(describeConfidenceFactor({ kind: 'superseded' })).toBe('已被新说法取代');
     expect(describeConfidenceFactor({ kind: 'expired' })).toBe('已过有效期');
     expect(describeConfidenceFactor({ kind: 'retracted' })).toBe('已撤回');
+  });
+});
+
+/**
+ * 「记忆」那一屏的两份列表各有 200 行的硬上限（`MEMORY_LIST_MAX_ROWS`）。
+ * 到了上限必须说出来：不说，用户会把「这里没有更早的」读成「更早的没发生过」——
+ * 已归档那一份尤其致命，因为「收起来的那批我看不全」正好是他最该知道的事。
+ * 口径跟时间线的 `capped` 和洞察那屏的 `describeListCap` 一致。
+ */
+describe('两份列表的截断说明', () => {
+  it('没到上限就一个字都不出，界面据此一行都不渲染', () => {
+    expect(describeMemoryListCap(false, 3)).toBe('');
+    expect(describeArchivedListCap(false, 1)).toBe('');
+  });
+
+  it('当前有效那一份到上限：报的是实际列出的条数，不是抄一个常量', () => {
+    expect(describeMemoryListCap(true, 200)).toBe('记忆比这一屏多：这里只列出最近 200 条，更早的没有读进来。');
+  });
+
+  it('已归档那一份到上限：说的是归档，别和上面那句混成一条', () => {
+    expect(describeArchivedListCap(true, 200)).toBe(
+      '已归档的记忆比这一屏多：这里只列出最近 200 条，更早的没有读进来。'
+    );
   });
 });
 

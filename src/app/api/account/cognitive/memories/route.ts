@@ -3,7 +3,7 @@ import { requireUser } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import { memoryPurgeSchema } from '@/lib/validation';
-import { listMemories } from '@/lib/cognitive/memories';
+import { listMemories, MEMORY_LIST_MAX_ROWS } from '@/lib/cognitive/memories';
 import { assessMemories } from '@/lib/cognitive/evidence';
 import { purgeAllMemories, purgeMemoriesByChat } from '@/lib/cognitive/forgetting';
 import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
@@ -34,15 +34,20 @@ const PURGE_WINDOW_MS = 60 * 60 * 1000;
  *
  * confidence 只给档位和因子，不给分数——一个三位小数会被当成精确真理，
  * 而它只是一条确定性规则的产物。因子是给界面翻译成中文用的，也是「凭什么信这条」的说明书。
+ *
+ * `capped` / `archivedCapped` 是两份列表各自的 200 行上限标志（口径和时间线、洞察那屏一样）：
+ * 服务层读多少行界面就列多少行，到顶的那一批不报出来的话，「这里没有更早的」就会被读成
+ * 「更早的没发生过」。两个标志分开算，是因为少掉的那批分属两个桶，混成一个数就说不清少了什么。
  */
 export async function GET(req: Request) {
   return api(async () => {
     const { user } = await requireUser(req);
-    const memories = await listMemories(user.id);
-    // 已归档那一份单独带回来越一次：没有它，归档就是一扇进得去出不来的门（任务书 7.2）。
-    // 不喂 chats，也不参与置信度——那一屏只要求「看清收起来的是什么，然后恢复」，
-    // 多算一份只是给一次点开付两批解密的钱。
-    const archived = await listMemories(user.id, { archivedOnly: true });
+    // 那一屏不喂 chats，也不参与置信度：它只要求「看清收起来的是什么，然后恢复」，
+    // 多算一份只是给一次点开付两批解密的钱。两份互不依赖，所以并发读，不串行等两轮往返。
+    const [memories, archived] = await Promise.all([
+      listMemories(user.id),
+      listMemories(user.id, { archivedOnly: true })
+    ]);
     const [chats, confidence] = await Promise.all([
       listChatTitles(
         user.id,
@@ -55,6 +60,8 @@ export async function GET(req: Request) {
     return {
       memories,
       archived,
+      capped: memories.length >= MEMORY_LIST_MAX_ROWS,
+      archivedCapped: archived.length >= MEMORY_LIST_MAX_ROWS,
       chats,
       confidence: Object.fromEntries(
         [...confidence].map(([id, entry]) => [id, { band: entry.band, factors: entry.factors }])

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MEMORY_LIST_MAX_ROWS } from '@/lib/cognitive/memories';
 
 /**
  * 记忆管理接口（任务书 8.2「记忆管理」那一屏的后端）。这一片钉的是四件事——
@@ -59,6 +60,8 @@ vi.mock('@/lib/audit', () => ({
 }));
 
 vi.mock('@/lib/cognitive/memories', () => ({
+  // 路由用它算截断标志，所以替身也得把这个常量交出去（真实现里是 200）。
+  MEMORY_LIST_MAX_ROWS: 200,
   listMemories: (userId: string, filters?: { archivedOnly?: boolean }) => {
     db.listCalls.push({ userId, filters });
     // 真实现只给「还没被取代、也没被撤回、也没归档」的行；按同一语义筛，
@@ -333,6 +336,38 @@ describe('读：用户看 AI 记了自己什么', () => {
     const { payload } = await call('GET');
 
     expect(payload.data.memories).toEqual([]);
+  });
+
+  it('读到 200 行上限时当前列表要说出截断：两份列表各自报自己的那一份', async () => {
+    for (let index = 0; index < MEMORY_LIST_MAX_ROWS; index += 1) store(memoryDto({ id: `mem-${index}` }));
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.memories).toHaveLength(MEMORY_LIST_MAX_ROWS);
+    expect(payload.data.capped).toBe(true);
+    // 归档那一份一条都没有，不能跟着报上限——两个标志各算各的。
+    expect(payload.data.archivedCapped).toBe(false);
+  });
+
+  it('没到上限时两个标志都是 false，界面据此一个字都不摆', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+
+    const { payload } = await call('GET');
+
+    expect(payload.data).toMatchObject({ capped: false, archivedCapped: false });
+  });
+
+  it('已归档那一份到上限而当前列表没到时，只有 archivedCapped 为真', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    for (let index = 0; index < MEMORY_LIST_MAX_ROWS; index += 1) {
+      store(memoryDto({ id: `arc-${index}`, archivedAt: '2026-11-05T10:00:00.000Z' }));
+    }
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.archived).toHaveLength(MEMORY_LIST_MAX_ROWS);
+    expect(payload.data.archivedCapped).toBe(true);
+    expect(payload.data.capped).toBe(false);
   });
 
   it('单条返回这一条和它的演化边；别人的 id 一律 404，边也不给', async () => {

@@ -115,6 +115,25 @@ export function describeConfidenceFactor(factor: ConfidenceFactor): string {
   }
 }
 
+/**
+ * 「记忆」那一屏两份列表的截断说明（任务书 7.2 之后，当前有效和已归档各自有 `MEMORY_LIST_MAX_ROWS` 上限）。
+ *
+ * 条数取**实际列出的行数**，不把服务端的常量抄一份到界面：抄的那一份会先过期，
+ * 而且被截断时两者必然相等。两句分开写而不是一句模板，是因为「归档比这一屏多」和
+ * 「记忆比这一屏多」是两件不同的事——合成一句，用户就分不清少掉的那批在哪个桶里。
+ * 口径与时间线的 `capped`、洞察那屏的 `describeListCap` 一致：不说出来，
+ * 「这里没有更早的」就会被读成「更早的没发生过」。
+ */
+export function describeMemoryListCap(capped: boolean, shownCount: number): string {
+  if (!capped) return '';
+  return `记忆比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
+}
+
+export function describeArchivedListCap(capped: boolean, shownCount: number): string {
+  if (!capped) return '';
+  return `已归档的记忆比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
+}
+
 export interface PolicySummaryInput {
   allowPersistence: boolean;
   allowedMemoryTypes: readonly MemoryType[];

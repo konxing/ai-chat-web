@@ -11,7 +11,9 @@ import {
   ORIGIN_LABELS,
   REVISION_ACTION_LABELS,
   TYPE_LABELS,
+  describeArchivedListCap,
   describeConfidenceFactor,
+  describeMemoryListCap,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
@@ -73,6 +75,9 @@ export function MemoryPanel() {
   const [memories, setMemories] = useState<MemoryDto[]>([]);
   /** 归档的那一份（任务书 7.2）：和当前有效的那一份分开显示，恢复只有在这里才有入口。 */
   const [archived, setArchived] = useState<MemoryDto[]>([]);
+  /** 两份列表各有 200 行的读取上限，到顶了得说出来（口径同时间线和洞察那屏）。 */
+  const [capped, setCapped] = useState(false);
+  const [archivedCapped, setArchivedCapped] = useState(false);
   const [chats, setChats] = useState<Record<string, string>>({});
   const [confidence, setConfidence] = useState<Record<string, ConfidenceEntry>>({});
   const [evidence, setEvidence] = useState<EvidenceDto[]>([]);
@@ -99,11 +104,15 @@ export function MemoryPanel() {
       const data = await apiFetch<{
         memories: MemoryDto[];
         archived: MemoryDto[];
+        capped: boolean;
+        archivedCapped: boolean;
         chats: Record<string, string>;
         confidence: Record<string, ConfidenceEntry>;
       }>('/api/account/cognitive/memories');
       setMemories(data.memories);
       setArchived(data.archived ?? []);
+      setCapped(data.capped);
+      setArchivedCapped(data.archivedCapped);
       setChats(data.chats);
       setConfidence(data.confidence ?? {});
       setLoadError('');
@@ -391,6 +400,10 @@ export function MemoryPanel() {
     }
   }
 
+  // 两份列表各自的上限说明：没到上限就是空串，界面据此一个字都不摆。
+  const capNote = describeMemoryListCap(capped, memories.length);
+  const archivedCapNote = describeArchivedListCap(archivedCapped, archived.length);
+
   return (
     <section className="panel p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -419,6 +432,7 @@ export function MemoryPanel() {
 
       <div className="mt-5 space-y-2.5">
         {loadError ? <Alert tone="error">{loadError}</Alert> : null}
+        {capNote ? <Alert tone="info">{capNote}</Alert> : null}
         {loading ? (
           <LoadingBlock label="加载记忆" />
         ) : memories.length === 0 ? (
@@ -738,6 +752,7 @@ export function MemoryPanel() {
           <p className="mt-1 text-[11.5px] leading-relaxed text-white/40">
             这些内容不参与对话，也不会被当作洞察的证据。要重新使用，点「恢复」。
           </p>
+          {archivedCapNote ? <Alert tone="info" className="mt-2">{archivedCapNote}</Alert> : null}
           <ul className="mt-3 space-y-2.5">
             {archived.map((memory) => (
               <li key={memory.id} className="flex flex-wrap items-start justify-between gap-2">
