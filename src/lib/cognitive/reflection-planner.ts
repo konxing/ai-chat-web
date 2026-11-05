@@ -69,8 +69,13 @@ const BOILERPLATE: readonly string[] = [
 /** 否定标记。单字子串匹配，误判方向是「多找一对矛盾」，所以宁可窄。措辞层判反证用的是同一张表。 */
 export const NEGATION_MARKERS: readonly string[] = ['不', '没', '无', '别'];
 
-/** 完成说法。MILESTONE 只认这些——「改成了 X」不是到达。 */
-const COMPLETION_MARKERS: readonly string[] = [
+/**
+ * 完成说法。MILESTONE 只认这些——「改成了 X」不是到达。
+ *
+ * 导出它是因为 4.3 的「目标状态变化」要用同一张表：一张表在两处各自维护，
+ * 早晚会变成「洞察说到达了、时间线说只是变了」——那是同一个事实的两种说法。
+ */
+export const COMPLETION_MARKERS: readonly string[] = [
   '完成了',
   '搞定了',
   '上线了',
@@ -177,7 +182,11 @@ export interface ReflectionPlan {
   insufficient: InsufficientEvidence[];
 }
 
-interface Cluster {
+/**
+ * 一个主题簇：活跃的行、失效的行、每行的主题词、活跃行共有的签名。
+ * 导出给 4.3 的变化检测用——「同一件事」在这份仓库里只该有一把尺子。
+ */
+export interface Cluster {
   active: ReflectableMemory[];
   inactive: ReflectableMemory[];
   tokens: Set<string>[];
@@ -185,7 +194,11 @@ interface Cluster {
   core: string[];
 }
 
-function daysBetween(later: Date, earlier: Date): number {
+/**
+ * 「跨了多少天」只有一个算法：四舍五入到整天。
+ * 导出给 4.3 用，因为观察里的观察跨度要是用另一种取整，两条规则就会对同一批行报出两个跨度。
+ */
+export function daysBetween(later: Date, earlier: Date): number {
   return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / DAY_MS));
 }
 
@@ -195,6 +208,20 @@ function isActive(memory: ReflectableMemory): boolean {
 
 function topicTokens(text: string): Set<string> {
   return new Set(tokenize(text).filter((token) => token.length >= 2 && !BOILERPLATE.includes(token)));
+}
+
+/** 一句话的主题签名（排过序、摘掉第一人称套话、只留两字以上的词）。4.3 的观察用它说「讲的是哪件事」。 */
+export function topicSignature(text: string): string[] {
+  return [...topicTokens(text)].sort();
+}
+
+/** 一组行的跨度、跨了几个会话、最后一条什么时候记的。4.3 的每一条观察都要带前两个数。 */
+export function statsOf(active: readonly ReflectableMemory[]): { spanDays: number; chatCount: number; lastRecordedAt: Date } {
+  const times = active.map((memory) => memory.recordedAt);
+  const chats = new Set(active.map((memory) => memory.chatId).filter((chatId): chatId is string => chatId !== null));
+  const first = new Date(Math.min(...times.map((time) => time.getTime())));
+  const last = new Date(Math.max(...times.map((time) => time.getTime())));
+  return { spanDays: daysBetween(last, first), chatCount: chats.size, lastRecordedAt: last };
 }
 
 function overlap(left: Set<string>, right: Set<string>): number {
@@ -226,8 +253,12 @@ function intersect(left: Set<string>, right: Set<string>): Set<string> {
  * 成簇：对所有记忆（含已被取代和已撤回的）做并查集，两两重合 ≥ TOPIC_MIN_OVERLAP 就并到一起。
  * 把失效的行也放进去，是为了让反例留在同一个簇里——只按活跃记忆成簇的话，
  * 「你以前说过相反的话」这一类证据永远进不了 6-C 的视野。
+ *
+ * 导出它是为了让 4.3 用同一把尺子量「同一件事」。这份仓库里如果一个概念有两套算法，
+ * 两套就会各自漂移，最后同一个用户在同一天看到两种互相矛盾的主题划分——
+ * prisma-mock 文件头写的就是要避掉这种事。
  */
-function buildClusters(memories: readonly ReflectableMemory[]): Cluster[] {
+export function buildClusters(memories: readonly ReflectableMemory[]): Cluster[] {
   if (memories.length === 0) return [];
   const tokens = memories.map((memory) => topicTokens(memory.text));
   const parent = memories.map((_, index) => index);
@@ -288,14 +319,6 @@ function sortByTime(memories: ReflectableMemory[]): ReflectableMemory[] {
 function dedupKey(type: ReflectionType, tokens: readonly string[]): string {
   const digest = createHash('sha1').update(tokens.join('|')).digest('hex').slice(0, 16);
   return `${type}:${digest}`;
-}
-
-function statsOf(active: readonly ReflectableMemory[]): { spanDays: number; chatCount: number; lastRecordedAt: Date } {
-  const times = active.map((memory) => memory.recordedAt);
-  const chats = new Set(active.map((memory) => memory.chatId).filter((chatId): chatId is string => chatId !== null));
-  const first = new Date(Math.min(...times.map((time) => time.getTime())));
-  const last = new Date(Math.max(...times.map((time) => time.getTime())));
-  return { spanDays: daysBetween(last, first), chatCount: chats.size, lastRecordedAt: last };
 }
 
 function finding(base: Omit<ReflectionFinding, 'dedupKey'>): ReflectionFinding {

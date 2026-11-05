@@ -184,6 +184,8 @@ const fromStoredPrecision = (value: string): TimePrecision =>
 /** 证据表和记忆表共用同一套来源枚举，映射只在这里定义一份，两边不会漂。 */
 export const toDbMemoryOrigin = toStoredOrigin;
 export const fromDbMemoryOrigin = fromStoredOrigin;
+/** 精度也一样：派生模块（时间线、变化检测）拿到的是界面那套小写，要和数据库那套大写比时只能走这一份映射。 */
+export const toDbTimePrecision = toStoredPrecision;
 
 // AAD 里带上 userId 和 schemaVersion：别人的行即使密文到手也解不开，日后换密钥也能按版本迁移。
 const aadFor = (userId: string, id: string) => `memory:v1:${userId}:${id}`;

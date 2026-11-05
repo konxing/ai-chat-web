@@ -6,6 +6,7 @@ import { ChevronDown, History, Pencil, Trash2 } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
+import { TimelineChanges } from './timeline-changes';
 import {
   CONTEXT_LABELS,
   ORIGIN_LABELS,
@@ -61,6 +62,8 @@ export function TimelinePanel() {
   const [reason, setReason] = useState('');
   const [busyId, setBusyId] = useState('');
   const [formError, setFormError] = useState('');
+  // 改口和永久删除都会动到演化边，「变化」那一区块读的就是那些边；顶一下这个计数让它跟着重读。
+  const [revision, setRevision] = useState(0);
 
   const loadTimeline = useCallback(async () => {
     setLoading(true);
@@ -148,6 +151,7 @@ export function TimelinePanel() {
       await apiFetch(MEMORY_URL(event.memoryId), { method: 'PATCH', json: { content: draft, reason } });
       push('已按新说法更新，旧版本仍保留');
       closeAction();
+      setRevision((value) => value + 1);
       await loadTimeline();
     } catch (err) {
       setFormError(errorMessage(err));
@@ -163,6 +167,7 @@ export function TimelinePanel() {
       await apiFetch(MEMORY_URL(event.memoryId), { method: 'DELETE' });
       push('已永久删除');
       closeAction();
+      setRevision((value) => value + 1);
       await loadTimeline();
     } catch (err) {
       setFormError(errorMessage(err));
@@ -393,6 +398,7 @@ export function TimelinePanel() {
               );
             })
           )}
+          <TimelineChanges revision={revision} />
         </div>
       ) : null}
     </section>
