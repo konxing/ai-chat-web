@@ -198,7 +198,12 @@ function decision(
   });
 }
 
-function outcomeRow(decisionId: string, recordedAt: Date, userId = USER) {
+function outcomeRow(
+  decisionId: string,
+  recordedAt: Date,
+  userId = USER,
+  overrides: Partial<Record<string, unknown>> = {}
+) {
   tables.get('decisionOutcome')!.seed({
     id: `out-${decisionId}-${recordedAt.getTime()}`,
     userId,
@@ -206,7 +211,8 @@ function outcomeRow(decisionId: string, recordedAt: Date, userId = USER) {
     linkStatus: 'LINKED',
     actualCiphertext: encryptString('成了', `decision-outcome:v1:${userId}:x:actual`),
     recordedAt,
-    sourceMessageId: 'msg-out'
+    sourceMessageId: 'msg-out',
+    ...overrides
   });
 }
 
@@ -222,6 +228,14 @@ function writtenRecords(): Row[] {
 
 function writtenCitations(): Row[] {
   return [...tables.get('reflectionCitation')!.rows.values()];
+}
+
+/**
+ * 按类型挑落库的洞察。一条 OUTCOME_RECORDED 的决策现在同时出 MILESTONE 和
+ * DECISION_LESSON，`writtenRecords()[0]` 不再是「那条经验」，别再按位置取。
+ */
+function recordsOfType(type: string): Row[] {
+  return writtenRecords().filter((row) => row.type === type);
 }
 
 function bodyOf(row: Row): string {
@@ -535,15 +549,18 @@ describe('落库的形状', () => {
 
     const result = await sweep();
 
-    expect(result.generated).toBe(1);
+    // 这条决策同时是里程碑（用户确认过）和经验的依据（报过结果）：两条洞察，各带各的引用。
+    expect(result.generated).toBe(2);
     expect(result.criticRejected).toBe(0);
-    const record = writtenRecords()[0]!;
-    expect(record.type).toBe('DECISION_LESSON');
+    const lessons = recordsOfType('DECISION_LESSON');
+    expect(lessons).toHaveLength(1);
+    expect(recordsOfType('MILESTONE')).toHaveLength(1);
+    const record = lessons[0]!;
     expect(record.sampleCount).toBe(1);
     expect(record.observationSpanDays).toBe(10);
     expect(record.confidence).toBe(0.167);
 
-    const citations = writtenCitations();
+    const citations = writtenCitations().filter((row) => row.reflectionId === record.id);
     expect(citations).toHaveLength(1);
     expect(citations[0]!.decisionId).toBe('d1');
     expect(citations[0]!.memoryId).toBeNull();
@@ -551,7 +568,7 @@ describe('落库的形状', () => {
     expect(bodyOf(record)).toContain('原话：「把订单存储换成 PostgreSQL」。');
   });
 
-  it('结果时间取该决策所有结果行里最早的那一条', async () => {
+  it('结果时间取该决策所有已确认结果行里最早的那一条', async () => {
     decision('d1', '把订单存储换成 PostgreSQL', {
       status: 'OUTCOME_RECORDED',
       confirmedAt: new Date('2026-08-01T00:00:00Z')
@@ -562,7 +579,7 @@ describe('落库的形状', () => {
 
     await sweep();
 
-    expect(writtenRecords()[0]!.observationSpanDays).toBe(10);
+    expect(recordsOfType('DECISION_LESSON')[0]!.observationSpanDays).toBe(10);
   });
 
   it('别人的结果行不算这个用户的证据', async () => {
@@ -573,12 +590,41 @@ describe('落库的形状', () => {
     outcomeRow('d1', new Date('2026-08-11T00:00:00Z'), OTHER);
     switchOn();
 
+    await sweep();
+
+    // 结果行按 userId 过滤：拿不到自己的结果，OUTCOME_RECORDED 也出不了 DECISION_LESSON。
+    // 里程碑不受影响——它的依据是「确认过」这件事，本来就不需要结果行。
+    expect(recordsOfType('DECISION_LESSON')).toEqual([]);
+    expect(recordsOfType('MILESTONE')).toHaveLength(1);
+  });
+
+  it('用户否认过的归因不算报过结果：DETACHED 的结果行撑不起 DECISION_LESSON', async () => {
+    // 状态是点头那一刻推上去的，之后用户可以再把这条归因摘掉。摘掉之后库里
+    // 只剩一行 DETACHED——「结果」这件事已经被用户收回，洞察不能再拿它当经验证据。
+    decision('d1', '把订单存储换成 PostgreSQL', {
+      status: 'OUTCOME_RECORDED',
+      confirmedAt: new Date('2026-08-01T00:00:00Z')
+    });
+    outcomeRow('d1', new Date('2026-08-11T00:00:00Z'), USER, { linkStatus: 'DETACHED' });
+    switchOn();
+
     const result = await sweep();
 
-    // 结果行按 userId 过滤：拿不到自己的结果，OUTCOME_RECORDED 就出不了 DECISION_LESSON；
-    // 而它状态不是 CONFIRMED，也出不了 MILESTONE（门槛 8）。这一轮什么都不写。
-    expect(result.generated).toBe(0);
-    expect(writtenRecords()).toEqual([]);
+    expect(recordsOfType('DECISION_LESSON')).toEqual([]);
+    expect(result.generated).toBe(1);
+  });
+
+  it('还没点头的候选结果不算报过结果：CANDIDATE 撑不起 DECISION_LESSON', async () => {
+    decision('d1', '把订单存储换成 PostgreSQL', {
+      status: 'OUTCOME_RECORDED',
+      confirmedAt: new Date('2026-08-01T00:00:00Z')
+    });
+    outcomeRow('d1', new Date('2026-08-11T00:00:00Z'), USER, { linkStatus: 'CANDIDATE' });
+    switchOn();
+
+    await sweep();
+
+    expect(recordsOfType('DECISION_LESSON')).toEqual([]);
   });
 });
 

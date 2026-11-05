@@ -7,6 +7,7 @@ import type {
   ReflectionType,
   TimePrecision
 } from '@prisma/client';
+import { isConfirmedDecision } from './decision-status';
 import { tokenize } from './retrieval';
 
 /**
@@ -529,7 +530,9 @@ function milestoneFindings(
   }
   for (const decision of [...decisions].sort((left, right) => left.id.localeCompare(right.id))) {
     // 门槛 8：待确认的候选连决策都还不算，不能拿它当里程碑。
-    if (decision.status !== 'CONFIRMED') continue;
+    // 反过来，报过结果、等着复盘的都是「已确认」之后的阶段——状态是一条往前走的链，
+    // 用 `!== 'CONFIRMED'` 会把最值得当里程碑的那几条悄悄筛掉。
+    if (!isConfirmedDecision(decision.status)) continue;
     const at = decision.confirmedAt;
     if (!at) continue;
     findings.push(
@@ -551,7 +554,14 @@ function milestoneFindings(
   return findings;
 }
 
-/** 6.1 DECISION_LESSON + 5.3：只有用户后来提过结果，才谈得上经验。 */
+/**
+ * 6.1 DECISION_LESSON + 5.3：只有用户后来提过结果，才谈得上经验。
+ *
+ * 闸门看的是证据：`outcomeRecordedAt` 由调用方只从 linkStatus = LINKED 的结果行里取
+ * （reflection-sweep.ts），所以这一列非空就是「用户点过头的一份结果」。状态标签只做
+ * 「这条决策算不算正式记录」，不拿来当结果凭证——推进状态是这一片才加上的，
+ * 只认 OUTCOME_RECORDED 会把更早那批已经报过结果的确认行永远关在经验之外。
+ */
 function decisionLessonFindings(decisions: readonly ReflectableDecision[]): {
   findings: ReflectionFinding[];
   insufficient: InsufficientEvidence[];
@@ -560,7 +570,7 @@ function decisionLessonFindings(decisions: readonly ReflectableDecision[]): {
   const insufficient: InsufficientEvidence[] = [];
   for (const decision of [...decisions].sort((left, right) => left.id.localeCompare(right.id))) {
     const tokens = [...topicTokens(decision.topic)].sort();
-    if (decision.status === 'OUTCOME_RECORDED' && decision.outcomeRecordedAt && decision.confirmedAt) {
+    if (isConfirmedDecision(decision.status) && decision.outcomeRecordedAt && decision.confirmedAt) {
       findings.push(
         finding({
           type: 'DECISION_LESSON',
@@ -580,7 +590,7 @@ function decisionLessonFindings(decisions: readonly ReflectableDecision[]): {
       );
       continue;
     }
-    if (decision.status === 'CONFIRMED' && !decision.outcomeRecordedAt) {
+    if (isConfirmedDecision(decision.status) && !decision.outcomeRecordedAt) {
       insufficient.push({
         type: 'DECISION_LESSON',
         sampleCount: 0,

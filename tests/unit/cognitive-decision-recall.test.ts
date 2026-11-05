@@ -8,17 +8,21 @@ const db = vi.hoisted(() => ({
   findManyTake: null as number | null
 }));
 
+/** 只认这里用到的两种条件：等值和 `{ in: [...] }`。 */
+const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+  Object.entries(where).every(([key, value]) =>
+    value !== null && typeof value === 'object' && 'in' in value
+      ? (value as { in: readonly unknown[] }).in.includes(row[key])
+      : row[key] === value
+  );
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     decisionRecord: {
       findMany: (args: { where?: Record<string, unknown>; take?: number }) => {
         db.findManyWhere = args.where ?? {};
         db.findManyTake = args.take ?? null;
-        return Promise.resolve(
-          db.rows.filter((row) =>
-            Object.entries(args.where ?? {}).every(([key, value]) => row[key] === value)
-          )
-        );
+        return Promise.resolve(db.rows.filter((row) => matches(row, args.where ?? {})));
       }
     }
   }
@@ -54,8 +58,22 @@ describe('决策经验读侧（5-E）', () => {
 
   it('只拿已确认的决策，且有池子上限', async () => {
     await readDecisionContext({ userId: 'user-a', query: '笔记本买哪种好' });
-    expect(db.findManyWhere).toMatchObject({ userId: 'user-a', status: 'CONFIRMED' });
+    expect(db.findManyWhere).toMatchObject({ userId: 'user-a' });
+    const pool = (db.findManyWhere ?? {}).status as { in: readonly string[] };
+    expect(pool.in).toEqual(expect.arrayContaining(['CONFIRMED', 'AWAITING_REVIEW', 'OUTCOME_RECORDED']));
+    expect(pool.in).not.toContain('PENDING_CONFIRM');
     expect(db.findManyTake).toBeTypeOf('number');
+  });
+
+  it('报过结果的决策照样能回忆起来：推进状态不是把它从经验池里删掉', async () => {
+    db.rows = [
+      ...CORPUS.map((row) => ({ ...row })),
+      decision('d9', 'OUTCOME_RECORDED', '买一台二手笔记本的内存配置', '加了 32G'),
+      decision('d8', 'AWAITING_REVIEW', '买一台二手笔记本的屏幕尺寸', '选了 14 寸')
+    ];
+    const blocks = await readDecisionContext({ userId: 'user-a', query: '笔记本屏幕多大合适' });
+    const text = blocks.map((block) => block.text).join('\n');
+    expect(text).toContain('买一台二手笔记本的屏幕尺寸');
   });
 
   it('主题重合的决策进上下文，并带着「不要照搬」的措辞', async () => {

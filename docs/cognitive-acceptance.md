@@ -2794,3 +2794,125 @@ MemoryExclusion、MemoryCandidate、DecisionRecord、ReflectionRecord、UserProf
 （重裹时要不要顺手把旧口径的行升成新口径，那正是「回退可以删了吗」的唯一入口）。
 
 **这条边界是「本片只做了 AAD 口径」，不是「加密这一层已经全绿」。**
+
+## 片P-1 / 片P-2：结果的五列第一次真的写进库，`OUTCOME_RECORDED` 第一次有了生产者（11-06）
+
+任务书 5.3 要 `OutcomeTracker` 记五列，5.5 要决策那一屏有「待复盘」「已记录结果」两桶，
+6.1 要 `DECISION_LESSON` 只在用户后来提过结果时才谈经验。这三件事在此之前是同一个样子：
+**纸面全有，运行时全空**。
+
+### 一、先量现状：schema 里有，代码里没有
+
+`git grep` 对 `HEAD` 逐列查过写侧（不是凭印象）：
+
+| 位置 | 之前 | 之后 |
+|---|---|---|
+| `DecisionOutcome.gap/rating/missedFactors/lessonCiphertext` | schema 有列（`prisma/schema.prisma:782-785`）、读侧解密（`decisions.ts:189-192`）、**写侧一处都不写** ⇒ 恒为 NULL | 派生得出才写，写不出来写 NULL |
+| 决策屏 `actual` 下方 | 只渲染整句原话 | 加上四列的标签行（`decision-panel.tsx:281`） |
+| `DecisionStatus.OUTCOME_RECORDED` | schema 有值、面板有桶、planner 拿它当 `DECISION_LESSON` 的闸门，**全仓没有一处写入** | `setOutcomeLink('link')` 写入（`decisions.ts:255-259`） |
+| `AWAITING_REVIEW`、`reviewAfter` | 同上：只有读者，没有生产者 | 本片仍然没有（见第五节） |
+
+最要紧的是最后两行合起来的意思：**`DECISION_LESSON` 这一类反思在此之前永远出不来**，
+因为它的闸门要求一个库里永远不会有的状态值。片 6-D 那批 sweep 用例是绿的，
+但它们绿在一个手工种进替身库、真实代码走不到的状态上——这是「测试绿 ≠ 功能在」的教科书样本，
+所以这片的第一件事不是加功能，是把那条死路接活。
+
+### 二、片P-1：五列怎么派生才算「用户说过」
+
+`outcome-extractor.ts` 从「整句 + 一句一条」改成「整句 + 分面」：
+
+- 整句仍然原样进 `actual`，另四列只装**原话里能认出归属标记的那一段分句**。
+  分句只在逗号、顿号、分号处切（`CLAUSE_SPLIT_RE`，`:70`），句号以上交给 `splitSentences`，不重复切。
+- `FACETS`（`:56`）的**数组顺序就是裁决顺序**：一个分句同时撞上两个标记时，排前面的那列整段拿走，
+  后面的列留空。理由写在注释里——同一句话归到两列，等于替用户把一句话说成两件事。
+  「没想到下次还要这样」因此登记为*遗漏因素*，不再被当成*经验*。
+- `比想象` 刻意不在 gap 的标记里：它后面常接「中」，而「想象中」不是预期，
+  拿它填「预期差异」是在替用户造一个他没写过的对比。
+- 一轮最多两条决策（`OUTCOME_CANDIDATES_PER_TURN = 2`）。名额给满后**不再往下看第三条决策，
+  但继续往下看已有两条的句子**：库里 `(sourceMessageId, decisionId)` 唯一 + `createMany` 的
+  `skipDuplicates`，同一条决策的第二句若单独立一行会被静默丢掉——那句话就此消失。所以后续句子并进同一条的分面。
+- 落库时派生不出来的列写 **null 而不是空串**（`decisions.ts:163-165`）：空串在界面上是一行「有内容但没字」，
+  null 才是「这句没说过」。每列一把封口，跨列搬密文解不开（片S 的口径）。
+- 展示层新纯函数 `outcome-display.ts`：`outcomeFacetRows` 只负责**null 不出行**这一件事。
+  界面上的标签顺序跟库里列名一一对应，不重排、不概括、不把四段拼成一句结论。
+
+### 三、片P-2：状态是一条往前走的链，不是一组互斥标签
+
+新叶子模块 `decision-status.ts`（之所以单独立文件：这个判断同时被召回池、结果匹配池、
+反思里程碑三处需要，让它住在 `decisions.ts` 里就得把 prisma 一起拖进纯函数那几侧）：
+
+```
+PENDING_CONFIRM → CONFIRMED → AWAITING_REVIEW / OUTCOME_RECORDED      REJECTED（岔路）
+CONFIRMED_DECISION_STATUSES = ['CONFIRMED', 'AWAITING_REVIEW', 'OUTCOME_RECORDED']
+```
+
+三处「已确认」的池子从此都用这个集合（`decisions.ts:147`、`:287`，`reflection-planner.ts:535`）。
+不这么改的后果是具体的：一条决策报过结果、推进到 `OUTCOME_RECORDED` 之后，
+反而从召回池和结果匹配池里掉出去——**用户越认真复盘，系统越忘得干净**，
+而且 6.1 要的 `DECISION_LESSON` 永远不可能触发，因为它的前置状态正是被筛掉那一个。
+
+生产者只有一处，规则要写清楚不对称：
+
+- **点头（link）推进状态**：`updateMany` 的 where 带着 `status: 'CONFIRMED'`，所以并发和重复投递只命中一次；
+  推不动也不报错——决策行可能已被删，那是另一条记录的事，不该把用户刚点下去的这次确认整体失败。
+- **解除（detach）不回退状态**：用户否认的是「这句话算不算这条决策的结果」这次归因，
+  不是「我没提过结果」，`actual` 那一列还留在库里。
+
+反思那一侧两处跟着证据走：
+
+- sweep 的结果池加了 `linkStatus: 'LINKED'`（`reflection-sweep.ts:415`）。
+  `CANDIDATE` 是系统猜的归因，`DETACHED` 是用户收回的归因，两者都不算「这个人真的报过结果」；
+  拿它们撑经验，就是总原则禁止的那种事——推断凌驾于真实表达。
+- `DECISION_LESSON` 的闸门看 `outcomeRecordedAt` 这一列**非空**（证据），
+  状态标签只管「算不算正式记录」（`reflection-planner.ts:573`）。
+  反过来说：如果把闸门写成 `status === 'OUTCOME_RECORDED'`，推进状态是这片才加上的，
+  更早那批已经报过结果的确认行会被永久关在经验之外。
+  同一条决策没点头结果时，老老实实报 `BELOW_OUTCOME_MIN`（`:593`）。
+
+### 四、十个变异探针，每一个都当场红、当场字面回滚
+
+| 探针 | 改动 | 红了谁 |
+|---|---|---|
+| P1-a | 分面去掉 `group[field] === null` 守卫 | 「同一分面只留第一次撞上的分句」1 处 |
+| P1-b | 名额满时直接返回（不再并句） | 「第三条决策不立，但已有那条还能续上分面」1 处 |
+| P1-c | 展示层 null 也出行（`text ?? ''`） | 「派生不出来的列不出行」「四列全空 ⇒ 一行都不摆」2 处 |
+| P2-1 | 删掉 link 时那段 `updateMany` | 推进状态那条 1 处 |
+| P2-2 | detach 也推进 | 「解除不推进」1 处 |
+| P2-3 | sweep 去掉 `linkStatus: 'LINKED'` | DETACHED / CANDIDATE 不算证据 2 处 |
+| P2-4 | 里程碑把 `AWAITING_REVIEW` 也排除 | 「待复盘的决策仍是里程碑」1 处 |
+| P2-5 | lesson 闸门退回 `=== 'OUTCOME_RECORDED'` | 「闸门看证据不看标签」1 处 |
+| P2-6 | 召回池退回 `status: 'CONFIRMED'` | 池子形状 + 「报过结果的决策照样能回忆起来」2 处 |
+| P2-7 | 结果匹配池退回 `status: 'CONFIRMED'` | 池子形状 + 「已记录结果、待复盘的仍然接着报结果」2 处 |
+
+P2-3 要按本来的样子记一笔：**第一次探针没作废**——那一次改动把整行的右括号吃掉了，
+整个文件解析不过，报的是「全文件 44 个用例都红」。那不算变异被咬住，那是探针自己坏了。
+改成语法合法的版本重跑，才是表里那个「恰好 2 处」。这轮的教训写在这儿：
+探针生效的前提是先确认改动是合法代码，否则测的是编译不是行为。
+
+门禁：`npx tsc --noEmit` 无输出；全量单测 `103 files / 1697 tests` 全绿。
+
+### 五、诚实的边界：这一片在真库里今天测不到
+
+一片跑完照例回真库量一次（只读、只打印计数，一行正文都不落地）：
+
+| 度量 | 值 |
+|---|---|
+| `DecisionRecord` 按状态分组 | 空（0 行） |
+| `DecisionOutcome` 按 linkStatus 分组 / 任一分面非空 | 0 / 0 |
+| `DecisionRecord.reviewAfter` 非空 | 0 |
+| `ReflectionRecord` 里 `DECISION_LESSON` | 0 |
+| `CognitivePreference` 行 / `decisionMemoryEnabled` 为真 | 1 / **0** |
+| 参照：用户 / 消息 / 记忆行 | 2 / 33 / 2 |
+
+三个结论，方向不同：
+
+1. **本片所有绿都是替身库的绿。** 真库里 0 条决策记录，所以「点头 → 推进 → 出经验」这条链
+   到今天为止一次都没真的走过。这条链的端到端验收属于「他在界面上开决策模块、说一句决定、
+   再说一句结果、点一次点头」，那是他的动作，不是我能在终端里替他做完的事。
+2. **0 行不是缺陷，是闸门。** `decisionMemoryEnabled` 默认 false、库里也没人为真——
+   认知模块默认关这条不变式在起作用。我不为了「让它有数据」去翻他的开关。
+3. **`reviewAfter` / `AWAITING_REVIEW` 仍然没有生产者**，所以面板第五桶「待复盘」今天还是空的。
+   这片没有假装填上它：写 `reviewAfter` 需要「从用户原话里解析复盘时间」，读侧还需要一条
+   `CONFIRMED && reviewAfter <= now ⇒ 待复盘`的派生。这两件是接下来的 P-3 / P-4，不在本片的完成定义里。
+
+换句话说：**这片把一条永远走不通的路修通了，但路上还没有车。**

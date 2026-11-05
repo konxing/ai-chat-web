@@ -5,6 +5,7 @@ import { ChevronDown, Scale } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
+import { outcomeFacetRows } from '@/lib/cognitive/outcome-display';
 
 /**
  * 决策记忆那一屏（任务书 5.5 的界面）。
@@ -43,6 +44,10 @@ interface OutcomeDto {
   decisionId: string;
   linkStatus: 'CANDIDATE' | 'LINKED' | 'DETACHED';
   actual: string;
+  gap: string | null;
+  rating: string | null;
+  missedFactors: string | null;
+  lesson: string | null;
   recordedAt: string;
 }
 
@@ -273,6 +278,14 @@ export function DecisionPanel() {
                                         <p className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/75">
                                           {outcome.actual}
                                         </p>
+                                        {outcomeFacetRows(outcome).map((row) => (
+                                          <div key={row.label} className="flex gap-1.5 text-[12px]">
+                                            <span className="shrink-0 text-white/40">{row.label}</span>
+                                            <span className="whitespace-pre-wrap break-words text-white/65">
+                                              {row.text}
+                                            </span>
+                                          </div>
+                                        ))}
                                         {outcome.linkStatus === 'CANDIDATE' ? (
                                           <>
                                             <p className="text-[11.5px] text-white/40">

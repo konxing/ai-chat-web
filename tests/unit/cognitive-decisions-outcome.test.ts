@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { encryptString } from '@/lib/crypto';
+import { decryptString, encryptString } from '@/lib/crypto';
 import {
   listOutcomes,
   setOutcomeLink,
@@ -12,19 +12,29 @@ const db = vi.hoisted(() => ({
   decisionFindManyWhere: null as Record<string, unknown> | null,
   outcomeCreateCalls: [] as Array<{ where?: unknown; data: Array<Record<string, unknown>> }>,
   outcomeUpdateCalls: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
-  updateCount: 0
+  decisionUpdateCalls: [] as Array<{ where: Record<string, unknown>; data: Record<string, unknown> }>,
+  updateCount: 0,
+  decisionUpdateCount: 0
 }));
+
+/** 只认这里用到的两种条件：等值和 `{ in: [...] }`。 */
+const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+  Object.entries(where).every(([key, value]) =>
+    value !== null && typeof value === 'object' && 'in' in value
+      ? (value as { in: readonly unknown[] }).in.includes(row[key])
+      : row[key] === value
+  );
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     decisionRecord: {
       findMany: (args: { where?: Record<string, unknown> }) => {
         db.decisionFindManyWhere = args.where ?? {};
-        return Promise.resolve(
-          db.decisionRows.filter((row) =>
-            Object.entries(args.where ?? {}).every(([key, value]) => row[key] === value)
-          )
-        );
+        return Promise.resolve(db.decisionRows.filter((row) => matches(row, args.where ?? {})));
+      },
+      updateMany: (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        db.decisionUpdateCalls.push(args);
+        return Promise.resolve({ count: db.decisionUpdateCount });
       }
     },
     decisionOutcome: {
@@ -33,17 +43,9 @@ vi.mock('@/lib/prisma', () => ({
         return Promise.resolve({ count: args.data.length });
       },
       findMany: (args: { where?: Record<string, unknown> }) =>
-        Promise.resolve(
-          db.outcomeRows.filter((row) =>
-            Object.entries(args.where ?? {}).every(([key, value]) => row[key] === value)
-          )
-        ),
+        Promise.resolve(db.outcomeRows.filter((row) => matches(row, args.where ?? {}))),
       findFirst: (args: { where?: Record<string, unknown> }) =>
-        Promise.resolve(
-          db.outcomeRows.find((row) =>
-            Object.entries(args.where ?? {}).every(([key, value]) => row[key] === value)
-          ) ?? null
-        ),
+        Promise.resolve(db.outcomeRows.find((row) => matches(row, args.where ?? {})) ?? null),
       updateMany: (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         db.outcomeUpdateCalls.push(args);
         return Promise.resolve({ count: db.updateCount });
@@ -53,7 +55,7 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 const topicAad = (id: string) => `decision:v1:user-a:${id}:topic`;
-const actualAad = (id: string) => `decision-outcome:v1:user-a:${id}:actual`;
+const outcomeAad = (id: string, field: string) => `decision-outcome:v1:user-a:${id}:${field}`;
 
 describe('结果跟踪（5-D）', () => {
   beforeEach(() => {
@@ -62,7 +64,9 @@ describe('结果跟踪（5-D）', () => {
     db.decisionFindManyWhere = null;
     db.outcomeCreateCalls = [];
     db.outcomeUpdateCalls = [];
+    db.decisionUpdateCalls = [];
     db.updateCount = 0;
+    db.decisionUpdateCount = 0;
   });
 
   it('只拿已确认的决策做匹配，连出来的是 CANDIDATE', async () => {
@@ -85,7 +89,11 @@ describe('结果跟踪（5-D）', () => {
       content: '结果 PostgreSQL 跑了一个月，比想象中稳。',
       sourceMessageId: 'm9'
     });
-    expect(db.decisionFindManyWhere).toMatchObject({ userId: 'user-a', status: 'CONFIRMED' });
+    const pool = (db.decisionFindManyWhere ?? {}).status as { in: readonly string[] };
+    expect(db.decisionFindManyWhere).toMatchObject({ userId: 'user-a' });
+    expect(pool.in).toEqual(expect.arrayContaining(['CONFIRMED', 'AWAITING_REVIEW', 'OUTCOME_RECORDED']));
+    expect(pool.in).not.toContain('PENDING_CONFIRM');
+    expect(pool.in).not.toContain('REJECTED');
     expect(db.outcomeCreateCalls).toHaveLength(1);
     const row = db.outcomeCreateCalls[0]!.data[0]!;
     expect(row.linkStatus).toBe('CANDIDATE');
@@ -113,6 +121,37 @@ describe('结果跟踪（5-D）', () => {
     expect(db.outcomeCreateCalls).toHaveLength(0);
   });
 
+  it('四个分面各按自己那一列加密：派生不出的写 null，搬列就解不开', async () => {
+    db.decisionRows = [
+      {
+        id: 'd1',
+        userId: 'user-a',
+        status: 'CONFIRMED',
+        topicCiphertext: encryptString('用 PostgreSQL，不上 MySQL 了', topicAad('d1'))
+      }
+    ];
+    await writeOutcomeCandidates({
+      userId: 'user-a',
+      content: '结果 PostgreSQL 很稳，真香，没想到备份这么麻烦，下次一定先估运维。',
+      sourceMessageId: 'm9'
+    });
+    const row = db.outcomeCreateCalls[0]!.data[0]!;
+    const id = row.id as string;
+
+    expect(decryptString(row.actualCiphertext as string, outcomeAad(id, 'actual'))).toBe(
+      '结果 PostgreSQL 很稳，真香，没想到备份这么麻烦，下次一定先估运维'
+    );
+    expect(decryptString(row.ratingCiphertext as string, outcomeAad(id, 'rating'))).toBe('真香');
+    expect(decryptString(row.missedFactorsCiphertext as string, outcomeAad(id, 'missedFactors'))).toBe(
+      '没想到备份这么麻烦'
+    );
+    expect(decryptString(row.lessonCiphertext as string, outcomeAad(id, 'lesson'))).toBe('下次一定先估运维');
+    // 这句里没有「预期差异」的说法——派生不出就留 null，不拿别的话凑那一列。
+    expect(row.gapCiphertext).toBeNull();
+    // 每列一把封口：把 rating 那串搬到 actual 上解不开。
+    expect(() => decryptString(row.ratingCiphertext as string, outcomeAad(id, 'actual'))).toThrow();
+  });
+
   it('结果列表按用户和决策过滤并解密', async () => {
     db.outcomeRows = [
       {
@@ -120,7 +159,7 @@ describe('结果跟踪（5-D）', () => {
         userId: 'user-a',
         decisionId: 'd1',
         linkStatus: 'CANDIDATE',
-        actualCiphertext: encryptString('跑了一个月很稳', actualAad('o1')),
+        actualCiphertext: encryptString('跑了一个月很稳', outcomeAad('o1', 'actual')),
         gapCiphertext: null,
         ratingCiphertext: null,
         missedFactorsCiphertext: null,
@@ -142,7 +181,7 @@ describe('结果跟踪（5-D）', () => {
         userId: 'user-a',
         decisionId: 'd1',
         linkStatus: 'CANDIDATE',
-        actualCiphertext: encryptString('跑了一个月很稳', actualAad('o1')),
+        actualCiphertext: encryptString('跑了一个月很稳', outcomeAad('o1', 'actual')),
         gapCiphertext: null,
         ratingCiphertext: null,
         missedFactorsCiphertext: null,
@@ -162,6 +201,103 @@ describe('结果跟踪（5-D）', () => {
     expect(db.outcomeUpdateCalls[0]!.data.linkStatus).toBe('LINKED');
     await setOutcomeLink('user-a', 'd1', 'o1', 'detach');
     expect(db.outcomeUpdateCalls[1]!.data.linkStatus).toBe('DETACHED');
+  });
+
+  it('确认关联把决策推成 OUTCOME_RECORDED——不然 DECISION_LESSON 永远没有依据', async () => {
+    db.decisionRows = [
+      {
+        id: 'd1',
+        userId: 'user-a',
+        status: 'CONFIRMED',
+        topicCiphertext: encryptString('用 PostgreSQL，不上 MySQL 了', topicAad('d1'))
+      }
+    ];
+    db.outcomeRows = [
+      {
+        id: 'o1',
+        userId: 'user-a',
+        decisionId: 'd1',
+        linkStatus: 'CANDIDATE',
+        actualCiphertext: encryptString('跑了一个月很稳', outcomeAad('o1', 'actual')),
+        gapCiphertext: null,
+        ratingCiphertext: null,
+        missedFactorsCiphertext: null,
+        lessonCiphertext: null,
+        sourceMessageId: 'm9',
+        recordedAt: new Date('2026-11-04T00:00:00Z')
+      }
+    ];
+    db.updateCount = 1;
+    db.decisionUpdateCount = 1;
+    await setOutcomeLink('user-a', 'd1', 'o1', 'link');
+    expect(db.decisionUpdateCalls).toHaveLength(1);
+    expect(db.decisionUpdateCalls[0]!.where).toMatchObject({
+      id: 'd1',
+      userId: 'user-a',
+      status: 'CONFIRMED'
+    });
+    expect(db.decisionUpdateCalls[0]!.data).toEqual({ status: 'OUTCOME_RECORDED' });
+  });
+
+  it('解除归因不回退决策状态：用户否认的是归因，不是「没提过结果」', async () => {
+    db.outcomeRows = [
+      {
+        id: 'o1',
+        userId: 'user-a',
+        decisionId: 'd1',
+        linkStatus: 'CANDIDATE',
+        actualCiphertext: encryptString('跑了一个月很稳', outcomeAad('o1', 'actual')),
+        gapCiphertext: null,
+        ratingCiphertext: null,
+        missedFactorsCiphertext: null,
+        lessonCiphertext: null,
+        sourceMessageId: 'm9',
+        recordedAt: new Date('2026-11-04T00:00:00Z')
+      }
+    ];
+    db.updateCount = 1;
+    await setOutcomeLink('user-a', 'd1', 'o1', 'detach');
+    expect(db.decisionUpdateCalls).toHaveLength(0);
+  });
+
+  it('决策行推不动（已被删）不拦结果链接本身：那是另一条记录的事', async () => {
+    db.outcomeRows = [
+      {
+        id: 'o1',
+        userId: 'user-a',
+        decisionId: 'd1',
+        linkStatus: 'CANDIDATE',
+        actualCiphertext: encryptString('跑了一个月很稳', outcomeAad('o1', 'actual')),
+        gapCiphertext: null,
+        ratingCiphertext: null,
+        missedFactorsCiphertext: null,
+        lessonCiphertext: null,
+        sourceMessageId: 'm9',
+        recordedAt: new Date('2026-11-04T00:00:00Z')
+      }
+    ];
+    db.decisionRows = [];
+    db.updateCount = 1;
+    db.decisionUpdateCount = 0;
+    await expect(setOutcomeLink('user-a', 'd1', 'o1', 'link')).resolves.toBeDefined();
+  });
+
+  it('已记录结果、待复盘的决策仍然接着报结果', async () => {
+    db.decisionRows = [
+      {
+        id: 'd9',
+        userId: 'user-a',
+        status: 'OUTCOME_RECORDED',
+        topicCiphertext: encryptString('用 PostgreSQL，不上 MySQL 了', topicAad('d9'))
+      }
+    ];
+    await writeOutcomeCandidates({
+      userId: 'user-a',
+      content: '结果 PostgreSQL 后来踩了个大坑。',
+      sourceMessageId: 'm10'
+    });
+    expect(db.outcomeCreateCalls).toHaveLength(1);
+    expect(db.outcomeCreateCalls[0]!.data[0]!.decisionId).toBe('d9');
   });
 
   it('行不存在 404，不是候选 409', async () => {

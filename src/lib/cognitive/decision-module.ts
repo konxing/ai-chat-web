@@ -40,7 +40,7 @@ export async function writeDecisionCandidates(turn: CognitiveTurn): Promise<void
   await prisma.decisionRecord.createMany({ data, skipDuplicates: true });
 }
 
-/** 读侧只认 `CONFIRMED` 的行（`decisions.ts:252`）：没确认过的候选一个字节都不进上下文。 */
+/** 读侧只认「正式决策记录」那三个状态（`decision-status.ts`）：没确认过的候选一个字节都不进上下文。 */
 export const decisionModule: CognitiveModule = {
   key: 'decisionMemory',
   read: (turn) => readDecisionContext({ userId: turn.userId, query: turn.content }),

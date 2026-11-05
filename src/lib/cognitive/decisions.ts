@@ -5,6 +5,7 @@ import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { getCognitivePreferences } from './preferences';
+import { CONFIRMED_DECISION_STATUSES } from './decision-status';
 import { scoreByKeyword } from './retrieval';
 import type { CognitiveBlock } from './manager';
 import { matchOutcomes } from './outcome-extractor';
@@ -15,9 +16,13 @@ import { matchOutcomes } from './outcome-extractor';
  * 密文口径和记忆一致但更严一格：AAD 里除了 userId 和 recordId 还带字段名，
  * 于是把 topic 的密文搬到 choice 列上会解不开——列和列之间也不能互换。
  *
- * 「正式决策记录」在库里的定义是 status = CONFIRMED（7.4 门槛 8）：
+ * 「正式决策记录」在库里的定义是 status ∈ CONFIRMED_DECISION_STATUSES（7.4 门槛 8）：
  * 确认动作只允许从 PENDING_CONFIRM 出发，updateMany 的 where 里带着这个状态，
  * 所以并发两次确认只有第一次命中，第二次落到 409 而不是把已确认的行再改一遍。
+ *
+ * 状态是一条往前走的链：CONFIRMED →（用户给这条决策报过结果并点头）OUTCOME_RECORDED。
+ * 所有「已确认」的池子——召回、结果匹配、门槛 8 的计数——都得连着后面的阶段一起算，
+ * 否则一条决策越有价值、报过结果之后反而越容易被悄悄筛出去。
  */
 export const DECISION_LIST_MAX_ROWS = 100;
 
@@ -139,7 +144,7 @@ export async function writeOutcomeCandidates(input: {
 }): Promise<void> {
   if (!input.sourceMessageId) return;
   const rows = await prisma.decisionRecord.findMany({
-    where: { userId: input.userId, status: 'CONFIRMED' }
+    where: { userId: input.userId, status: { in: [...CONFIRMED_DECISION_STATUSES] } }
   });
   if (rows.length === 0) return;
   const matches = matchOutcomes(
@@ -153,12 +158,20 @@ export async function writeOutcomeCandidates(input: {
   const sourceMessageId = input.sourceMessageId;
   const data = matches.map((match) => {
     const id = randomUUID();
+    // 派生不出来的分面写 null，不写空串：空串在界面上是一行「有内容但没字」，
+    // null 才是「这句没说过」。每列一把封口，把 rating 的密文搬到 actual 列上解不开。
+    const facet = (field: 'gap' | 'rating' | 'missedFactors' | 'lesson', value: string | null) =>
+      value === null ? null : encryptString(value, outcomeAadFor(input.userId, id, field));
     return {
       id,
       userId: input.userId,
       decisionId: match.decisionId,
       linkStatus: 'CANDIDATE' as const,
       actualCiphertext: encryptString(match.actual, outcomeAadFor(input.userId, id, 'actual')),
+      gapCiphertext: facet('gap', match.gap),
+      ratingCiphertext: facet('rating', match.rating),
+      missedFactorsCiphertext: facet('missedFactors', match.missedFactors),
+      lessonCiphertext: facet('lesson', match.lesson),
       sourceMessageId
     };
   });
@@ -213,7 +226,17 @@ export async function getDecisionWithOutcomes(
 }
 
 export type OutcomeLinkAction = 'link' | 'detach';
-/** 候选链接的确认/解除。和决策确认同构：只从 CANDIDATE 出发，where 里带着状态。 */
+/**
+ * 候选链接的确认/解除。和决策确认同构：只从 CANDIDATE 出发，where 里带着状态。
+ *
+ * 点头（link）同时把那条决策推到 OUTCOME_RECORDED——这一步是 6.1 DECISION_LESSON 唯一的依据，
+ * 库里此前没有任何一处写过这个状态，那条反思类型因此永远出不来。推的时候 where 带着
+ * `status: CONFIRMED`，所以并发和重复投递都只命中一次，推不动也不报错：决策行可能已被删，
+ * 那是另一条记录的事，不该把用户刚点下去的这次确认整体失败。
+ *
+ * 解除（detach）不回退状态。用户否认的是「这句话算不算这条决策的结果」这次归因，
+ * 不是「我没提过结果」——实际结果那一列还留在库里。
+ */
 export async function setOutcomeLink(
   userId: string,
   decisionId: string,
@@ -228,6 +251,12 @@ export async function setOutcomeLink(
     const existing = await prisma.decisionOutcome.findFirst({ where: { id: outcomeId, userId } });
     if (!existing) throw new ApiError(404, 'OUTCOME_NOT_FOUND', '这条结果记录不存在');
     throw new ApiError(409, 'OUTCOME_NOT_CANDIDATE', '这条结果已经处理过了，不能再确认或解除');
+  }
+  if (action === 'link') {
+    await prisma.decisionRecord.updateMany({
+      where: { id: decisionId, userId, status: 'CONFIRMED' },
+      data: { status: 'OUTCOME_RECORDED' }
+    });
   }
   const row = await prisma.decisionOutcome.findFirst({ where: { id: outcomeId, userId } });
   return toOutcomeDto(row!);
@@ -255,7 +284,7 @@ export async function readDecisionContext(turn: {
 }): Promise<CognitiveBlock[]> {
   if (turn.query.trim() === '') return [];
   const rows = await prisma.decisionRecord.findMany({
-    where: { userId: turn.userId, status: 'CONFIRMED' },
+    where: { userId: turn.userId, status: { in: [...CONFIRMED_DECISION_STATUSES] } },
     orderBy: { createdAt: 'desc' },
     take: DECISION_RECALL_POOL
   });

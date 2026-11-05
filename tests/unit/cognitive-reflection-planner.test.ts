@@ -387,6 +387,52 @@ describe('MILESTONE：一个里程碑必须有一个完成的样子', () => {
     expect(milestone.timePrecision).toBe('TIMESTAMP');
   });
 
+  it('报过结果的决策仍是里程碑：状态是往前走的链，不是互斥的标签', () => {
+    const decisions: ReflectableDecision[] = [
+      {
+        id: 'd1',
+        status: 'OUTCOME_RECORDED',
+        topic: '我决定买这块显卡',
+        decidedAt: day(50),
+        confirmedAt: day(52),
+        outcomeRecordedAt: day(80)
+      }
+    ];
+    const plan = planReflections({ now: NOW, memories: [], decisions });
+    const milestone = find(plan.findings, 'MILESTONE')!;
+    expect(milestone.supportDecisionIds).toEqual(['d1']);
+  });
+
+  it('待复盘的决策仍是里程碑', () => {
+    const decisions: ReflectableDecision[] = [
+      {
+        id: 'd1',
+        status: 'AWAITING_REVIEW',
+        topic: '我决定买这块显卡',
+        decidedAt: day(50),
+        confirmedAt: day(52),
+        outcomeRecordedAt: null
+      }
+    ];
+    const plan = planReflections({ now: NOW, memories: [], decisions });
+    expect(find(plan.findings, 'MILESTONE')?.supportDecisionIds).toEqual(['d1']);
+  });
+
+  it('被否掉的决策不是里程碑', () => {
+    const decisions: ReflectableDecision[] = [
+      {
+        id: 'd1',
+        status: 'REJECTED',
+        topic: '我决定买这块显卡',
+        decidedAt: day(50),
+        confirmedAt: null,
+        outcomeRecordedAt: null
+      }
+    ];
+    const plan = planReflections({ now: NOW, memories: [], decisions });
+    expect(find(plan.findings, 'MILESTONE')).toBeUndefined();
+  });
+
   it('待确认的决策不是里程碑：门槛 8 说没确认的连决策都还不算', () => {
     const plan = planReflections({
       now: NOW,
@@ -440,6 +486,50 @@ describe('DECISION_LESSON：只有记下结果了才谈经验', () => {
         {
           id: 'd1',
           status: 'CONFIRMED',
+          topic: '我决定等降价再买这块显卡',
+          decidedAt: day(50),
+          confirmedAt: day(52),
+          outcomeRecordedAt: null
+        }
+      ]
+    });
+    expect(find(plan.findings, 'DECISION_LESSON')).toBeUndefined();
+    expect(find(plan.insufficient, 'DECISION_LESSON')!.reason).toBe('BELOW_OUTCOME_MIN');
+  });
+
+  it('闸门看的是证据不是标签：状态还停在 CONFIRMED、结果已点头的旧行照样出经验', () => {
+    // 推进状态是这一片才加上的，库里更早的确认行不会自己补上 OUTCOME_RECORDED。
+    // 只认标签就把它们永远关在经验之外——而那恰恰是用户点过头的一份结果。
+    const plan = planReflections({
+      now: NOW,
+      memories: [],
+      decisions: [
+        {
+          id: 'd1',
+          status: 'CONFIRMED',
+          topic: '我决定等降价再买这块显卡',
+          decidedAt: day(50),
+          confirmedAt: day(52),
+          outcomeRecordedAt: day(80)
+        }
+      ]
+    });
+    const lesson = find(plan.findings, 'DECISION_LESSON')!;
+    expect(lesson.supportDecisionIds).toEqual(['d1']);
+    expect(lesson.observationSpanDays).toBe(28);
+    expect(find(plan.insufficient, 'DECISION_LESSON')).toBeUndefined();
+  });
+
+  it('结果被收回了的决策也报「证据不足」，不许两头都不吭声', () => {
+    // 状态是点头那一刻推上去的，之后用户把归因摘掉就不回来（他否认的是归因，不是「没提过结果」）。
+    // 于是这一行可能是 OUTCOME_RECORDED + outcomeRecordedAt 为空：说不出经验，但那句话得落进证据不足。
+    const plan = planReflections({
+      now: NOW,
+      memories: [],
+      decisions: [
+        {
+          id: 'd1',
+          status: 'OUTCOME_RECORDED',
           topic: '我决定等降价再买这块显卡',
           decidedAt: day(50),
           confirmedAt: day(52),

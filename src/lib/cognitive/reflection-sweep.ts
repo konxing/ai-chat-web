@@ -409,7 +409,11 @@ async function loadPool(userId: string) {
     orderBy: { createdAt: 'desc' },
     take: REFLECTION_POOL_LIMIT
   });
-  const outcomeRows = await prisma.decisionOutcome.findMany({ where: { userId } });
+  // 只算用户点过头的那一份（LINKED）：CANDIDATE 是系统猜的归因，DETACHED 是用户收回的归因，
+  // 两者都不算「这个人真的报过结果」。拿它们撑 DECISION_LESSON，就是推断凌驾于真实表达。
+  const outcomeRows = await prisma.decisionOutcome.findMany({
+    where: { userId, linkStatus: 'LINKED' }
+  });
 
   const earliestOutcome = new Map<string, Date>();
   for (const row of outcomeRows) {
