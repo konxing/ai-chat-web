@@ -31,6 +31,13 @@ const db = vi.hoisted(() => ({
   access: [] as Row[],
   /** 每张表上一次 findMany 交回给代码的那批行——用它断言「只读了 id，没读正文」。 */
   returned: {} as Record<string, Row[]>,
+  /**
+   * 事务客户端上 memoryItem.findMany 收到的 where，原样记一份。
+   * 记它而不是只数剩下的行，是因为「删除条件里带 userId」这一道兜得住结果、兜不住读：
+   * 只把 userId 从那条 findMany 上摘掉时，别人的行会被读进这个进程，而 deleteMany 仍然只删自己的，
+   * 于是「别人的行还在」这条断言照样绿。跨用户读要的正是这一份物证。
+   */
+  readFilters: [] as Row[],
   txOps: [] as string[],
   topOps: [] as string[],
   commits: 0,
@@ -183,6 +190,7 @@ vi.mock('@/lib/prisma', () => ({
           },
           findMany: ({ where }: { where: unknown }) => {
             db.txOps.push('find');
+            db.readFilters.push(where as Row);
             return Promise.resolve(matching(where).map((row) => ({ ...row })));
           },
           deleteMany: ({ where }: { where: unknown }) => Promise.resolve(deleteMany(where, db.txOps))
@@ -284,6 +292,7 @@ beforeEach(() => {
   db.messages = [];
   db.access = [];
   db.returned = {};
+  db.readFilters = [];
   db.txOps = [];
   db.topOps = [];
   db.commits = 0;
@@ -1181,5 +1190,213 @@ describe('忘记要连带清掉检索访问痕迹（任务书 7.1）', () => {
     expect(result).toMatchObject({ purged: 0 });
     expect(db.txOps).not.toContain('access_delete');
     expect(db.access).toHaveLength(1);
+  });
+});
+
+/**
+ * 「忘记某个主题」（任务书 7.3 的第二臂）。
+ *
+ * 这里的「主题」= `MemoryItem.context` 那一列（七个值，对外小写驼峰、入库大写枚举）。
+ * 它是库里唯一同时有逐情境策略行（`MemoryPolicy @@id([userId, context])`）和写侧消费者的
+ * 分类轴，所以「忘记某个主题」落在这里才既删得掉、又拦得住下一次写入。
+ *
+ * 和「忘记这次对话」的三处不同，每一处都有用例钉着：
+ * 一、不扫决策也不读消息行——决策行上没有 context 也没有 chatId，这条路根本牵不到它；
+ * 二、不撤任何认知任务——一条欠账是一整轮话，那一轮会产出哪几个主题还没定，
+ *     按主题撤账会把同一轮里属于别的情境的说法一起抹掉，那是删用户没说要忘的东西；
+ * 三、response 文案得明说「决策记录不在范围内」，不能让用户以为一次主题忘记清掉了这轮做过的选择。
+ */
+describe('按主题忘记（任务书 7.3 的「忘记某个主题」）', () => {
+  it('只删这个主题的行：别的话题、没有来源对话的、别人的都留着', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.rows.set('mem-learn-2', row('mem-learn-2', { context: 'LEARNING', chatId: null }));
+    db.rows.set('mem-goal', row('mem-goal', { context: 'PERSONAL_GOAL' }));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    expect(result).toMatchObject({ purged: 2 });
+    expect([...db.rows.keys()]).toEqual(['mem-goal']);
+  });
+
+  it('对外是小写驼峰、查库是大写枚举：转换只在这一处做，不许把应用层的值原样丢进 where', async () => {
+    db.rows.set('mem-learn', row('learn-1', { context: 'LEARNING' }));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    // 替身求值器按严格相等比 where，原样把 'learning' 丢进去就一行都匹配不上 ⇒ purged 会是 0。
+    expect(result).toMatchObject({ purged: 1 });
+  });
+
+  it('同名主题的别人的行一条都不动：条件里丢 userId 就是跨用户删数据', async () => {
+    db.rows.set('mem-mine', row('mem-mine', { context: 'LEARNING' }));
+    db.rows.set('mem-other', row('mem-other', { context: 'LEARNING', userId: OTHER }, '我每周三晚上上课'));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    expect(result).toMatchObject({ purged: 1 });
+    expect([...db.rows.keys()]).toEqual(['mem-other']);
+    // 只断言「删不掉」不够：真正那句 `where: { userId, context }` 丢了 userId 时，
+    // deleteMany 上还有第二道 userId 条件兜住结果，别人的行照样留着，这条断言却全绿。
+    // 而别人的密文已经被读进这个进程了——跨用户读要单独立一道，看的是交给代码的那份条件。
+    expect(db.readFilters).toHaveLength(1);
+    for (const filter of db.readFilters) {
+      expect(filter).toMatchObject({ userId: USER, context: 'LEARNING' });
+    }
+    // 排除表里一条都不许是别人的正文：AAD 绑的是行自己的 userId，读漏了也解不开，
+    // 但「解不开所以跳过」不该变成隔离的依靠，所以上面那道是主，这一道是兜。
+    expect(db.exclusions).toHaveLength(1);
+    for (const exclusion of db.exclusions) {
+      expect(exclusion).toMatchObject({ userId: USER });
+      expect(String(exclusion.contentCiphertext)).not.toContain('每周三');
+    }
+  });
+
+  it('不是七个值之一的主题直接拒：不给「忘记一个应用不认识的主题」留一条静默返回 0 的路', async () => {
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await expect(purgeMemoriesByContext('everything' as never, USER)).rejects.toThrow();
+    expect(db.commits).toBe(0);
+  });
+
+  it('跨主题的版本链摘干净：新版本挂在别的话题里，边保住、只丢掉指向已删内容的指针', async () => {
+    db.rows.set('mem-old', row('mem-old', { context: 'LEARNING' }));
+    db.rows.set('mem-new', row('mem-new', { context: 'PERSONAL_GOAL' }));
+    db.edges = [edge('edge-1', 'mem-new', 'mem-old')];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.edges).toHaveLength(1);
+    expect(db.edges[0]).toMatchObject({ id: 'edge-1', memoryId: 'mem-new', previousId: null });
+  });
+
+  it('这个主题一条都没有 ⇒ 返回 0，一张表的写都不发', async () => {
+    db.rows.set('mem-goal', row('mem-goal', { context: 'PERSONAL_GOAL' }));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    expect(result).toMatchObject({ purged: 0, contexts: [] });
+    expect(db.txOps.filter((op) => op === 'delete' || op === 'detach')).toEqual([]);
+  });
+
+  it('不扫决策也不读消息行：按主题忘记压根不该经过会话那条路径', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.messages = [{ id: 'msg-1', chatId: 'chat-1' }];
+    db.decisions = [{ id: 'dec-1', userId: USER, sourceMessageId: 'msg-1' }];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.txOps).not.toContain('message_find');
+    expect(db.txOps).not.toContain('decision_delete');
+    // 决策行留着不是漏了，是这一屏的范围本来就到不了它：决策行上没有 context，也没有 chatId。
+    expect(db.decisions).toHaveLength(1);
+  });
+
+  it('不撤任何认知任务：一条欠账是一整轮话，那轮里的别的主题不该陪着死', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' })];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.txOps).not.toContain('task');
+    expect(db.tasks).toHaveLength(2);
+  });
+
+  it('不碰原会话和聊天记录：这个替身客户端上根本没有 chat 那张表，顺手删会话的实现会当场抛', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.messages = [{ id: 'msg-1', chatId: 'chat-1' }];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await expect(purgeMemoriesByContext('learning', USER)).resolves.toMatchObject({ purged: 1 });
+
+    expect(db.txOps).not.toContain('message_delete');
+    expect(db.messages).toHaveLength(1);
+  });
+
+  it('每一条被删正文各建一条排除：主题忘记也要挡住后台把原句再记回来', async () => {
+    db.rows.set('mem-a', row('mem-a', { context: 'LEARNING' }, '我在准备英语考试'));
+    db.rows.set('mem-b', row('mem-b', { context: 'LEARNING' }, '我每周三晚上上课'));
+    db.rows.set('mem-c', row('mem-c', { context: 'PERSONAL_GOAL' }, '我在减脂'));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.exclusions).toHaveLength(2);
+    for (const exclusion of db.exclusions) {
+      expect(exclusion).toMatchObject({ userId: USER });
+      expect(exclusion).not.toHaveProperty('content');
+      expect(String(exclusion.contentCiphertext)).not.toContain('英语');
+    }
+  });
+
+  it('清掉被删记忆的检索痕迹，别的主题的轮次留着', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.rows.set('mem-goal', row('mem-goal', { context: 'PERSONAL_GOAL' }));
+    db.access = [
+      accessTurn('acc-go', { memoryIds: ['mem-learn'] }),
+      accessTurn('acc-stay', { memoryIds: ['mem-goal'] }),
+      accessTurn('acc-other-user', { userId: OTHER, memoryIds: ['mem-learn'] })
+    ];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.access.map((turn) => turn.id)).toEqual(['acc-stay', 'acc-other-user']);
+  });
+
+  it('学习证据只记这一个情境一条：删掉三条学习记忆不等于「他反复表达了三次」', async () => {
+    db.rows.set('mem-1', row('mem-1', { context: 'LEARNING' }));
+    db.rows.set('mem-2', row('mem-2', { context: 'LEARNING', chatId: 'chat-2' }));
+    db.rows.set('mem-3', row('mem-3', { context: 'LEARNING', chatId: null }));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    expect(result).toMatchObject({ contexts: ['learning'] });
+    expect(db.signals).toHaveLength(1);
+    expect(db.signals[0]).toMatchObject({ userId: USER, context: 'LEARNING' });
+  });
+
+  it('策略学习关着时一条证据都不攒，但派生清理一样不少', async () => {
+    db.adaptiveEnabled = false;
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.access = [accessTurn('acc-1', { memoryIds: ['mem-learn'] })];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.signals).toEqual([]);
+    expect(db.rows.size).toBe(0);
+    expect(db.access).toEqual([]);
+  });
+
+  it('引用了被删记忆的洞察整条消失，且在删记忆之前找', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    db.reflections = [{ id: 'ref-1', userId: USER, dedupKey: 'k' }];
+    db.citations = [{ id: 'cit-1', userId: USER, reflectionId: 'ref-1', memoryId: 'mem-learn' }];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.reflections).toEqual([]);
+    expect(db.citations).toEqual([]);
+    expect(db.txOps.indexOf('citation_find')).toBeLessThan(db.txOps.indexOf('delete'));
+  });
+
+  it('删除与派生清理在同一个事务里：不许出现「记忆删了、排除留在原地等下一次提交」', async () => {
+    db.rows.set('mem-learn', row('mem-learn', { context: 'LEARNING' }));
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('learning', USER);
+
+    expect(db.commits).toBe(1);
+    expect(db.topOps).toEqual([]);
+    expect(db.txOps).toContain('exclude');
   });
 });

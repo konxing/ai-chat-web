@@ -23,6 +23,7 @@ const db = vi.hoisted(() => ({
   restoreCalls: [] as Array<{ id: string; userId: string }>,
   purgeCalls: [] as Array<{ id: string; userId: string }>,
   purgeChatCalls: [] as Array<{ chatId: string; userId: string }>,
+  purgeContextCalls: [] as Array<{ context: string; userId: string }>,
   purgeAllCalls: [] as string[],
   learnCalls: [] as Array<{ userId: string; contexts: string[] }>,
   learned: [] as string[],
@@ -159,6 +160,18 @@ vi.mock('@/lib/cognitive/forgetting', () => ({
     }
     return Promise.resolve({ purged: count, contexts: [...contexts] });
   },
+  purgeMemoriesByContext: (context: string, userId: string) => {
+    db.purgeContextCalls.push({ context, userId });
+    let count = 0;
+    for (const [key, row] of [...db.stored]) {
+      if (row.userId === userId && row.context === context) {
+        db.stored.delete(key);
+        count += 1;
+      }
+    }
+    // 主题忘记只把这一个情境交给学习层，而且真删到行才交——和「不扫决策」是同一句范围声明。
+    return Promise.resolve({ purged: count, contexts: count > 0 ? [context] : [] });
+  },
   purgeAllMemories: (userId: string) => {
     db.purgeAllCalls.push(userId);
     let count = 0;
@@ -287,6 +300,7 @@ beforeEach(() => {
   db.restoreCalls = [];
   db.purgeCalls = [];
   db.purgeChatCalls = [];
+  db.purgeContextCalls = [];
   db.purgeAllCalls = [];
   db.learnCalls = [];
   db.learned = [];
@@ -894,6 +908,111 @@ describe('批量永久删除', () => {
 
     expect(response.status).toBe(401);
     expect(db.purgeAllCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
+  });
+});
+
+/**
+ * ③ 按主题忘记（任务书 7.3 的第二臂）。
+ *
+ * 「主题」= `MemoryItem.context` 那七个值，不是自由文本：这一屏只有七个可对账的桶，
+ * 每个桶都同时有逐情境策略行和写侧消费者。所以 context 走和策略屏同一套枚举校验，
+ * 传进来一个应用不认识的主题值就是 400，而不是「删了 0 条」的假成功。
+ */
+describe('按主题忘记（scope=context）', () => {
+  beforeEach(() => {
+    store(memoryDto({ id: 'mem-1', context: 'technicalProject', chatId: 'chat-1' }));
+    store(memoryDto({ id: 'mem-2', context: 'learning', chatId: 'chat-1' }));
+    store(memoryDto({ id: 'mem-3', context: 'learning', chatId: 'chat-2' }));
+    store(memoryDto({ id: 'mem-4', context: 'learning', userId: 'user-b', chatId: 'chat-3' }));
+  });
+
+  it('scope=context 只删这个情境的行，别的情境和别人的不动', async () => {
+    const { response, payload } = await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(response.status).toBe(200);
+    expect(payload.data).toEqual({ purged: 2, learned: [] });
+    expect(db.purgeContextCalls).toEqual([{ context: 'learning', userId: 'user-a' }]);
+    expect([...db.stored.keys()].sort()).toEqual(['user-a|mem-1', 'user-b|mem-4']);
+  });
+
+  it('审计记下按主题删除的范围：动作、情境名和条数，没有正文', async () => {
+    await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(db.audits[0]).toMatchObject({
+      action: 'user.memory_purge_by_context',
+      targetType: 'context',
+      targetId: 'learning',
+      after: { purged: 2 }
+    });
+    expect(JSON.stringify(db.audits[0])).not.toContain('我在用 Prisma');
+  });
+
+  it('缺 context 时 400，一次删除都不发', async () => {
+    const { response, payload } = await call('DELETE', '', undefined, '?scope=context');
+
+    expect(response.status).toBe(400);
+    expect(payload.error.code).toBe('VALIDATION_ERROR');
+    expect(db.purgeContextCalls).toEqual([]);
+    expect(db.stored.size).toBe(4);
+  });
+
+  it('主题不是七个值之一时 400：不许把「应用不认识的主题」过成一次删了 0 条的成功', async () => {
+    const { response } = await call('DELETE', '', undefined, '?scope=context&context=everything');
+
+    expect(response.status).toBe(400);
+    expect(db.purgeContextCalls).toEqual([]);
+    expect(db.stored.size).toBe(4);
+  });
+
+  it('按主题自己一个限流桶，和清空、按会话互不占用额度', async () => {
+    await call('DELETE', '', undefined, '?scope=all');
+    await call('DELETE', '', undefined, '?scope=chat&chatId=chat-1');
+    const { response } = await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(response.status).toBe(200);
+    expect(db.limiterCalls.map((entry) => entry.key)).toEqual([
+      'memory-purge-all:user-a',
+      'memory-purge-chat:user-a',
+      'memory-purge-context:user-a'
+    ]);
+    expect(db.limiterCalls[2]).toMatchObject({ limit: 20, windowMs: 60 * 60 * 1000 });
+  });
+
+  it('限流挡下时不删、不学、不写审计', async () => {
+    db.limiterOk = false;
+
+    const { response } = await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(response.status).toBe(429);
+    expect(db.purgeContextCalls).toEqual([]);
+    expect(db.learnCalls).toEqual([]);
+    expect(db.audits).toEqual([]);
+  });
+
+  it('删到的情境交给学习层：主题忘记只学这一个情境', async () => {
+    db.learned = ['learning'];
+
+    const { payload } = await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(payload.data).toEqual({ purged: 2, learned: ['learning'] });
+    expect(db.learnCalls).toEqual([{ userId: 'user-a', contexts: ['learning'] }]);
+  });
+
+  it('一条都没删到时学习层收到空数组：没删掉东西就不该收紧任何情境', async () => {
+    const { payload } = await call('DELETE', '', undefined, '?scope=context&context=personalGoal');
+
+    expect(payload.data).toEqual({ purged: 0, learned: [] });
+    expect(db.learnCalls).toEqual([{ userId: 'user-a', contexts: [] }]);
+  });
+
+  it('未登录时 401，不删也不写审计', async () => {
+    db.authThrows = true;
+
+    const { response } = await call('DELETE', '', undefined, '?scope=context&context=learning');
+
+    expect(response.status).toBe(401);
+    expect(db.purgeContextCalls).toEqual([]);
     expect(db.audits).toEqual([]);
   });
 });

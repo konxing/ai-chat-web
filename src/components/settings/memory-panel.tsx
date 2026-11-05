@@ -74,6 +74,11 @@ export function MemoryPanel() {
   const { push } = useToast();
   const { confirm } = useConfirm();
   const [enabled, setEnabled] = useState<boolean | null>(null);
+  /**
+   * 「暂停长期记忆写入」（任务书 7.3）。和总开关同一个 null 口径：读不出来就显示「状态未知」，
+   * 不许假装它是没暂停的——那会让用户在一次失败的读取之后以为自己还在记录。
+   */
+  const [paused, setPaused] = useState<boolean | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
 
   const [memories, setMemories] = useState<MemoryDto[]>([]);
@@ -156,8 +161,11 @@ export function MemoryPanel() {
     void loadExclusions();
     void (async () => {
       try {
-        const data = await apiFetch<{ preferences: { memoryEnabled: boolean } }>('/api/account/cognitive');
+        const data = await apiFetch<{ preferences: { memoryEnabled: boolean; memoryWritePaused: boolean } }>(
+          '/api/account/cognitive'
+        );
         setEnabled(data.preferences.memoryEnabled);
+        setPaused(data.preferences.memoryWritePaused);
       } catch {
         // 开关读不到就保持 null：界面显示「状态未知」，而不是假装它是关着的。
       }
@@ -168,12 +176,38 @@ export function MemoryPanel() {
     if (enabled === null || flagBusy) return;
     setFlagBusy(true);
     try {
-      const data = await apiFetch<{ preferences: { memoryEnabled: boolean } }>('/api/account/cognitive', {
-        method: 'PATCH',
-        json: { memoryEnabled: !enabled }
-      });
+      const data = await apiFetch<{ preferences: { memoryEnabled: boolean; memoryWritePaused: boolean } }>(
+        '/api/account/cognitive',
+        { method: 'PATCH', json: { memoryEnabled: !enabled } }
+      );
       setEnabled(data.preferences.memoryEnabled);
+      // 两个控件读的是同一份偏好行，切完一个必须跟着另一个的最新值走，否则界面会出现
+      // 「总开关已关闭 + 暂停已恢复」这种库里并不存在的组合。
+      setPaused(data.preferences.memoryWritePaused);
       push(data.preferences.memoryEnabled ? '长期记忆已打开' : '长期记忆已关闭');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setFlagBusy(false);
+    }
+  }
+
+  /**
+   * 暂停长期记忆写入（任务书 7.3 的第五臂）。它和上面那个总开关不是一件事，所以分开摆：
+   * 关掉总开关是「这个模块不工作」——读侧也不再注入；暂停写入是「还记不记新东西」——
+   * 已记住的照常带入对话。这句差别必须出现在反馈里，不然用户只能靠猜。
+   */
+  async function togglePaused() {
+    if (paused === null || flagBusy) return;
+    setFlagBusy(true);
+    try {
+      const data = await apiFetch<{ preferences: { memoryEnabled: boolean; memoryWritePaused: boolean } }>(
+        '/api/account/cognitive',
+        { method: 'PATCH', json: { memoryWritePaused: !paused } }
+      );
+      setEnabled(data.preferences.memoryEnabled);
+      setPaused(data.preferences.memoryWritePaused);
+      push(data.preferences.memoryWritePaused ? '已暂停新的记忆写入，已记住的内容照常带入对话' : '已恢复新的记忆写入');
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -379,6 +413,49 @@ export function MemoryPanel() {
     }
   }
 
+  /**
+   * 忘记某个主题（任务书 7.3 的第二臂）。「主题」就是这一行上那枚情境标签，七个值之一——
+   * 界面不拿一个用户现编的词当范围，因为库里就没有那一列。
+   *
+   * 确认框里那三句各守一条边界，少一句就是撒谎：
+   * 一、原对话保留。三条批量删除都不碰会话，但这一臂最容易被人读成「把这个话题整个抹掉」，
+   *    所以这一句不能省（任务书：「用户仅要求忘记记忆时，不得擅自删除原会话」）。
+   * 二、决策记录不在范围内。按会话那一臂会顺带清掉那一次对话关联的决策，这一臂不会——
+   *    决策行既没有情境也没有来源会话列，够不着「某个主题」。
+   * 三、删完之后同一个主题的新说法还会照常记下来。删除建的是「原句排除」，挡的是逐字重复；
+   *    同义改写归「记忆策略」那一层管，那是要用户另外确认的另一个动作，不许藏在删除里顺手改掉。
+   *
+   * 和按会话那一路一样，确认框不报条数：客户端只看得见当前有效的那几十条，
+   * 被取代过的和已撤回的行也在删除范围内，数出来的数字会偏小。
+   */
+  async function purgeByContext(memory: MemoryDto) {
+    if (bulkBusy) return;
+    const context = memory.context;
+    const ok = await confirm({
+      title: `忘记「${CONTEXT_LABELS[context]}」这个主题的全部记忆？`,
+      description:
+        '这个主题下记住的内容会一起删掉，不可恢复。对话本身保留，其它主题和决策记录都不动。同一个主题的新说法还会照常记下来；要让它不再记，去「记忆策略」里关掉这个主题的写入。',
+      confirmText: '删除记忆',
+      tone: 'danger'
+    });
+    if (!ok) return;
+    setBulkBusy(`context:${context}`);
+    try {
+      const data = await apiFetch<{ purged: number }>(
+        `/api/account/cognitive/memories?scope=context&context=${encodeURIComponent(context)}`,
+        { method: 'DELETE' }
+      );
+      push(`已删除 ${data.purged} 条记忆`);
+      close();
+      // 排除表跟着重读：这一臂顺手建起来的原句排除，不刷新就等于没告诉用户它生效了。
+      await Promise.all([load(), loadExclusions()]);
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBulkBusy('');
+    }
+  }
+
   async function purgeAll() {
     if (bulkBusy) return;
     const ok = await confirm({
@@ -443,6 +520,26 @@ export function MemoryPanel() {
           {enabled === null ? '开关状态未知' : enabled ? '已打开' : '已关闭'}
         </label>
       </div>
+      {enabled === true ? (
+        <label className="mt-3 flex items-center gap-2 text-[12.5px] text-white/55">
+          <input
+            type="checkbox"
+            checked={paused === true}
+            disabled={paused === null || flagBusy}
+            onChange={togglePaused}
+            className="accent-emerald-400"
+          />
+          {/*
+            这一行只在总开关真开着时才摆出来：关着的模块本来就不写，再挂一个「暂停」就是假交互。
+            三个状态都得说得出话——未知时不许假装没暂停，那会让一次失败的读取变成一句假承诺。
+          */}
+          {paused === null
+            ? '暂停长期记忆写入（状态未知）'
+            : paused
+              ? '暂停长期记忆写入：已暂停'
+              : '暂停长期记忆写入'}
+        </label>
+      ) : null}
       {enabled === false ? (
         <Alert tone="info" className="mt-4">
           关闭只停止新的读写，已存下的记忆仍在下面这份列表里。要逐条停掉，用「归档」。
@@ -474,6 +571,7 @@ export function MemoryPanel() {
             const flags = reviews[memory.id] ?? [];
             const count = access[memory.id];
             const chatPurgeBusy = bulkBusy === `chat:${memory.chatId}`;
+            const contextPurgeBusy = bulkBusy === `context:${memory.context}`;
             return (
               <div key={memory.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
                 <div className="flex flex-wrap items-start gap-3">
@@ -544,6 +642,20 @@ export function MemoryPanel() {
                           {chatPurgeBusy ? '删除中…' : '忘记这次对话产生的记忆'}
                         </button>
                       ) : null}
+                      {/*
+                        「忘记这个主题」和上面那句不是一件事，所以两个入口都摆着：
+                        按会话删的是「那一次说过的」，按主题删的是「这一类说过的」，
+                        一条记忆同时落在两个范围里，删完另一个还剩。
+                        这一臂不需要原对话在场，所以它挂在每一行上，不受 chats[memory.chatId] 限制。
+                      */}
+                      <button
+                        type="button"
+                        className="text-white/35 underline-offset-2 hover:text-red-300 hover:underline disabled:cursor-not-allowed disabled:opacity-45"
+                        disabled={Boolean(bulkBusy)}
+                        onClick={() => void purgeByContext(memory)}
+                      >
+                        {contextPurgeBusy ? '删除中…' : '忘记这个主题'}
+                      </button>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">

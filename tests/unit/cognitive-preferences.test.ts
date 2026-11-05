@@ -66,9 +66,54 @@ describe('认知模块开关', () => {
       reflectionEnabled: false,
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
-      emotionTransparency: 'implicit'
+      emotionTransparency: 'implicit',
+      memoryWritePaused: false
     });
     for (const key of ALL_SWITCHES) expect(preferences[key]).toBe(false);
+  });
+
+  it('暂停写入不是第九个模块开关：八个开关还是八个，暂停不跟着把读一起关', async () => {
+    const { COGNITIVE_FLAGS, updateCognitivePreferences, getCognitivePreferences } = await prefs();
+
+    // 模块开关关掉后读侧也不注入；暂停只关写。塞进同一张表就等于把两件事合成一件。
+    expect([...COGNITIVE_FLAGS]).toHaveLength(8);
+    expect([...COGNITIVE_FLAGS]).not.toContain('memoryWritePaused');
+
+    await updateCognitivePreferences(USER_A, { memoryEnabled: true });
+    await updateCognitivePreferences(USER_A, { memoryWritePaused: true });
+
+    const preferences = await getCognitivePreferences(USER_A);
+    expect(preferences).toMatchObject({ memoryEnabled: true, memoryWritePaused: true });
+  });
+
+  it('暂停只改自己那一列：八个开关和情感透明度都保持原值', async () => {
+    const { updateCognitivePreferences, getCognitivePreferences } = await prefs();
+    await updateCognitivePreferences(USER_A, {
+      memoryEnabled: true,
+      timelineEnabled: true,
+      emotionTransparency: 'explicit'
+    });
+
+    await updateCognitivePreferences(USER_A, { memoryWritePaused: true });
+
+    expect(await getCognitivePreferences(USER_A)).toMatchObject({
+      memoryEnabled: true,
+      timelineEnabled: true,
+      emotionTransparency: 'explicit',
+      memoryWritePaused: true
+    });
+  });
+
+  it('取消暂停是一次普通的改列：库里那一行回到 false，读侧不受影响', async () => {
+    const { updateCognitivePreferences, getCognitivePreferences } = await prefs();
+    await updateCognitivePreferences(USER_A, { memoryEnabled: true, memoryWritePaused: true });
+
+    await updateCognitivePreferences(USER_A, { memoryWritePaused: false });
+
+    expect(await getCognitivePreferences(USER_A)).toMatchObject({
+      memoryEnabled: true,
+      memoryWritePaused: false
+    });
   });
 
   it('只打开记忆模块，画像与情感保持关闭', async () => {

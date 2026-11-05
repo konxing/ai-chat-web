@@ -87,7 +87,7 @@ describe('认知开关接口', () => {
     expect(db.authCalls[0].opts).toBeUndefined();
   });
 
-  it('GET 返回全部八个开关，库里没记录时全是默认关闭', async () => {
+  it('GET 返回全部八个开关加上「暂停写入」，库里没记录时全是默认关闭', async () => {
     const { payload } = await call('GET');
 
     expect(payload.data.preferences).toEqual({
@@ -99,7 +99,8 @@ describe('认知开关接口', () => {
       reflectionEnabled: false,
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
-      emotionTransparency: 'implicit'
+      emotionTransparency: 'implicit',
+      memoryWritePaused: false
     });
   });
 
@@ -151,5 +152,33 @@ describe('认知开关接口', () => {
     await call('PATCH', {});
 
     expect(db.audits).toEqual([]);
+  });
+
+  it('暂停长期记忆写入走同一个口子：只改自己那一列，八个开关一个都不动', async () => {
+    await call('PATCH', { memoryEnabled: true });
+
+    const { response, payload } = await call('PATCH', { memoryWritePaused: true });
+
+    expect(response.status).toBe(200);
+    expect(payload.data.preferences).toMatchObject({ memoryWritePaused: true, memoryEnabled: true });
+    expect(db.rows.get('user-a')).toMatchObject({ memoryEnabled: true, memoryWritePaused: true });
+  });
+
+  it('解除暂停和取消其它开关一样是一次普通改列：旧值不清空', async () => {
+    await call('PATCH', { memoryEnabled: true, memoryWritePaused: true });
+    expect(db.rows.get('user-a')).toMatchObject({ memoryWritePaused: true });
+
+    const { payload } = await call('PATCH', { memoryWritePaused: false });
+
+    expect(db.rows.get('user-a')).toMatchObject({ memoryWritePaused: false, memoryEnabled: true });
+    expect(payload.data.preferences).toMatchObject({ memoryWritePaused: false, memoryEnabled: true });
+  });
+
+  it('暂停写入不是布尔时被拒，一行都不写：这一列管的是「还不记新东西」，不能被一个字符串过成开或关', async () => {
+    const { response, payload } = await call('PATCH', { memoryWritePaused: 'yes' });
+
+    expect(response.status).toBe(400);
+    expect(payload.error.code).toBe('VALIDATION_ERROR');
+    expect(db.rows.size).toBe(0);
   });
 });

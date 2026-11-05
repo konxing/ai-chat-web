@@ -251,6 +251,26 @@ describe('闸门：关掉就作废，读不出来一条都不删', () => {
     expect(writes.mock.calls[0]![1]).toBe(COGNITIVE_TASK_TIMEOUT_MS);
     expect(COGNITIVE_TASK_TIMEOUT_MS).toBeGreaterThan(1000);
   });
+
+  it('暂停写入不是关掉模块 ⇒ 欠账照样排空、行照样删，不往队列里堆', async () => {
+    preferences.mockResolvedValue({
+      memoryEnabled: true,
+      memoryWritePaused: true,
+      adaptiveMemoryEnabled: false
+    });
+    succeeded('memory');
+    taskTable().seed(waiting());
+    message('我住在杭州');
+
+    const { runCognitiveWorkerTick } = await worker();
+    await runCognitiveWorkerTick();
+
+    // 落不落库由写侧那道闸门判（memory-module），worker 只管把欠账跑完。
+    // 要是这里也看暂停，欠账会一直留在表里堆着，用户恢复后一次性收到十几轮旧话。
+    expect(taskTable().rows.size).toBe(0);
+    expect(events()).not.toContain('cognitive.task_discarded');
+    expect(events()).not.toContain('cognitive.task_timeout');
+  });
 });
 
 describe('重建这一轮：任务行只有 id，正文从消息行解密、归属经会话行', () => {

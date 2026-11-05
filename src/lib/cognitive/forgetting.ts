@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
 import { decryptMemoryContent } from './memories';
-import { fromDbMemoryContext, type MemoryContext } from './policy';
+import { fromDbMemoryContext, toDbMemoryContext, type MemoryContext } from './policy';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
 import { cancelCognitiveTasks } from './task-queue';
@@ -257,6 +257,49 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
     // 否则一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
     for (const context of contexts) if (recordSignals) await recordPolicySignal(tx, userId, context);
     return { purged: result.count, contexts };
+  });
+}
+
+/**
+ * 「忘记某个主题」（任务书 7.3 的第二臂）：删掉某个情境下的全部记忆，对话和消息一条都不动。
+ *
+ * 和 `purgeMemoriesByChat` 的三处不同都是刻意的，每一处都有用例钉着：
+ *
+ * 一、**不扫决策，也不读消息行**。决策行上没有 context，也没有 chatId，只能顺着来源消息找——
+ *     而「这个主题」和「哪些消息属于它」在两列之间没有任何可对账的东西。
+ *     所以主题忘记的范围到记忆、洞察和访问痕迹为止，响应文案要明说决策记录不在范围内，
+ *     不能让用户以为一次主题忘记把他这轮做过的选择也清掉了。
+ * 二、**不撤任何认知任务**。一条欠账是一整轮话，那一轮会落成哪几个主题还没定：
+ *     按主题撤账会把同一轮里属于别的情境的说法一起抹掉，那是删用户没说要忘的东西。
+ *     挡住「后台再把同一句记回来」靠的是下面那次 `recordSources`（原句一层）；
+ *     挡同义改写要靠该情境的 `allowPersistence`，那是策略屏上另一个要用户另外确认的动作，
+ *     不在这里替他改。
+ * 三、学习证据只记这一个情境一条：删掉三条学习记忆不等于「他反复表达了三次这个意思」。
+ *
+ * 情境先转成库里的枚举再查，转换失败就在这儿抛——事务根本不开始，
+ * 免得一个应用不认识的主题值换来一次「删了 0 行」的假成功。
+ */
+export async function purgeMemoriesByContext(
+  context: MemoryContext,
+  userId: string
+): Promise<PurgeResult> {
+  const dbContext = toDbMemoryContext(context);
+  const recordSignals = await policyLearningEnabled(userId);
+  return prisma.$transaction(async (tx) => {
+    const rows = (await tx.memoryItem.findMany({
+      where: { userId, context: dbContext }
+    })) as unknown as PurgeTargetRow[];
+    const ids = rows.map((row) => row.id);
+    // 洞察先于删记忆：等引用行被外键级联带走，就找不到「谁引用过它」了（甲 +「1算」）。
+    await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, []));
+    if (rows.length === 0) return { purged: 0, contexts: [] };
+    await detachEdges(tx, userId, ids);
+    const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
+    await recordSources(tx, userId, rows);
+    // 清的是这批被删记忆的检索痕迹，跟「哪一轮发生在哪个会话」无关。
+    await deleteAccessForMemories(tx, userId, ids);
+    if (recordSignals) await recordPolicySignal(tx, userId, context);
+    return { purged: result.count, contexts: [context] };
   });
 }
 

@@ -6,9 +6,9 @@
 其余每一条的证据都止于内存替身——没有一条认知单测走过真实数据库。
 把这些写清楚比凑一个「10/10」有用——下一次争论「这个增强要不要上」时，这里是共同的事实基线。
 
-核对时间：2026-11-05（7.2 的 ARCHIVE 落地、`20261105000000_memory_archive` 已由他执行、且这份文档补上真库探针与截断提示之后），
-基线 HEAD `9de2886`（上一刀只改本文档的三处口径；7.2 的代码在 `6b8ea63`，本刀的代码与本文档同批提交）。
-全量单测 **78 个文件 1097 条用例**通过（`npx vitest run`），`npx tsc --noEmit` 干净。
+核对时间：2026-11-05（7.2 的 ARCHIVE 落地、`20261105000000_memory_archive` 已由他执行；之后 7.1 检索再巩固与 7.3 按主题忘记 + 暂停写入两片落地，**它那两支迁移 `20261106000000_memory_access` / `20261106000001_memory_write_pause` 尚未执行**）。
+基线 HEAD `2e968d1`（7.1 的代码与文档同批；7.3 这一刀的代码与本文档同批提交）。
+全量单测 **81 个文件 1225 条用例**通过（`npx vitest run`），`npx tsc --noEmit` 干净。
 Phase 4 之后新增的认知文件把 58 个文件 / 734 条推到 77 / 1066；**Phase 4—6 的界面那几半一条组件测试都没加**——
 这个项目没有组件测试，能测的部分搬进纯函数模块，剩下那句话在各片边界表里单独写着。
 
@@ -300,6 +300,9 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 | `tests/unit/cognitive-reflection-sweep.test.ts:298` `reflectionEnabled 开着但 memoryEnabled 关着 ⇒ 不查记忆行、不写洞察` | 服务 |
 | `tests/unit/cognitive-reflection-sweep.test.ts:311` `memoryEnabled 关着时戳照盖：抢冷却不该被记忆的闸门带走` | 服务 |
 | `tests/unit/cognitive-reflection-sweep.test.ts:320` `memoryEnabled 关着时收割照跑：到期和稍后到点都有人写` | 服务 |
+| `tests/unit/cognitive-memory-module.test.ts:396` `暂停时写侧一次数据库读都不发生：排除表、策略、已有记忆都不问` | 服务（**7.3 暂停臂，11-05 片 b**：这条断言的是「没问」，不是「问了但没写」） |
+| `tests/unit/cognitive-memory-module.test.ts:383` `暂停时一行都不落，也不记证据` | 服务（同上） |
+| `tests/unit/cognitive-memory-module.test.ts:410` `暂停只管记、不管用：已存的记忆照常注入提示词` | 服务（同上；这条走 `runCognitiveReads`，所以「暂停把读一起挡掉」这种越界改动会当场红——P6 探针实测过） |
 
 **这一条今天有四个必须写清的事实**：
 
@@ -1274,10 +1277,10 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 统计 | `src/lib/cognitive/access.ts:91`（`listAccessStats`） | 取 `MAX_ROWS + 1` 行只为了知道有没有被截断——「恰好读了 200 轮」和「还有更多轮没读」在数字上一样，在诚实程度上不一样 |
 | 检查 | `src/lib/cognitive/reconsolidation.ts:54`（`reviewMemory`）/ `:79`（`reviewMemories`） | **纯函数**：输入是已经查回来的列和证据条，输出标记数组，不算分、不排序、不碰库。三种终态（被取代 / 归档 / 撤回）不产标记 |
 | 证据的批量读 | `src/lib/cognitive/evidence.ts:166`（`listEvidenceRows`） | 一屏一次查完，只取 `memoryId / kind / createdAt`，说明文字的密文不经过这条路。方向映射仍只有 `fromDbKind` 一份，所以这个读留在证据账本里，不搬进 `reconsolidation.ts` |
-| API | `src/app/api/account/cognitive/memories/route.ts:70-73,81,103-106` | GET 多带 `reviews` / `access` / `accessWindow` / `accessCapped` 四个字段，与置信度、标题**并行**发出。`reviews` 对每条记忆都有一项（空数组 ≠ 缺席）；`accessWindow` 报**实际扫过的轮数**，不把 `MEMORY_ACCESS_MAX_ROWS` 抄给界面 |
+| API | `src/app/api/account/cognitive/memories/route.ts:69-76,105-108` | GET 多带 `reviews` / `access` / `accessWindow` / `accessCapped` 四个字段，与置信度、标题**并行**发出。`reviews` 对每条记忆都有一项（空数组 ≠ 缺席）；`accessWindow` 报**实际扫过的轮数**，不把 `MEMORY_ACCESS_MAX_ROWS` 抄给界面 |
 | 文案 | `src/lib/cognitive/memory-display.ts:125`（`RECONSOLIDATION_LABELS`）/ `:157`（`describeAccessCount`）/ `:162`（`describeAccessCap`） | 三个纯函数/常量，只产出句子 |
-| 界面 | `src/components/settings/memory-panel.tsx:515`（标记芯片）/ `:523`（「最近 N 轮里被带到 M 次」）/ `:424`（截断提示） | 芯片用中性 `chip`，不用琥珀色——琥珀色那一档已经是「可信度低」，「值得回看一眼」不是「不可信」 |
-| 忘记连带清理 | `src/lib/cognitive/forgetting.ts:218`（单条）/ `:254`（按来源会话）/ `:283`（清空全部） | 派生数据从五种变第六种。删的口径是**被删的那批记忆 id**，整行删（不是把 id 从数组里挑出来——一个已删记忆的 id 本身就是被删内容的痕迹，而残缺的组合比没有组合更误导） |
+| 界面 | `src/components/settings/memory-panel.tsx:613`（标记芯片）/ `:621`（「最近 N 轮里被带到 M 次」）/ `:552`（截断提示） | 芯片用中性 `chip`，不用琥珀色——琥珀色那一档已经是「可信度低」，「值得回看一眼」不是「不可信」 |
+| 忘记连带清理 | `src/lib/cognitive/forgetting.ts:198`（单条）/ `:231`（按来源会话）/ `:282`（按主题，7.3 片 b 补的第四臂）/ `:317`（清空全部） | 派生数据从五种变第六种。删的口径是**被删的那批记忆 id**，整行删（不是把 id 从数组里挑出来——一个已删记忆的 id 本身就是被删内容的痕迹，而残缺的组合比没有组合更误导）；只有清空全部走 `deleteAllAccess`（`:327`），因为「全部」没有子集可挑 |
 
 ### 「检索次数不能提高可信度」这一条怎么证（不靠注释）
 
@@ -1314,6 +1317,68 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 - **窗口是 200 轮，且会说话**：超过 200 轮以后的访问不计入 `count`，`capped` 为真，界面摆一句「访问记录比这一屏多：这里只统计最近 N 轮对话」。所以那个数字是**下限**，不是全生命周期条数。
 - **「忘记这次对话」不清这一轮在这段对话里发生过的检索**：只有被删的那批记忆的检索痕迹走。留着的 `acc-stay` 是真实发生过的历史，删掉它等于篡改另一件事；而真的删除整个会话时，那些行靠 `sourceMessageId` 外键自己走。
 - **两项无法验收的检查不会出现在界面上**：不摆控件、不给文案、不产标记。「摘要」与「关联关系」将来若落地，得先有可写的位置，再回来加第四、第五项——顺序不能反。
+
+## 7.3：忘记某个主题 + 暂停长期记忆写入（11-05 片 b）
+
+7.3 这一条上今天已经有四臂：单条永久删除、按来源会话忘记、清空全部长期记忆、原句永久排除（`recordExclusions`，上面 ④a / ④b 那两节）。这片补最后两臂——**按主题忘记**和**暂停写入**，并把「关了就真的不读不写」这条门槛（第 9 条）在暂停这一臂上做成字面成立的。
+
+### 「主题」的身份是我替他定的，不是从界面里长出来的
+
+「忘记某个主题」里的「主题」，库里三条候选轴：
+
+| 候选 | 判词 |
+|---|---|
+| `MemoryItem.context`（七个值，`MemoryContext`） | **采用**。唯一同时有逐情境策略行（`MemoryPolicy @@id([userId, context])`）和写侧消费者的枚举轴——删完还能在「记忆策略」里把同一条轴关掉，两臂说的是同一件事 |
+| `ReflectionRecord.dedupKey` | 不采用。删它其实是 Phase 6 已经有的洞察删除，换个名字再交一遍是范围蔓延 |
+| `DecisionRecord.topicCiphertext`（自由文本） | 不采用。要先把密文主题搜出来才能删，而那正是 4-T3 那次 0/36 判词禁掉的词法搜索 |
+
+这个身份定的后果是**接口上「主题」只收七个值之一**（`validation.ts:241-251` 的 discriminatedUnion）。放任意字符串等于让界面过一次「`where context = 用户现编的词`」，换来的是一次「删了 0 行」的假成功，所以不在合法值之外留静默返回 0 的路：非法值直接拒（`cognitive-forgetting.test.ts` 有一条专门钉这个）。
+
+### 代码事实（一支迁移、一个服务函数、一个闸门、一条路由分支、一屏两个控件）
+
+| 环节 | 位置 | 只干什么 |
+|---|---|---|
+| 迁移 | `prisma/migrations/20261106000001_memory_write_pause/migration.sql` | 只加一列 `memoryWritePaused Boolean @default(false)`。**未执行**（和上一片那支一起跑）。默认 false 让「库里没有这一行」等于没暂停，和这张表其余开关同构 |
+| 它不是第九个模块开关 | `preferences.ts:27`（`FlagKey` 把它和 `emotionTransparency` 一起 `Exclude` 掉）、`:90`（单独一条 PATCH 分支） | 模块开关管「这个模块要不要工作」，关掉后读侧也不注入；这一列只管「还记不记新东西」。**混进 `COGNITIVE_FLAGS` 会让它变成一个能被批量清空的开关**，P5 探针专门咬这个 |
+| 写侧闸门 | `memory-module.ts:169-174` | 开在能开的最早处：`memoryEnabled`（`:170`）之后、`excludedHashes` / `getMemoryPolicies` / `listMemories`（`:178-183`）**之前**。所以门槛 9 那句「关闭后不再执行对应的数据读取」在这一臂上字面成立——零读零写，不是「读了但没写」 |
+| 读侧不动 | `memory-module.ts:76-89` | `readMemory` 一次都不看这张偏好。「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停，两件事必须分得开 |
+| 服务函数 | `forgetting.ts:282-304`（`purgeMemoriesByContext`） | 照 `purgeMemoriesByChat`（`:231`）抄，三处差异：where 换成 context；**不**扫决策；**不**撤别的主题的欠账。同一事务里顺手建原句排除、清版本链指针、清访问痕迹 |
+| API | `memories/route.ts:140-147` + `:24` | 新分支 `scope=context`，独立限流桶 `memory-purge-context:{userId}`（20/小时，和另外两臂同宽），审计 `user.memory_purge_by_context`，`targetType='context'`、`after.purged` **只带条数和主题名，不带正文** |
+| 界面 | `memory-panel.tsx:431`（`purgeByContext`）/ `:645-658`（行内按钮）/ `:523-542`（暂停三态控件） | 「忘记这个主题」和「忘记这次对话」两个入口都摆着，因为它们不是一件事。暂停控件在总开关打开时才摆——总开关关着时暂停是句废话 |
+
+### 文案（他批的姿势：确认框里就把边界说完）
+
+`忘记「${CONTEXT_LABELS[context]}」这个主题的全部记忆？` / `这个主题下记住的内容会一起删掉，不可恢复。对话本身保留，其它主题和决策记录都不动。同一个主题的新说法还会照常记下来；要让它不再记，去「记忆策略」里关掉这个主题的写入。`
+
+暂停那一句是 `已暂停新的记忆写入，已记住的内容照常带入对话`——**「照常带入」是这句的功能，不是修饰**，它说的正是上面「读侧不动」那行代码。
+
+### 先红与变异探针
+
+| 步骤 | 结果 |
+|---|---|
+| 先红 | 本片新增 **46 条**用例：`cognitive-forgetting.test.ts` +15、`cognitive-memories-route.test.ts` +9、`cognitive-memory-panel.test.ts` +11、`cognitive-memory-module.test.ts` +4、`cognitive-preferences.test.ts` +3、`cognitive-preferences-route.test.ts` +3、`cognitive-task-worker.test.ts` +1。红法是：`purgeMemoriesByContext` 未导出时命名导入直接报 `does not provide an export`，`memoryWritePaused` 不在 `CognitivePreferences` 上时那三条偏好用例断言不到字段，面板那批用 `stripComments` 逐字扫源码、「接线了但没渲染」当场抓住。**另外一处不是用例而是替身行**：`chat-message-route-side-effects.test.ts:129-144` 那个逐列写全的偏好行必须跟着加这一列——留空等于让替身替产品决定默认值，那条文件一条新用例都没加（18 条前后相同），改的是夹具 |
+| 立刻绿、我没改用例的三条 | 路由那 9 条里「缺 context 报 400」「非法主题报 400」「未登录 401」**第一轮就是绿的**——今天的 `scope` 不认识自己也 400。它们钉的是「将来也不会松」，不是「这片新加的」 |
+| worker 那条也是立刻绿 | 「暂停写入不是关掉模块 ⇒ 欠账照样排空、行照样删」写出来就过。`gateOpen`（`task-worker.ts:124-128`）本来就只看模块开关，**故意不看这一列**——暂停期间欠账照排空，只是不落库，不往队列里堆尸体 |
+| **丢 `userId`（`findMany` 的 where 只留 context）** | **第一轮 0 红——这片最重要的发现。** 两个原因叠着：`deleteMany` 那一边还带着 `userId`，所以删的还是对的行；`recordSources` 碰到别人的行会解密失败（AAD 绑的是那一行自己的 userId）而被 `catch` 吞掉，排除表条数一点没变。**修法不是改探针，是补用例**：替身 `findMany` 把 where 原样收进 `db.readFilters`，断言这次读**带着 `userId`**——读条件一旦漂移就红，不再靠「删得对」倒推。补完后同一条变异：**1 红** |
+| P3 跳过 `recordSources` | **3 红**（计划预期 1 红）：「每条被删正文进排除表一次」那条 + 按主题删的两条连带断言。红得比预期多，方向是对的 |
+| P4 把暂停检查挪到 `listMemories` 之后 | **1 红**：「暂停时写侧一次数据库读都不发生」。那条断言的是 `db.exclusionCalls` / `db.policyCalls` / `db.listFilters` **为空**——「没问」和「问了但没写」在这里第一次能被区分 |
+| P5 把新列塞进 `COGNITIVE_FLAGS` | **1 红**（计划预期 ≥2 红）。**预期错了**：`grep` 复核后只有 `cognitive-preferences.test.ts` 那一条专门用例吃这张表，路由与面板都按字段名点名，所以「批量清空」的第二处红源并不存在。数目如实记 1 |
+| P6 暂停连读一起挡 | **1 红**，但这条是返工过一次才有效力的。第一版用例直接 `await memoryModule.read(...)`，而读侧的闸根本不在模块里，在 `manager.ts:128` 的 `enabledModules` 上——把变异放在闸门处，那条用例绿给你看。**改成走 `runCognitiveReads`（线上真正的读入口）后**，同一条变异：**1 红**（「暂停只管记、不管用」）。另记一笔：第一次实现这条变异时我在 `runCognitiveReads` 里多插了一次没有 try/catch 的 `getCognitivePreferences`，于是多红了第二条（「开关本身读不出来时……」）——那条红的是我这只手，不是那个语义；换成在 `enabledModules` 里改，才是 1 红 |
+
+探针逐个当场回滚，回滚后立刻 `grep` 复核当前内容；全程只用字面替换，不碰 `git checkout` / `git stash`。
+
+### 「缓存」这一条：判词是「无记忆派生缓存可清」，不是「缓存不存在」
+
+任务书这条要求删除时清掉派生缓存。核实过：进程内确有缓存（`admin.ts:509` 的库大小展示值、`:604` 的目录大小、`ssrf.ts:88` 的目标解析结果、`env.ts:45` 的整份环境、`rate-limit.ts` 的限流桶），但**没有一个按记忆内容或记忆 id 做键**，所以没有该清的东西。时间线是读时投影（`timeline.ts:65`），每次现算，也不需要一个清的动作。这句话要说准：说「缓存不存在」是假话。
+
+### 这一片的边界
+
+- **两支迁移都未执行**：`20261106000000_memory_access`（上一片）和 `20261106000001_memory_write_pause`（这一片）。一次 `npx prisma migrate deploy` 同时补齐。**先拉代码后跑迁移会有 P2022**：认知读侧的 `SELECT` 引用了库里还不存在的列——那三条历史 `DEAD` 行就是这个根因（上面「那三条 `DEAD`」那节）。它 fail safe：模块错误隔离让回复照常，worker 的 `gateOpen` 读不出来当「未知」走重试。
+- **按主题忘记不扫决策记录**：`DecisionRecord` 既没有 `context` 也没有 `chatId`，一次主题删除拿不到「哪些决策属于这个主题」这个问题的答案。文案里「决策记录都不动」是**明说的边界**，不是遗漏。
+- **不撤别的主题的欠账**：一条 `CognitiveTask` 欠账对应的是「这一轮」，不是「这个主题」。删一个主题时把整轮的欠账一起撤掉，会连带作废另一个主题的提取机会。要停掉整个后台，用总开关。
+- **暂停不追溯**：这一列只管之后的写入。已经记住的照常带入对话，欠账照常排空（只是不再落库）。要清已有的，用「忘记」那四臂。
+- **界面没有真渲染验收**：`memory-panel.tsx` 过了类型检查，并有静态断言（DELETE 的 query 串、确认文案逐字、暂停控件在 `enabled === true` 之内、`toggleEnabled` 里也要 `setPaused`），但静态断言只证明源码写了这一行，不证明 React 画出来了。真渲染在片 g。
+- **真库上这一臂没跑过**：`where: { userId, context }` 编成的 SQL、`BOOLEAN NOT NULL DEFAULT false` 在 PostgreSQL 17 上的加列成本，全部只有内存求值器验过。归档那一片做过真库回滚探针，这片没有——没有他的批准不动库。
 
 
 

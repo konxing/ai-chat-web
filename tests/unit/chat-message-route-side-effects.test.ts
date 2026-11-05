@@ -124,7 +124,7 @@ async function memoryRow(id: string, content: string) {
 }
 
 /**
- * 任务书 1.1 的八个开关：逐列写全，默认全关。
+ * 任务书 1.1 的八个开关，加上 7.3 的「暂停长期记忆写入」那一列：逐列写全，默认全关、没暂停。
  * 留空等于让替身替产品决定默认值——正向对照那条用例就会因为「少了一列」而假绿。
  */
 function preferenceRow(overrides: Record<string, boolean> = {}) {
@@ -139,6 +139,7 @@ function preferenceRow(overrides: Record<string, boolean> = {}) {
     decisionMemoryEnabled: false,
     adaptiveMemoryEnabled: false,
     emotionTransparency: 'IMPLICIT',
+    memoryWritePaused: false,
     ...overrides
   };
 }

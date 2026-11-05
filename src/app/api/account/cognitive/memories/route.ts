@@ -7,7 +7,7 @@ import { listMemories, MEMORY_LIST_MAX_ROWS } from '@/lib/cognitive/memories';
 import { assessMemories, listEvidenceRows } from '@/lib/cognitive/evidence';
 import { reviewMemories } from '@/lib/cognitive/reconsolidation';
 import { listAccessStats, type AccessStats, type MemoryAccessStat } from '@/lib/cognitive/access';
-import { purgeAllMemories, purgeMemoriesByChat } from '@/lib/cognitive/forgetting';
+import { purgeAllMemories, purgeMemoriesByChat, purgeMemoriesByContext } from '@/lib/cognitive/forgetting';
 import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
 import { listChatTitles } from '@/lib/chats';
 import type { Confidence } from '@/lib/cognitive/confidence';
@@ -15,11 +15,13 @@ import type { Confidence } from '@/lib/cognitive/confidence';
 export const runtime = 'nodejs';
 
 /**
- * 清空全部一小时 3 次、按会话一小时 20 次：前者是一次不可逆的大动作，
- * 后者是用户逐个会话清理，得给足余地。两个桶分开，免得清空用掉的额度挡住正常清理。
+ * 清空全部一小时 3 次、按会话和按主题各一小时 20 次：前者是一次不可逆的大动作，
+ * 后两者是用户逐个清理，得给足余地。三个桶各算各的额度，免得清空用掉的额度挡住正常清理，
+ * 也免得「把这一个主题挨个清一遍」顺带把「按会话清」的那一路堵死。
  */
 const PURGE_ALL_LIMIT = 3;
 const PURGE_CHAT_LIMIT = 20;
+const PURGE_CONTEXT_LIMIT = 20;
 const PURGE_WINDOW_MS = 60 * 60 * 1000;
 
 /**
@@ -109,11 +111,11 @@ export async function GET(req: Request) {
 }
 
 /**
- * 批量永久删除（任务书 7.3 的「忘记某个来源会话产生的记忆」和「清空全部长期记忆」）。
+ * 批量永久删除（任务书 7.3 的三臂：「忘记某个主题」「忘记某个来源会话产生的记忆」「清空全部长期记忆」）。
  *
  * 范围只从查询串读，userId 只从 session 取：chatId 是任意字符串输入，
  * 但服务层的删除条件里始终带着 session 的 userId，塞别人的会话 id 只会删掉 0 行。
- * 两种范围都只删记忆，不动会话、附件和消息。
+ * 三种范围都只删记忆，不动会话、附件和消息。
  */
 export async function DELETE(req: Request) {
   return api(async () => {
@@ -121,7 +123,8 @@ export async function DELETE(req: Request) {
     const params = new URL(req.url).searchParams;
     const scope = memoryPurgeSchema.parse({
       scope: params.get('scope'),
-      chatId: params.get('chatId')
+      chatId: params.get('chatId'),
+      context: params.get('context')
     });
 
     if (scope.scope === 'all') {
@@ -131,6 +134,15 @@ export async function DELETE(req: Request) {
       // 清空全部不产生学习证据，所以这里永远是空数组：一次重置不该被读成「七个情境都记太多了」。
       const learned = await learnAfterPurge(user.id, result.contexts);
       await audit(req, user, 'user.memory_purge_all', 'user', user.id, result.purged, learned);
+      return { purged: result.purged, learned };
+    }
+
+    if (scope.scope === 'context') {
+      const limit = rateLimit(`memory-purge-context:${user.id}`, PURGE_CONTEXT_LIMIT, PURGE_WINDOW_MS);
+      if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
+      const result = await purgeMemoriesByContext(scope.context, user.id);
+      const learned = await learnAfterPurge(user.id, result.contexts);
+      await audit(req, user, 'user.memory_purge_by_context', 'context', scope.context, result.purged, learned);
       return { purged: result.purged, learned };
     }
 

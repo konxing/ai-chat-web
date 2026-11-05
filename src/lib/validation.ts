@@ -107,7 +107,15 @@ export const adminConfigSchema = z.object({
   maintenanceNotice: z.string().max(500).optional()
 });
 
-/** 九个字段全部可选：只提交改动的那一项，其余保持原值。 */
+/**
+ * 十个字段全部可选：只提交改动的那一项，其余保持原值。
+ *
+ * memoryWritePaused 和那八个开关走同一个口子，但它不是第九个模块开关：
+ * 模块开关管「这个模块要不要工作」，关掉后读侧也不注入；这一列只管「还记不记新东西」，
+ * 已存的记忆照常带入对话。之所以不拆成第二个接口，是因为它和开关改的是同一行 CognitivePreference，
+ * 拆两个入口只是多一条能改同一行的路——边界靠 preferences.ts 里那条「不进 COGNITIVE_FLAGS」的断言守，
+ * 不靠多一个路由。
+ */
 export const cognitivePreferencesPatchSchema = z.object({
   memoryEnabled: z.boolean().optional(),
   userModelEnabled: z.boolean().optional(),
@@ -117,7 +125,8 @@ export const cognitivePreferencesPatchSchema = z.object({
   reflectionEnabled: z.boolean().optional(),
   decisionMemoryEnabled: z.boolean().optional(),
   adaptiveMemoryEnabled: z.boolean().optional(),
-  emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional()
+  emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional(),
+  memoryWritePaused: z.boolean().optional()
 });
 
 const MEMORY_CONTEXT_VALUES = [
@@ -223,11 +232,20 @@ export const reflectionActionSchema = z.discriminatedUnion('action', [
  * 批量永久删除的范围。用可辨识联合而不是「chatId 可选」：
  * scope=chat 时 chatId 必须存在，这条约束由类型系统兜住，路由里就不用再补一次判断。
  * 两个值都来自查询串，所以 chatId 只当作不透明字符串收——归属由服务层的 userId 条件决定。
+ *
+ * scope=context 收的是七个情境名之一（任务书 7.3 的「忘记某个主题」）：
+ * 这里只认枚举，不认自由文本。「主题」在库里就是 MemoryItem.context 这一列，
+ * 放一个任意字符串进来，界面就能把「忘记主题」过一次「where context = 用户现编的词」，
+ * 那既不是七个情境中的任何一个，也说不清到底删了什么。
  */
 export const memoryPurgeSchema = z.discriminatedUnion('scope', [
   z.object({ scope: z.literal('all'), chatId: z.null().optional() }),
   z.object({
     scope: z.literal('chat'),
     chatId: z.string().trim().min(1, '按会话删除必须指明是哪一次对话').max(64, '会话 id 不合法')
+  }),
+  z.object({
+    scope: z.literal('context'),
+    context: z.enum(MEMORY_CONTEXT_VALUES)
   })
 ]);

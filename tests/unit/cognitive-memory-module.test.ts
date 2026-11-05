@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 const db = vi.hoisted(() => ({
   memoryEnabled: false,
+  memoryWritePaused: false,
   creates: [] as Array<Record<string, unknown>>,
   revises: [] as Array<Record<string, unknown>>,
   readRows: [] as Array<Record<string, unknown>>,
@@ -37,7 +38,8 @@ vi.mock('@/lib/cognitive/preferences', () => ({
       reflectionEnabled: false,
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
-      emotionTransparency: 'implicit'
+      emotionTransparency: 'implicit',
+      memoryWritePaused: db.memoryWritePaused
     })
 }));
 
@@ -168,6 +170,7 @@ async function write(content: string) {
 
 beforeEach(() => {
   db.memoryEnabled = false;
+  db.memoryWritePaused = false;
   db.creates = [];
   db.revises = [];
   db.readRows = [];
@@ -373,6 +376,61 @@ describe('写侧：同一件事的新说法走演化，不新增第二条', () =
     expect(reason.length).toBeGreaterThan(0);
     expect(reason).not.toContain('Next.js');
     expect(reason).not.toContain('14');
+  });
+});
+
+describe('暂停长期记忆写入（任务书 7.3 的第五臂）', () => {
+  it('暂停时一行都不落，也不记证据：新建、演化、派生记账全在闸门之后', async () => {
+    db.memoryEnabled = true;
+    db.memoryWritePaused = true;
+    // 库里已有同一件事的旧说法 ⇒ 不暂停时这一句本该走演化，而不是新建。
+    db.readRows = [memoryRow()];
+
+    await write('我在用 Prisma 1.0 和 Next.js。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.revises).toEqual([]);
+    expect(db.evidenceCalls).toEqual([]);
+  });
+
+  it('暂停时写侧一次数据库读都不发生：排除表、策略、已有记忆都不问', async () => {
+    db.memoryEnabled = true;
+    db.memoryWritePaused = true;
+    db.readRows = [memoryRow()];
+
+    await write('我在用 Next.js 15 和 Prisma。');
+
+    // 8.3 那句「关闭模块后，不能继续执行对应的数据读取、生成和后台写入」在这一臂上字面成立。
+    // 所以这一条断言的是「没问」，不是「问了但没写」——闸门必须在所有读之前。
+    expect(db.exclusionCalls).toEqual([]);
+    expect(db.policyCalls).toBe(0);
+    expect(db.listFilters).toEqual([]);
+  });
+
+  it('暂停只管记、不管用：已存的记忆照常注入提示词', async () => {
+    db.memoryEnabled = true;
+    db.memoryWritePaused = true;
+    db.readRows = [memoryRow()];
+
+    // 走 runCognitiveReads 而不是直接 call memoryModule.read：读侧的开关根本不在模块里，
+    // 而在 manager 的模块闸门上。绕过闸门就测不到「暂停把读一起挡掉」这类越界改动。
+    ensureCognitiveModules();
+    const result = await runCognitiveReads({ ...TURN, content: '在吗' });
+
+    // 「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停——两件事必须分得开。
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]?.text).toContain('我在用 Prisma');
+  });
+
+  it('没暂停时和今天一样：闸门不许把开着的那条路也变慢', async () => {
+    db.memoryEnabled = true;
+    db.memoryWritePaused = false;
+
+    await write('我在用 Next.js 15 和 Prisma。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.exclusionCalls).toEqual(['user-a']);
+    expect(db.policyCalls).toBe(1);
   });
 });
 

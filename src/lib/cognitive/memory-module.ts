@@ -168,6 +168,10 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
 
   const preferences = await getCognitivePreferences(turn.userId);
   if (!preferences.memoryEnabled) return;
+  // 「暂停长期记忆写入」（任务书 7.3）的闸门开在这三行读之前。
+  // 放在 excludedHashes / getMemoryPolicies / listMemories 之后就成了「读了但没写」，
+  // 而 8.3 要的是「关闭后不能继续执行对应的数据读取」——除这张偏好行本身之外，零读零写。
+  if (preferences.memoryWritePaused) return;
 
   // 用户永久删除过的内容不许被自动记回来（任务书 7.3）。放在候选检查之后：
   // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。

@@ -459,6 +459,10 @@ model CognitivePreference {
   decisionMemoryEnabled Boolean             @default(false)
   adaptiveMemoryEnabled Boolean             @default(false)
   emotionTransparency   EmotionTransparency @default(IMPLICIT)
+  /// 任务书 7.3 的「暂停长期记忆写入」。它不是第九个模块开关：模块开关管「这个模块要不要工作」
+  /// （关掉后读侧也不注入），这一列只管「还记不记新东西」——后台不再落库，已存的记忆照常带入对话。
+  /// 「记住但不带入」和「暂停写入但继续带入」必须是两件事，所以闸门只放在写侧的最早一处。
+  memoryWritePaused     Boolean             @default(false)
   /// 上一次跑反思规则的时刻。反思不能挂在每条消息上重算整个记忆池（任务书 6.6 的冷却），
   /// 所以这一列是后台那趟扫描的节流标记，不是用户设置项。
   reflectionSweptAt     DateTime?

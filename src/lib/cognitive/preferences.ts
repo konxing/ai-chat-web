@@ -16,9 +16,15 @@ export interface CognitivePreferences {
   decisionMemoryEnabled: boolean;
   adaptiveMemoryEnabled: boolean;
   emotionTransparency: EmotionTransparency;
+  /**
+   * 任务书 7.3 的「暂停长期记忆写入」。它故意不是第九个模块开关：
+   * 模块开关管「这个模块要不要工作」，关掉后读侧也不再注入；这一列只管「还记不记新东西」，
+   * 已存的记忆照常带入对话。两件事合成一件就没有「先别记、继续用旧的」这一档了。
+   */
+  memoryWritePaused: boolean;
 }
 
-type FlagKey = Exclude<keyof CognitivePreferences, 'emotionTransparency'>;
+type FlagKey = Exclude<keyof CognitivePreferences, 'emotionTransparency' | 'memoryWritePaused'>;
 
 /** 任务书 1.1 的八个开关：前七个各对一个模块，第八个管策略学习层。 */
 export const COGNITIVE_FLAGS: readonly FlagKey[] = [
@@ -46,7 +52,8 @@ const OFF: CognitivePreferences = {
   reflectionEnabled: false,
   decisionMemoryEnabled: false,
   adaptiveMemoryEnabled: false,
-  emotionTransparency: 'implicit'
+  emotionTransparency: 'implicit',
+  memoryWritePaused: false
 };
 
 const TO_STORED: Record<EmotionTransparency, StoredRow['emotionTransparency']> = {
@@ -65,7 +72,8 @@ export type CognitivePreferencesPatch = Partial<CognitivePreferences>;
 
 function toPreferences(row: StoredRow): CognitivePreferences {
   const preferences = {
-    emotionTransparency: FROM_STORED[row.emotionTransparency] ?? 'implicit'
+    emotionTransparency: FROM_STORED[row.emotionTransparency] ?? 'implicit',
+    memoryWritePaused: row.memoryWritePaused
   } as CognitivePreferences;
   for (const flag of COGNITIVE_FLAGS) preferences[flag] = row[flag];
   return preferences;
@@ -79,6 +87,7 @@ function toStored(patch: CognitivePreferencesPatch): Partial<StoredRow> {
   if (patch.emotionTransparency !== undefined) {
     stored.emotionTransparency = TO_STORED[patch.emotionTransparency];
   }
+  if (patch.memoryWritePaused !== undefined) stored.memoryWritePaused = patch.memoryWritePaused;
   return stored;
 }
 

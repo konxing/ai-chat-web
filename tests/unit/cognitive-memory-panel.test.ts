@@ -153,3 +153,70 @@ describe('两份列表的截断提示各自挂上', () => {
     expect(PANEL_CODE).not.toContain('比这一屏多');
   });
 });
+
+/**
+ * 任务书 7.3 在这一屏补上的两臂：「忘记某个主题」和「暂停长期记忆写入」。
+ *
+ * 这一簇断言守的四件事：
+ * 一、主题按钮打到的是 `scope=context`，范围用的是行上已有的那个情境——界面不许自己现编一个词当主题。
+ * 二、确认框必须说清这一臂的两条边界：原对话不动、决策记录不在范围内。
+ *    「不得擅自删除原会话」是任务书点名的红线，而这一臂和按会话那一臂删的东西确实不一样，文案含糊就等于撒谎。
+ * 三、「删掉已经记住的」和「让它不再记」是两个动作，界面上不许顺手合并：
+ *    删除只建原句排除，同义改写归策略那层管，得由用户自己另外去点。
+ * 四、暂停写入只在总开关打开时才摆出来——总开关一关，写入本来就停了，再摆一个控件就是假交互。
+ */
+describe('忘记某个主题（任务书 7.3 的第三臂）', () => {
+  it('打到 scope=context，范围取自这一行自己的情境，不是界面现编的词', () => {
+    expect(PANEL_CODE).toContain('scope=context&context=${encodeURIComponent(context)}');
+    expect(PANEL_CODE).toContain('const context = memory.context');
+  });
+
+  it('主题名走情境标签表：界面不许把七个枚举的中文自己写一遍', () => {
+    expect(PANEL_CODE).toContain('CONTEXT_LABELS[context]');
+    expect(PANEL_CODE).toMatch(/title: `忘记「\$\{CONTEXT_LABELS\[context\]\}」这个主题的全部记忆？`/);
+  });
+
+  it('确认框逐字说清两条边界：原对话保留、决策记录不在范围内', () => {
+    expect(PANEL).toContain('对话本身保留，其它主题和决策记录都不动。');
+  });
+
+  it('确认框还要说清「删掉的会再长回来」这件事，并指向另一个动作', () => {
+    expect(PANEL).toContain('同一个主题的新说法还会照常记下来；要让它不再记，去「记忆策略」里关掉这个主题的写入。');
+  });
+
+  it('删除中把这一行的按钮一起挡住：忙态按主题分桶，和按会话那一路共用同一个闸门', () => {
+    expect(PANEL_CODE).toContain('const contextPurgeBusy = bulkBusy === `context:${memory.context}`');
+    expect(PANEL_CODE).toContain("{contextPurgeBusy ? '删除中…' : '忘记这个主题'}");
+  });
+
+  it('删完要重读排除表：原句排除是这一臂顺手建起来的，不刷新就等于没生效', () => {
+    expect(PANEL_CODE).toMatch(/purgeByContext[\s\S]{0,1200}Promise\.all\(\[load\(\), loadExclusions\(\)\]\)/);
+  });
+});
+
+describe('暂停长期记忆写入（任务书 7.3 的第五臂）', () => {
+  it('控件打到 memoryWritePaused 这一列，取的是服务端回的值', () => {
+    expect(PANEL_CODE).toContain('json: { memoryWritePaused: !paused }');
+    expect(PANEL_CODE).toContain('setPaused(data.preferences.memoryWritePaused)');
+  });
+
+  it('状态未知时不许假装它是关着的：和总开关同一个口径', () => {
+    expect(PANEL_CODE).toMatch(/disabled=\{paused === null \|\| flagBusy\}/);
+  });
+
+  it('暂停的说法要说清「已记住的照常带入」：它不是关闭记忆', () => {
+    expect(PANEL).toContain('已暂停新的记忆写入，已记住的内容照常带入对话');
+  });
+
+  it('只在总开关真开着时才摆出来：关着的模块不需要一个暂停键', () => {
+    expect(PANEL_CODE).toMatch(/\{enabled === true \? \([\s\S]{0,400}暂停长期记忆写入/);
+  });
+
+  it('切总开关时也要同步暂停态：两个控件读的是同一份偏好行', () => {
+    const enabledToggle = PANEL_CODE.slice(
+      PANEL_CODE.indexOf('async function toggleEnabled()'),
+      PANEL_CODE.indexOf('async function togglePaused()')
+    );
+    expect(enabledToggle).toContain('setPaused(data.preferences.memoryWritePaused)');
+  });
+});
