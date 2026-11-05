@@ -233,6 +233,31 @@ vi.mock('@/lib/chats', () => ({
   }
 }));
 
+/**
+ * 八个模块开关 + 「暂停长期记忆写入」全关时的那一份偏好。
+ *
+ * 今天没有任何一条 memories 路由读它（这正是片L 那条用例要钉住的裁决），
+ * 但把替身摆在这里，将来若有人给这一屏补闸门，跑的是这份全 false 的偏好而不是真库，
+ * 用例的失败也就只会是「裁决被推翻」，不会伪装成一个数据库连接错误。
+ */
+const allFlagsOff = vi.hoisted(() => ({
+  memoryEnabled: false,
+  userModelEnabled: false,
+  emotionEnabled: false,
+  associationEnabled: false,
+  timelineEnabled: false,
+  reflectionEnabled: false,
+  decisionMemoryEnabled: false,
+  adaptiveMemoryEnabled: false,
+  emotionTransparency: 'implicit' as const,
+  memoryWritePaused: false
+}));
+
+vi.mock('@/lib/cognitive/preferences', () => ({
+  getCognitivePreferences: () => Promise.resolve(allFlagsOff),
+  updateCognitivePreferences: () => Promise.resolve(allFlagsOff)
+}));
+
 const BASE = 'http://127.0.0.1:3000/api/account/cognitive/memories';
 
 /** 服务层返回的那一行的形状；到这里正文已经是解密后的明文，只回给所有者。 */
@@ -1164,5 +1189,87 @@ describe('一条记忆的证据', () => {
 
     expect(response.status).toBe(200);
     expect(db.evidenceCalls).toEqual([{ memoryId: 'whatever', userId: 'user-a' }]);
+  });
+});
+
+/**
+ * 片L 的裁决（任务书 1.1「所有模块开关必须在服务端执行」的边界）。
+ *
+ * 「关了就真的不读不写」管的是认知引擎自己：注入提示词、派生视图（时间线/变化/网络/洞察/画像）、
+ * 后台任务——那五处都实打实查过 `memoryEnabled`，片 3 补的就是它们。
+ * 这一屏不在那五处里，而且是刻意不在：
+ *
+ * 一、数据已经躺在库里，正文只有 session 里这一个用户读得到，这里没有「模块」在运行，
+ *    只有用户行使任务书第七节要他始终保有的查看、修改、暂停、删除权。
+ * 二、给管理屏补闸门会把「关掉长期记忆」变成「看不见也删不掉自己已有的记忆」——
+ *    那是一扇进得去出不来的门，正好是 7.2 归档那一节反对的形状。
+ * 三、反向的门也关不上：真正的写侧闸门在 memory-module 里，关着就不再产生新行；
+ *    这一屏只处理已经存在的行。
+ *
+ * 所以这里的断言是「全关时七条路一条都不设闸」。它的牙齿由变异探针量过：
+ * 在列表路由 `requireUser` 之后临时插入 `if (!preferences.memoryEnabled) return jsonError(403)`，
+ * 这一节立刻红；探针按字面回滚。
+ */
+describe('八个开关全关时，记忆管理的七条路一条都不设闸', () => {
+  it('列表和单条照常返回，正文照样解到收件人', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+
+    const list = await call('GET');
+    const single = await call('GET', '/mem-1');
+
+    expect(list.response.status).toBe(200);
+    expect(list.payload.data.memories.map((row: { content: string }) => row.content)).toEqual(['我在用 Prisma']);
+    expect(single.response.status).toBe(200);
+    expect(single.payload.data.memory.content).toBe('我在用 Prisma');
+  });
+
+  it('一条记忆的证据照常读', async () => {
+    db.evidenceRows = [{ id: 'ev-1', kind: 'supports', origin: 'explicit' }];
+
+    const { response } = await call('GET', '/mem-1/evidence');
+
+    expect(response.status).toBe(200);
+    expect(db.evidenceCalls).toEqual([{ memoryId: 'mem-1', userId: 'user-a' }]);
+  });
+
+  it('改口照常产生演化，origin 仍由服务端定成「用户已确认」', async () => {
+    store(memoryDto({ content: '我在用 Next.js 14' }));
+
+    const { response } = await call('PATCH', '/mem-1', { content: '我在用 Next.js 15', reason: '版本记错了' });
+
+    expect(response.status).toBe(200);
+    expect(db.reviseCalls).toHaveLength(1);
+    expect(db.reviseCalls[0]).toMatchObject({ origin: 'userConfirmed' });
+  });
+
+  it('撤回、归档、恢复三条路照常走得通', async () => {
+    store(memoryDto({ content: '我叫小明' }));
+
+    const retract = await call('POST', '/mem-1/retract', { reason: '名字说错了' });
+    const archive = await call('POST', '/mem-1/archive');
+    const restore = await call('POST', '/mem-1/restore');
+
+    expect(retract.payload.data.retracted).toBe(true);
+    expect(archive.response.status).toBe(200);
+    expect(restore.payload.data.restored).toBe(true);
+  });
+
+  it('三种永久删除照常删得掉，而且仍然走完审计', async () => {
+    store(memoryDto({ id: 'mem-1', content: '我在用 Prisma' }));
+    store(memoryDto({ id: 'mem-2', chatId: 'chat-2', content: '我在学 Rust' }));
+
+    const one = await call('DELETE', '/mem-1');
+    const byChat = await call('DELETE', '', undefined, '?scope=chat&chatId=chat-2');
+    const all = await call('DELETE', '', undefined, '?scope=all');
+
+    expect(one.payload.data.purged).toBe(1);
+    expect(byChat.payload.data.purged).toBe(1);
+    expect(all.payload.data.purged).toBe(0);
+    expect(db.stored.size).toBe(0);
+    expect(db.audits.map((row) => row.action)).toEqual([
+      'user.memory_purge',
+      'user.memory_purge_by_chat',
+      'user.memory_purge_all'
+    ]);
   });
 });
