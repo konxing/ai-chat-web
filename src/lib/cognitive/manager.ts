@@ -1,5 +1,5 @@
 import { log } from '@/lib/logger';
-import { getCognitivePreferences, type CognitivePreferences } from './preferences';
+import { getCognitivePreferences, type CognitivePreferences, type EmotionTransparency } from './preferences';
 
 export type CognitiveModuleKey =
   | 'memory'
@@ -19,6 +19,12 @@ export interface CognitiveTurn {
   sourceMessageId?: string;
   /** 用户说话的时刻，比「服务器现在处理到这一条」更接近事实发生的时间。 */
   occurredAt?: Date;
+  /**
+   * 情绪行的呈现档位（任务书 8.3）。由引擎在跑模块之前填上，取自刚读过的那一行偏好——
+   * 模块不该为了同一个值各读一遍数据库，每轮对话都在这条路径上。
+   * 缺席就是 `implicit`：直接调模块的调用方（评测 Harness、后台写侧）拿到的都是今天的形状。
+   */
+  emotionTransparency?: EmotionTransparency;
 }
 
 /** 模块产出的一段可注入提示词的文本。label 是给前端分组用的中文名。 */
@@ -69,10 +75,15 @@ export interface CognitiveReadResult {
 }
 
 export async function runCognitiveReads(turn: CognitiveTurn): Promise<CognitiveReadResult> {
-  const enabled = await enabledModules(turn.userId);
+  const preferences = await readPreferences(turn.userId);
+  if (!preferences) return { blocks: [], failed: [] };
+  const enabled = [...registry.values()].filter((module) => preferences[MODULE_SWITCH[module.key]] === true);
+  // 那一行偏好刚读过一次，档位就在这里顺手交给模块：每轮对话都走这条路，
+  // 让每个模块为同一个值各查一遍库只会把关键路径变长，读到的还是同一个数。
+  const scoped: CognitiveTurn = { ...turn, emotionTransparency: preferences.emotionTransparency };
   const blocks: CognitiveBlock[] = [];
   const failed: CognitiveModuleKey[] = [];
-  for (const outcome of await settleAll(enabled, (module) => module.read(turn), COGNITIVE_MODULE_DEADLINE_MS)) {
+  for (const outcome of await settleAll(enabled, (module) => module.read(scoped), COGNITIVE_MODULE_DEADLINE_MS)) {
     if (outcome.status === 'ok') blocks.push(...outcome.value);
     else {
       failed.push(outcome.module.key);
@@ -105,7 +116,11 @@ export async function runCognitiveWrites(
   turn: CognitiveTurn,
   deadlineMs: number = COGNITIVE_MODULE_DEADLINE_MS
 ): Promise<CognitiveWriteResult> {
-  const enabled = (await enabledModules(turn.userId)).filter((module) => module.write);
+  const preferences = await readPreferences(turn.userId);
+  if (!preferences) return { attempted: [], failed: [] };
+  const enabled = [...registry.values()].filter(
+    (module) => module.write && preferences[MODULE_SWITCH[module.key]] === true
+  );
   const failed: CognitiveWriteFailure[] = [];
   for (const outcome of await settleAll(enabled, (module) => module.write!(turn), deadlineMs)) {
     if (outcome.status !== 'ok') {
@@ -116,16 +131,19 @@ export async function runCognitiveWrites(
   return { attempted: enabled.map((module) => module.key), failed };
 }
 
-/** 开关读不出来就当全关——认知引擎宁可什么都不做，也不能把对话带下水。 */
-async function enabledModules(userId: string): Promise<CognitiveModule[]> {
-  let preferences: CognitivePreferences;
+/**
+ * 那一行偏好读不出来就当全关——认知引擎宁可什么都不做，也不能把对话带下水。
+ *
+ * 返回 null 而不是空数组，是因为调用方要的有两样：哪些模块该跑，和偏好上的其它字段
+ * （现在只有情绪档位一个，任务书 8.3）。开关筛完就把其余丢掉，模块再也拿不到档位。
+ */
+async function readPreferences(userId: string): Promise<CognitivePreferences | null> {
   try {
-    preferences = await getCognitivePreferences(userId);
+    return await getCognitivePreferences(userId);
   } catch {
     log.warn('cognitive.preferences_unavailable', { userId });
-    return [];
+    return null;
   }
-  return [...registry.values()].filter((module) => preferences[MODULE_SWITCH[module.key]] === true);
 }
 
 type Outcome<T> =

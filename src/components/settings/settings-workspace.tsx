@@ -8,6 +8,7 @@ import {
   Bot,
   Brain,
   Check,
+  Fingerprint,
   History,
   KeyRound,
   Laptop,
@@ -46,6 +47,7 @@ import { DecisionPanel } from './decision-panel';
 import { TimelinePanel } from './timeline-panel';
 import { MemoryGraphPanel } from './memory-graph-panel';
 import { ReflectionPanel } from './reflection-panel';
+import { ProfilePanel } from './profile-panel';
 
 interface AccountUser {
   id: string;
@@ -87,6 +89,7 @@ type Tab =
   | 'memoryGraph'
   | 'decisions'
   | 'reflections'
+  | 'userModel'
   | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
@@ -351,6 +354,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['memoryGraph', '记忆网络', Network],
               ['decisions', '决策', Scale],
               ['reflections', '洞察', Lightbulb],
+              ['userModel', '画像', Fingerprint],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -760,6 +764,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'decisions' ? <DecisionPanel /> : null}
 
           {tab === 'reflections' ? <ReflectionPanel /> : null}
+
+          {tab === 'userModel' ? <ProfilePanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

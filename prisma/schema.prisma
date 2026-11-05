@@ -219,6 +219,7 @@ model User {
   reflections      ReflectionRecord[]
   reflectionCitations ReflectionCitation[]
   memoryAccessTurns   MemoryAccessTurn[]
+  userProfileEntries  UserProfileEntry[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -862,3 +863,34 @@ model MemoryAccessTurn {
   @@unique([sourceMessageId])
   @@index([userId, createdAt])
 }
+
+/// 用户画像条目（任务书 8.2）。这张表里只存用户确认过的自我描述。
+///
+/// 「只存确认过的」在这里是结构，不是承诺，三处一起兜：
+/// 一、`confirmedAt` 不可空，迁移也不给它 DEFAULT——值只能来自服务层写入那一刻的盖章；
+/// 二、服务层的写入入参里根本没有这个字段（测试断的是 ProfileEntryInput 的形状），
+///     所以「先存着，等以后确认」这种调用在类型层面就递不进去；
+/// 三、没确认的候选只在纯函数层现算（profile-candidates.ts），永不落库，
+///     所以这张表不需要「候选/已确认」那种状态列——有状态列就有默认值，有默认值就能绕过确认。
+///
+/// 正文跟记忆同等对待：密文，AAD 绑 `userId + 行 id + 字段名`。
+/// 来源 id 是数组，外键管不到它，而且这里故意不管：那两个数组记的是「你确认时依据的是哪几条」，
+/// 是一个时间戳式的事实。用户忘记某条记忆之后，这个来源不该被悄悄改写，也不该连带删掉画像条目
+/// ——画像不是派生记录。解析不出来的 id 在界面上就是解析不出来，不谎报来源。
+model UserProfileEntry {
+  id                  String   @id @default(uuid())
+  userId              String
+  contentCiphertext   String   @db.Text
+  sourceMemoryIds     String[]
+  sourceReflectionIds String[]
+  confirmedAt         DateTime
+  /// 用户后来改过这句话的时刻。没改过就是 null——「改过」和「什么时候确认的」是两件不同的事。
+  editedAt            DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, confirmedAt])
+}
+

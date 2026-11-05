@@ -24,6 +24,7 @@ const db = vi.hoisted(() => ({
   assessReturnsEmpty: false,
   band: 'medium' as 'low' | 'medium' | 'high',
   policies: null as unknown,
+  emotionTransparency: 'implicit' as 'off' | 'implicit' | 'explicit',
   policyCalls: 0
 }));
 
@@ -38,7 +39,7 @@ vi.mock('@/lib/cognitive/preferences', () => ({
       reflectionEnabled: false,
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
-      emotionTransparency: 'implicit',
+      emotionTransparency: db.emotionTransparency,
       memoryWritePaused: db.memoryWritePaused
     })
 }));
@@ -183,6 +184,7 @@ beforeEach(() => {
   db.assessReturnsEmpty = false;
   db.band = 'medium';
   db.policies = null;
+  db.emotionTransparency = 'implicit';
   db.policyCalls = 0;
 });
 
@@ -460,6 +462,38 @@ describe('读侧：记忆作为数据进提示词', () => {
     expect(blocks[0]?.text).toContain('项目');
     expect(blocks[0]?.text).toContain('技术项目');
     expect(blocks[0]?.text).toContain('亲口说');
+  });
+
+  it('情绪行的三档真的挂在读路径上：off 不带入、explicit 报条数、默认与今天一样', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' }),
+      memoryRow({ id: 'mem-tech', content: '我在用 Prisma' })
+    ];
+
+    const off = await memoryModule.read({ ...TURN, content: '在吗', emotionTransparency: 'off' });
+    const implicit = await memoryModule.read({ ...TURN, content: '在吗' });
+    const explicit = await memoryModule.read({ ...TURN, content: '在吗', emotionTransparency: 'explicit' });
+
+    // off 是「连看都不看」：正文不进 text，id 也不进引用清单。
+    expect(off[0]?.text).not.toContain('发紧');
+    expect(off[0]?.memoryIds).toEqual(['mem-tech']);
+    expect(implicit[0]?.text).toContain('发紧');
+    expect(explicit[0]?.text).toContain('其中 1 条与情绪有关');
+    // 没传档位 = 库里的默认档 = 改造前的形状，一个字都不许多。
+    expect(implicit[0]?.text).not.toContain('与情绪有关');
+  });
+
+  it('用户在设置页选的那一档，走到这一轮的提示词里', async () => {
+    db.memoryEnabled = true;
+    db.emotionTransparency = 'explicit';
+    db.readRows = [memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' })];
+
+    ensureCognitiveModules();
+    const result = await runCognitiveReads({ ...TURN, content: '在吗' });
+
+    // 这一条钉的是整条链：偏好行 → 引擎交给模块 → 渲染。中间任何一环把档位丢掉，这里就静默回到旧档。
+    expect(result.blocks[0]?.text).toContain('其中 1 条与情绪有关');
   });
 
   it('没有记忆时不注入空块', async () => {

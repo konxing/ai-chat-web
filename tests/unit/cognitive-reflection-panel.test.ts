@@ -94,9 +94,9 @@ describe('不许有没人消费的交互', () => {
     expect(PANEL_CODE).not.toContain("status === 'PENDING' ? (");
   });
 
-  it('画像与关联两列至今没有消费者，所以策略面板依旧不许给它们控件', () => {
-    expect(stripComments(POLICY_PANEL)).not.toContain('allowUserProfile');
+  it('关联一列至今没有消费者，策略面板不许给它控件；画像一列片 d 起有，必须给', () => {
     expect(stripComments(POLICY_PANEL)).not.toContain('allowAssociation');
+    expect(stripComments(POLICY_PANEL)).toContain('allowUserProfile');
   });
 });
 

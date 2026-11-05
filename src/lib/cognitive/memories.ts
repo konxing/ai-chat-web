@@ -548,6 +548,27 @@ export async function listCitationEdges(userId: string): Promise<Array<{ reflect
 }
 
 /**
+ * 按 id 取记忆行的情境列。只取这两列，不解密正文。
+ *
+ * 画像候选的情境闸门要认的是「这条洞察引用过的那些记忆各属于什么情境」，而那些行**可能是已归档、
+ * 已被取代的历史行**：`listMemories` 的默认桶把它们挡在门外，用那份列表去解析情境会把
+ * 「关着门的那一路」读成「这条洞察没有引用」，于是派生品从旁边绕过了用户的排除（任务书 8.3）。
+ * 这里按 id 直查，不看生命周期：解析不出来的就是解析不出来，调用方会因此不提议。
+ */
+export async function listMemoryContextsByIds(
+  userId: string,
+  memoryIds: readonly string[]
+): Promise<Map<string, MemoryContext>> {
+  if (memoryIds.length === 0) return new Map();
+  const rows = await prisma.memoryItem.findMany({
+    where: { userId, id: { in: [...memoryIds] } },
+    select: { id: true, context: true },
+    take: MEMORY_LIST_MAX_ROWS
+  });
+  return new Map(rows.map((row) => [row.id, fromDbMemoryContext(row.context)]));
+}
+
+/**
  * 把后台算好的向量写进那一行。
  *
  * 单独一步、不进写记忆那个事务：向量是一趟可选的出站调用，端点慢了或挂了

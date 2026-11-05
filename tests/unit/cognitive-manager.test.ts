@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   row: {} as Record<string, unknown>,
   throws: false,
+  reads: 0,
   warns: [] as Array<[string, Record<string, unknown>]>
 }));
 
@@ -15,6 +16,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     cognitivePreference: {
       findUnique: () => {
+        db.reads += 1;
         if (db.throws) return Promise.reject(new Error('数据库连接断了'));
         return Promise.resolve(Object.keys(db.row).length ? db.row : null);
       }
@@ -38,6 +40,9 @@ async function loadManager() {
   return await import('@/lib/cognitive/manager');
 }
 
+// 只引类型：这份替身要断言「交给模块的那份 turn」，而编译期不想要那个模块的运行时代码。
+type CognitiveTurn = import('@/lib/cognitive/manager').CognitiveTurn;
+
 function turnFixture(overrides: Record<string, unknown> = {}) {
   return { userId: 'user-a', chatId: 'chat-1', content: '我今天不太想聊工作', ...overrides };
 }
@@ -45,6 +50,7 @@ function turnFixture(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   db.row = {};
   db.throws = false;
+  db.reads = 0;
   db.warns = [];
 });
 
@@ -79,6 +85,28 @@ describe('认知模块的读侧', () => {
 
     expect(result.blocks).toEqual([{ module: 'memory', label: '相关记忆', text: '用户的孩子叫小满' }]);
     expect(result.failed).toEqual([]);
+  });
+
+  it('情绪呈现档位由引擎交给模块：那一行偏好每轮只读一次', async () => {
+    const manager = await loadManager();
+    db.row = { memoryEnabled: true, emotionTransparency: 'EXPLICIT' };
+    const seen: Array<string | undefined> = [];
+    manager.registerCognitiveModule({
+      key: 'memory',
+      read: (turn) => {
+        seen.push(turn.emotionTransparency);
+        return Promise.resolve([]);
+      }
+    });
+    const turn: CognitiveTurn = turnFixture();
+
+    await manager.runCognitiveReads(turn);
+
+    // 库里存的是大写枚举，模块拿到的是对外的小写值：这一条同时钉住「换算在服务层就做完了」。
+    expect(seen).toEqual(['explicit']);
+    expect(db.reads).toBe(1);
+    // 交给模块的是副本，不是就地改：调用方那份 turn 之后还要给写侧用。
+    expect(turn.emotionTransparency).toBeUndefined();
   });
 
   it('一个模块抛错，另一个照常产出，且错误原文不进返回值也不进日志', async () => {

@@ -249,6 +249,108 @@ describe('renderMemoryBlock', () => {
   });
 });
 
+describe('emotionTransparency：三档只管呈现，不给你的情绪贴标签', () => {
+  const base = { chatId: 'chat-1', now: OCCURRED, policies: DEFAULT_MEMORY_POLICIES };
+
+  /** 一条情绪 + 一条别的：档位的作用范围只在情绪那一类上。 */
+  function moodPool() {
+    return [
+      row({ id: 'mood', type: 'emotion', content: '最近一想到汇报就发紧', recordedAt: isoDaysAgo(1) }),
+      row({ id: 'tech', content: '我在用 Prisma 做数据库层', recordedAt: isoDaysAgo(2) })
+    ];
+  }
+
+  it('不传档位就是 implicit，而 implicit 与改造前逐字节相同', () => {
+    const rows = moodPool();
+    const legacy = selectMemoryCandidates({ ...base, query: 'Prisma 发紧', rows });
+    const implicit = selectMemoryCandidates({ ...base, query: 'Prisma 发紧', rows, emotionTransparency: 'implicit' });
+
+    expect(implicit).toEqual(legacy);
+    // 库里这一列的默认值就是 IMPLICIT，所以「今天线上是什么」= 「implicit 是什么」。
+    // 两句都要：前一句比对的是同一个函数的两种调用，这一句钉的是「两参数的老写法本身没有那句说明」。
+    expect(renderMemoryBlock(legacy, new Map())[0]?.text).not.toContain('与情绪有关');
+    expect(renderMemoryBlock(legacy, new Map())[0]?.text).toBe(
+      renderMemoryBlock(implicit, new Map(), 'implicit')[0]?.text
+    );
+  });
+
+  it('off：情绪行在排序之前就被丢掉，所以它也进不了引用清单', () => {
+    const picked = selectMemoryCandidates({ ...base, query: '发紧', rows: moodPool(), emotionTransparency: 'off' });
+
+    expect(picked.map((memory) => memory.id)).toEqual(['tech']);
+    const [block] = renderMemoryBlock(picked, new Map());
+    expect(block?.memoryIds).toEqual(['tech']);
+    expect(block?.text).not.toContain('发紧');
+  });
+
+  it('off 只丢情绪那一类，别的行一条都不许多丢', () => {
+    const rows = [...moodPool(), row({ id: 'goal', type: 'goal', content: '我打算明年考研', recordedAt: isoDaysAgo(3) })];
+
+    const picked = selectMemoryCandidates({ ...base, query: 'zzz', rows, emotionTransparency: 'off' });
+
+    expect(picked.map((memory) => memory.id)).toEqual(['tech', 'goal']);
+  });
+
+  it('explicit：末尾多一句「其中 N 条与情绪有关」，N 数的是真进了提示词的条数', () => {
+    const picked = selectMemoryCandidates({ ...base, query: '发紧', rows: moodPool(), emotionTransparency: 'explicit' });
+
+    const [block] = renderMemoryBlock(picked, new Map(), 'explicit');
+
+    expect(block?.text).toContain('其中 1 条与情绪有关');
+    expect(block?.memoryIds).toEqual(['mood', 'tech']);
+  });
+
+  it('explicit 没有情绪行时，文字与 implicit 逐字节相同——那句说明不许无中生有', () => {
+    const rows = [row({ id: 'tech' })];
+
+    expect(renderMemoryBlock(rows, new Map(), 'explicit')[0]?.text).toBe(
+      renderMemoryBlock(rows, new Map(), 'implicit')[0]?.text
+    );
+  });
+
+  it('explicit 被字符预算截掉的情绪行不计进 N：那句关于条数的话只能说模型真读到的', () => {
+    const long = '很'.repeat(MEMORY_READ_MAX_CHARS - 60);
+    const memories = [
+      row({ id: 'mood', type: 'emotion', content: '最近一想到汇报就发紧' }),
+      row({ id: 'huge', content: long })
+    ];
+
+    const [block] = renderMemoryBlock(memories, new Map(), 'explicit');
+
+    // 情绪行进去了，那条超长的普通行没进去；N 只能是真正在文字里的情绪行数。
+    expect(block?.text).toContain('其中 1 条与情绪有关');
+    expect((block?.text ?? '').length).toBeLessThanOrEqual(MEMORY_READ_MAX_CHARS);
+  });
+
+  it('explicit 池子里两条情绪、文字里只有一条时，N 报 1：被截掉的那条模型没读到', () => {
+    const long = '很'.repeat(MEMORY_READ_MAX_CHARS - 60);
+    const memories = [
+      row({ id: 'mood-in', type: 'emotion', content: '最近一想到汇报就发紧' }),
+      row({ id: 'huge', content: long }),
+      row({ id: 'mood-out', type: 'emotion', content: '和家里吵完之后连着三天没说话' })
+    ];
+
+    const [block] = renderMemoryBlock(memories, new Map(), 'explicit');
+
+    // 上一条用例的两端（池子 1 条 / 文字 1 条）数不出差别，这一条才数得出来：
+    // 那句「其中 N 条」说的是模型读到的条数，不是候选池里的条数。
+    expect(block?.text).toContain('其中 1 条与情绪有关');
+    expect(block?.text).not.toContain('连着三天没说话');
+  });
+
+  it('情绪那一行本身一个字都不许多：档位不改写它，只改「说不说有几条」', () => {
+    const [block] = renderMemoryBlock(
+      [row({ id: 'mood', type: 'emotion', content: '最近一想到汇报就发紧' })],
+      new Map(),
+      'explicit'
+    );
+
+    expect(block?.text).toContain('- [情绪｜技术项目｜亲口说] 最近一想到汇报就发紧');
+    // 系统不许在这里长出「焦虑」「抑郁」这种词：那是给用户的情绪命名，任务书 8.3 划的那条线。
+    expect(block?.text).not.toMatch(/焦虑|抑郁|悲伤|紧张|情绪不稳定/);
+  });
+});
+
 describe('assessWithCounts', () => {
   const subject = {
     id: 'mem-1',

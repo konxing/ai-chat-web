@@ -178,6 +178,34 @@ export const memoryRetractSchema = z.object({
   reason: z.string().trim().min(1, '撤回记忆要写明理由').max(500, '理由不能超过 500 字')
 });
 
+/**
+ * 画像条目的写入（任务书 8.2）。
+ *
+ * 请求体里**没有 confirmedAt**，而且不许有：确认时间是服务在 create 那一刻自己盖章的
+ * （src/lib/cognitive/user-profile.ts 的 ProfileEntryInput 根本没有这个字段）。
+ * 白名单不收，从后门递进来的「我去年就确认过了」就变成用户自己能编的一列。
+ *
+ * 正文 1000 字、来源各 20 条这两个数字和服务层同源但各写一遍——validation.ts 不 import 认知层模块，
+ * 它是这条依赖链的叶子（同 reflectionActionSchema 的理由）。数字改一边忘改另一边时，
+ * 严格的那一边先报错，不会静默放宽；tests/unit/cognitive-profile-route.test.ts 钉的是 1000 字整条收、
+ * 1001 字拒，两边各跑一次都跑得到。
+ */
+const profileSourceIdsSchema = z.array(z.string().trim().min(1, '来源 id 不能为空').max(64, '来源 id 不合法')).max(
+  20,
+  '来源最多 20 条'
+);
+
+export const profileEntrySchema = z.object({
+  content: z.string().trim().min(1, '画像正文不能为空').max(1000, '画像正文不能超过 1000 字，请拆成多条'),
+  sourceMemoryIds: profileSourceIdsSchema.optional(),
+  sourceReflectionIds: profileSourceIdsSchema.optional()
+});
+
+/** 改画像正文：只有正文这一扇门。来源是「你确认那一刻的依据」，改一个字都不许顺带动它。 */
+export const profileReviseSchema = z.object({
+  content: z.string().trim().min(1, '画像正文不能为空').max(1000, '画像正文不能超过 1000 字，请拆成多条')
+});
+
 /** 决策的确认/拒绝（任务书 5.5）。动词只有这两个：别的动作在这一版不存在。 */
 export const decisionActionSchema = z.object({
   action: z.enum(['confirm', 'reject'])

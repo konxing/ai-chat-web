@@ -6,6 +6,7 @@ import {
 } from './manager';
 import { extractMemoryCandidates } from './memory-extractor';
 import { decisionModule } from './decision-module';
+import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
 import { embedMemoryText } from './embedding';
@@ -15,7 +16,7 @@ import { log } from '@/lib/logger';
 import { getMemoryPolicies } from './policy';
 import type { MemoryContext, MemoryPolicy } from './policy';
 import type { Confidence } from './confidence';
-import { getCognitivePreferences } from './preferences';
+import { getCognitivePreferences, type EmotionTransparency } from './preferences';
 import { rankMemories, rankMemoriesHybrid, type NumericVector } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
@@ -68,6 +69,17 @@ const BLOCK_HEADER =
  */
 const LOW_CONFIDENCE_MARKER = '（可信度低，不得以确定性语气使用）';
 
+/**
+ * 情绪透明说明（任务书 8.3 的 `explicit` 档）。
+ *
+ * 这一句只报条数，一个形容情绪的词都没有——「其中 1 条与情绪有关」说的是「模型看到的这批数据里
+ * 有情绪类的行」，而「你现在情绪不稳定」是系统给用户的情绪下的判断，后者一句都不许出现。
+ * 措辞由 tests/unit/cognitive-memory-seam.test.ts 逐字钉住。
+ */
+function emotionTransparencyNote(count: number): string {
+  return `（其中 ${count} 条与情绪有关）`;
+}
+
 /** 忽略空白和大小写后相同，就认为是同一句话——重复陈述不该变成第二条记忆。 */
 function dedupeKey(text: string): string {
   return text.replace(/\s+/g, '').toLowerCase();
@@ -82,10 +94,18 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
   // 读不到保留期就注入，等于把用户设成「30 天」的记忆又端回模型面前，宁可这一轮不带记忆。
   const policies = await getMemoryPolicies(turn.userId);
-  const memories = selectMemoryCandidates({ query: turn.content, rows, policies, chatId: turn.chatId, now });
+  const emotionTransparency = turn.emotionTransparency ?? 'implicit';
+  const memories = selectMemoryCandidates({
+    query: turn.content,
+    rows,
+    policies,
+    chatId: turn.chatId,
+    now,
+    emotionTransparency
+  });
   // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
   const confidence = await assessMemories(turn.userId, memories, now);
-  return renderMemoryBlock(memories, confidence);
+  return renderMemoryBlock(memories, confidence, emotionTransparency);
 }
 
 export interface MemorySelectionInput {
@@ -102,6 +122,14 @@ export interface MemorySelectionInput {
   queryVector?: NumericVector | null;
   /** 记忆 id → 已解密的向量；没算过向量的行不出现在这里，也不会在排序里被丢掉。 */
   vectors?: ReadonlyMap<string, NumericVector>;
+  /**
+   * 情绪行这一类要怎么呈现（任务书 8.3）。缺省 `'implicit'`，也就是库里的默认档，
+   * 于是评测 Harness 与任何没传这个字段的调用方拿到的都是今天线上的形状。
+   *
+   * 它管的只有「带不带、说不说带了几条」：`off` 在排序之前就把情绪行丢掉（所以它也进不了引用清单），
+   * `explicit` 在块尾多附一句条数说明。三档都不改写那一行本身，也不给它加任何情绪判词。
+   */
+  emotionTransparency?: EmotionTransparency;
 }
 
 /**
@@ -115,7 +143,11 @@ export interface MemorySelectionInput {
  * 等 5e 用真端点量出增益再决定要不要为它付一次出站。
  */
 export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[] {
-  const usable = input.rows.filter((memory) =>
+  // `off` 丢在保留期过滤之前：这一档要的是「连看都不看」，而不是「看了再藏起来」。
+  // 排在前面才同时保证两件事——情绪行不进排序，也就拿不到名额、进不了 memoryIds。
+  const pool =
+    input.emotionTransparency === 'off' ? input.rows.filter((memory) => memory.type !== 'emotion') : input.rows;
+  const usable = pool.filter((memory) =>
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
   if (input.queryVector == null) {
@@ -139,12 +171,20 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
  */
 export function renderMemoryBlock(
   memories: readonly MemoryDto[],
-  confidence: ReadonlyMap<string, Confidence>
+  confidence: ReadonlyMap<string, Confidence>,
+  emotionTransparency: EmotionTransparency = 'implicit'
 ): CognitiveBlock[] {
   const lines: string[] = [];
   // 进了 text 的那几条才算引用（任务书 8.2）：报一条模型没读到的记忆，比少报一条更糟。
   const used: string[] = [];
-  let size = BLOCK_HEADER.length;
+  // 那句条数说明同样只能数真进了文字的：被预算截掉的情绪行，模型根本没看到它。
+  let emotionUsed = 0;
+  // 说明这一句也要占预算，先给它留位子。留的是「传进来的情绪行条数」这个上界——
+  // 进文字的只会等于或少于它，句子只会更短，所以整块的字保证不越 MEMORY_READ_MAX_CHARS。
+  const emotionInPool = memories.reduce((count, memory) => (memory.type === 'emotion' ? count + 1 : count), 0);
+  const reserve =
+    emotionTransparency === 'explicit' && emotionInPool > 0 ? emotionTransparencyNote(emotionInPool).length + 1 : 0;
+  let size = BLOCK_HEADER.length + reserve;
   for (const memory of memories) {
     const range = describeValidRange(memory);
     const suffix = range === '时间未知' ? '' : `（${range}）`;
@@ -156,10 +196,20 @@ export function renderMemoryBlock(
     if (size + line.length > MEMORY_READ_MAX_CHARS) break;
     lines.push(line);
     used.push(memory.id);
+    if (memory.type === 'emotion') emotionUsed += 1;
     size += line.length;
   }
   if (lines.length === 0) return [];
-  return [{ module: 'memory', label: '长期记忆', text: [BLOCK_HEADER, ...lines].join('\n'), memoryIds: used }];
+  const note =
+    emotionTransparency === 'explicit' && emotionUsed > 0 ? [emotionTransparencyNote(emotionUsed)] : [];
+  return [
+    {
+      module: 'memory',
+      label: '长期记忆',
+      text: [BLOCK_HEADER, ...lines, ...note].join('\n'),
+      memoryIds: used
+    }
+  ];
 }
 
 async function writeMemory(turn: CognitiveTurn): Promise<void> {
@@ -301,4 +351,5 @@ export function ensureCognitiveModules(): void {
   registered = true;
   registerCognitiveModule(memoryModule);
   registerCognitiveModule(decisionModule);
+  registerCognitiveModule(userModelModule);
 }

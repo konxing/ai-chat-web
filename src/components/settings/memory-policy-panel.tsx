@@ -16,30 +16,49 @@ import {
 } from '@/lib/cognitive/memory-display';
 import type { MemoryContext, MemoryPolicy, MemoryRetention, MemoryType } from '@/lib/cognitive/policy';
 import type { PolicyLearningState } from '@/lib/cognitive/policy-learner';
+import type { EmotionTransparency } from '@/lib/cognitive/preferences';
 
 /**
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
  *
- * 只渲染真有代码在消费的五个字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、保留期。
- * 同一张策略表里的「写入画像 / 关联」两项至今没有消费者——grep 得到的只有存储和校验的字段声明，
- * 没有任何运行时代码读它们；偏好表里的八个开关也一样，只有真接进链路的那些是真的。
- * 把它们做成能拨的控件，就是任务书第八节点名禁止的「用假的交互代替」，所以一个都不放，接口和存储原样留着。
+ * 只渲染真有代码在消费的字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、
+ * 是否允许整理进画像、保留期，再加上一个全局的「情绪标注」档位。
+ * 同一张策略表里只剩「关联」一项没有消费者——grep 得到的是它的存储和校验声明，
+ * 没有任何运行时代码读它；偏好表里的 `emotionEnabled` 同理。把它们做成能拨的控件，
+ * 就是任务书第八节点名禁止的「用假的交互代替」，所以一个都不放，接口和存储原样留着。
  *
- * 「允许反思」是 11-04 补上的：洞察扫描（reflection-sweep.ts）真按这一列过闸，
- * 在它出现之前这一屏已经把三个模块（时间线、决策、洞察）的开关都摆出去了，唯独少这一个。
+ * 「允许反思」是 11-04 补上的：洞察扫描（reflection-sweep.ts）真按这一列过闸。
+ * 「允许整理进画像」是 11-05（片 d）补上的：画像候选（profile-candidates.ts）真按这一列过闸，
+ * 关掉之后这种情境里记下的内容既不作为候选，也不作为洞察候选的依据。
  *
- * 一屏同时只展开一张卡：七种情境各自五个控件，全摊开就是三十五控件同屏，
+ * 一屏同时只展开一张卡：七种情境各自六个控件，全摊开就是四十二控件同屏，
  * 谁也说不清刚才那一下点的是哪一条。这条规矩和「记忆」那一屏一致。
  */
 
 const POLICIES_URL = '/api/account/cognitive/policies';
+const PREFERENCES_URL = '/api/account/cognitive';
 
-/** 只有这五个字段能被这一屏改动，草稿就只装这五个，免得把没消费者的字段一起回写。 */
+/**
+ * 「情绪标注」三档的界面措辞。
+ *
+ * 这一组摆在这里而不是策略卡里，因为它是一个全局档位、七种情境共用一个值。
+ * 名字刻意叫「标注」不叫「允许情绪」：`off` 这一档不是「把情绪记下来但不给你看」，
+ * 而是情绪类的行**连候选池都不进**——那等于改了模型看到你什么，界面上必须把这层说出来。
+ */
+const EMOTION_ORDER: readonly EmotionTransparency[] = ['off', 'implicit', 'explicit'];
+const EMOTION_LABELS: Record<EmotionTransparency, string> = {
+  off: '不用情绪类记忆',
+  implicit: '用，但不特别说明',
+  explicit: '用，并说明有几条和情绪有关'
+};
+
+/** 只有这六个字段能被这一屏改动，草稿就只装这六个，免得把没消费者的字段一起回写。 */
 interface Draft {
   allowPersistence: boolean;
   allowedMemoryTypes: MemoryType[];
   requireConfirmation: boolean;
   allowReflection: boolean;
+  allowUserProfile: boolean;
   retention: MemoryRetention;
 }
 
@@ -49,6 +68,7 @@ function toDraft(policy: MemoryPolicy): Draft {
     allowedMemoryTypes: [...policy.allowedMemoryTypes],
     requireConfirmation: policy.requireConfirmation,
     allowReflection: policy.allowReflection,
+    allowUserProfile: policy.allowUserProfile,
     retention: policy.retention
   };
 }
@@ -58,6 +78,7 @@ function isSameDraft(left: Draft, right: Draft): boolean {
     left.allowPersistence === right.allowPersistence &&
     left.requireConfirmation === right.requireConfirmation &&
     left.allowReflection === right.allowReflection &&
+    left.allowUserProfile === right.allowUserProfile &&
     left.retention === right.retention &&
     [...left.allowedMemoryTypes].sort().join(',') === [...right.allowedMemoryTypes].sort().join(',')
   );
@@ -73,6 +94,10 @@ export function MemoryPolicyPanel() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
+  // 全局的「情绪标注」档位：读不到就摆 null，界面显示「档位未知」而不是假装它是默认那档。
+  const [emotion, setEmotion] = useState<EmotionTransparency | null>(null);
+  const [emotionBusy, setEmotionBusy] = useState(false);
+  const [emotionError, setEmotionError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +118,11 @@ export function MemoryPolicyPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 情绪标注住在偏好表里，和策略表是两个接口，所以单独读一次。
+  useEffect(() => {
+    void loadEmotion();
+  }, []);
 
   function close() {
     setOpen(null);
@@ -159,6 +189,35 @@ export function MemoryPolicyPanel() {
       setFormError(errorMessage(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function loadEmotion() {
+    try {
+      const data = await apiFetch<{ preferences: { emotionTransparency: EmotionTransparency } }>(PREFERENCES_URL);
+      setEmotion(data.preferences.emotionTransparency);
+    } catch {
+      // 读失败留在 null：这一档的三个值都会改变模型看到的东西，猜一个默认值等于替用户决定。
+      setEmotion(null);
+    }
+  }
+
+  async function saveEmotion(next: EmotionTransparency) {
+    if (next === emotion) return;
+    setEmotionBusy(true);
+    setEmotionError('');
+    try {
+      const data = await apiFetch<{ preferences: { emotionTransparency: EmotionTransparency } }>(PREFERENCES_URL, {
+        method: 'PATCH',
+        json: { emotionTransparency: next }
+      });
+      // 以服务端回读的值为准：界面跟着它走才不会和库里分叉。
+      setEmotion(data.preferences.emotionTransparency);
+      push('情绪标注已更新');
+    } catch (err) {
+      setEmotionError(errorMessage(err));
+    } finally {
+      setEmotionBusy(false);
     }
   }
 
@@ -269,6 +328,21 @@ export function MemoryPolicyPanel() {
                     </div>
 
                     <div>
+                      <label className="flex items-start gap-2 text-[13px] text-white/75">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 accent-emerald-400"
+                          checked={draft.allowUserProfile}
+                          onChange={(e) => setDraft({ ...draft, allowUserProfile: e.target.checked })}
+                        />
+                        允许把这种情境整理进画像
+                      </label>
+                      <p className="mt-1.5 text-[11.5px] text-white/35">
+                        关掉后，这种情境里记下的内容不再作为画像候选的依据。
+                      </p>
+                    </div>
+
+                    <div>
                       <label className="label">保留期</label>
                       <select
                         className="field"
@@ -316,10 +390,48 @@ export function MemoryPolicyPanel() {
         )}
       </div>
 
+      <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+        <h3 className="text-[13.5px] text-white/85">情绪标注</h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
+          这一档只改「对话时模型看到的那批记忆里有没有情绪类的那几行」，不改记不记：
+          上面的类型勾选决定落不落库，这里决定端不端给模型。
+          三个档位都不会给你的情绪下判断，最亮的一档也只报一个条数。
+        </p>
+
+        <div className="mt-3">
+          <label className="label">情绪类记忆的用法</label>
+          <select
+            className="field"
+            value={emotion ?? ''}
+            disabled={emotion === null || emotionBusy}
+            onChange={(e) => void saveEmotion(e.target.value as EmotionTransparency)}
+          >
+            {emotion === null ? <option value="">档位未知</option> : null}
+            {EMOTION_ORDER.map((option) => (
+              <option key={option} value={option}>
+                {EMOTION_LABELS[option]}
+              </option>
+            ))}
+          </select>
+          {emotion === null ? (
+            <p className="mt-1.5 text-[11.5px] text-white/35">
+              当前档位没读到。这里不替你猜一个，因为三个选项都会改变模型看到的内容。
+            </p>
+          ) : null}
+          <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-white/30">
+            <li>{EMOTION_LABELS.off}：情绪类的行连候选池都不进，模型看不到它们。</li>
+            <li>{EMOTION_LABELS.implicit}：和其它记忆一起端给模型，界面与提示里都不特别说明。</li>
+            <li>{EMOTION_LABELS.explicit}：一起端给模型，并在末尾加一句「其中 N 条与情绪有关」。</li>
+          </ul>
+          {emotionError ? <Alert tone="error" className="mt-2">{emotionError}</Alert> : null}
+        </div>
+      </div>
+
       <p className="mt-5 text-[11.5px] leading-relaxed text-white/30">
-        还没做的部分：用户画像、情绪、关联三个模块尚未实现，它们的开关不会出现在这里，等模块落地再一起上。
-        策略里的「写入画像 / 关联」两项接口已能保存，但目前没有代码读取；「反思」一项已经开始被后台读取——
-        某个情境不放开它，那个情境里的记忆就不会出现在洞察里。
+        还没做的部分：策略表里的「关联」一列至今没有运行时代码读它，接口能保存但界面上不给控件；
+        偏好表里的情绪总开关同理，能用的情绪控件只有上面那三档。
+        「反思」「写入画像」两列已经有后台真按它们过闸——某个情境不放开反思，那个情境里的记忆就不会出现在洞察里；
+        不放开画像，它就不出现在画像候选里。
       </p>
     </section>
   );
