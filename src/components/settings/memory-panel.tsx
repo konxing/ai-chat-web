@@ -9,14 +9,18 @@ import {
   CONFIDENCE_BAND_LABELS,
   CONTEXT_LABELS,
   ORIGIN_LABELS,
+  RECONSOLIDATION_LABELS,
   REVISION_ACTION_LABELS,
   TYPE_LABELS,
+  describeAccessCap,
+  describeAccessCount,
   describeArchivedListCap,
   describeConfidenceFactor,
   describeMemoryListCap,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
+import type { ReconsolidationFlag } from '@/lib/cognitive/reconsolidation';
 import type { ExclusionDto } from '@/lib/cognitive/exclusions';
 import type { EvidenceDto } from '@/lib/cognitive/evidence';
 import type { ConfidenceBand, ConfidenceFactor } from '@/lib/cognitive/confidence';
@@ -80,6 +84,11 @@ export function MemoryPanel() {
   const [archivedCapped, setArchivedCapped] = useState(false);
   const [chats, setChats] = useState<Record<string, string>>({});
   const [confidence, setConfidence] = useState<Record<string, ConfidenceEntry>>({});
+  /** 再巩固标记与访问次数（任务书 7.1）：两份旁表，都不参与置信度那一份算分。 */
+  const [reviews, setReviews] = useState<Record<string, ReconsolidationFlag[]>>({});
+  const [access, setAccess] = useState<Record<string, number>>({});
+  const [accessWindow, setAccessWindow] = useState(0);
+  const [accessCapped, setAccessCapped] = useState(false);
   const [evidence, setEvidence] = useState<EvidenceDto[]>([]);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -108,6 +117,10 @@ export function MemoryPanel() {
         archivedCapped: boolean;
         chats: Record<string, string>;
         confidence: Record<string, ConfidenceEntry>;
+        reviews: Record<string, ReconsolidationFlag[]>;
+        access: Record<string, number>;
+        accessWindow: number;
+        accessCapped: boolean;
       }>('/api/account/cognitive/memories');
       setMemories(data.memories);
       setArchived(data.archived ?? []);
@@ -115,6 +128,10 @@ export function MemoryPanel() {
       setArchivedCapped(data.archivedCapped);
       setChats(data.chats);
       setConfidence(data.confidence ?? {});
+      setReviews(data.reviews ?? {});
+      setAccess(data.access ?? {});
+      setAccessWindow(data.accessWindow ?? 0);
+      setAccessCapped(data.accessCapped === true);
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -403,6 +420,8 @@ export function MemoryPanel() {
   // 两份列表各自的上限说明：没到上限就是空串，界面据此一个字都不摆。
   const capNote = describeMemoryListCap(capped, memories.length);
   const archivedCapNote = describeArchivedListCap(archivedCapped, archived.length);
+  // 访问窗口截断了也要说：不然「最近 200 轮」听起来像全部历史。
+  const accessCapNote = describeAccessCap(accessCapped, accessWindow);
 
   return (
     <section className="panel p-5 sm:p-6">
@@ -433,6 +452,7 @@ export function MemoryPanel() {
       <div className="mt-5 space-y-2.5">
         {loadError ? <Alert tone="error">{loadError}</Alert> : null}
         {capNote ? <Alert tone="info">{capNote}</Alert> : null}
+      {accessCapNote ? <Alert tone="info">{accessCapNote}</Alert> : null}
         {loading ? (
           <LoadingBlock label="加载记忆" />
         ) : memories.length === 0 ? (
@@ -450,6 +470,9 @@ export function MemoryPanel() {
             const isPurge = panel?.kind === 'purge' && panel.id === memory.id;
             const isEvidence = panel?.kind === 'evidence' && panel.id === memory.id;
             const band = confidence[memory.id]?.band;
+            // 再巩固标记和访问次数：服务端没给条目就是「没算过 / 没带过」，界面不许自己补。
+            const flags = reviews[memory.id] ?? [];
+            const count = access[memory.id];
             const chatPurgeBusy = bulkBusy === `chat:${memory.chatId}`;
             return (
               <div key={memory.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
@@ -481,9 +504,23 @@ export function MemoryPanel() {
                       {band ? (
                         <span className={BAND_BADGE[band]}>{CONFIDENCE_BAND_LABELS[band]}</span>
                       ) : null}
+                      {/*
+                        再巩固标记（任务书 7.1）用中性的 chip，不给琥珀色徽章：
+                        这三条只回答「凭据变了，值得回看一眼」，不是「这条有问题」。
+                        真过期的那条，档位自己会掉到「可信度低」，颜色在那儿已经说过了。
+                      */}
+                      {flags.length > 0
+                        ? flags.map((flag) => (
+                            <span key={flag} className="chip !px-2 !py-0.5 !text-[10.5px]">
+                              {RECONSOLIDATION_LABELS[flag]}
+                            </span>
+                          ))
+                        : null}
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-white/30">
                       <span>记于 {timeAgo(memory.recordedAt)}</span>
+                      {/* 只有被带进过提示词的才报次数：没有条目就是「这些轮里没带过」，不摆一个 0。 */}
+                      {count !== undefined ? <span>{describeAccessCount(accessWindow, count)}</span> : null}
                       {memory.chatId ? (
                         chats[memory.chatId] ? (
                           <Link

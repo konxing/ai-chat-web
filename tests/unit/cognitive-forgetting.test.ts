@@ -27,6 +27,8 @@ const db = vi.hoisted(() => ({
   citations: [] as Row[],
   decisions: [] as Row[],
   messages: [] as Row[],
+  /** 检索访问行（任务书 7.1 那张表）：memoryIds 是数组列，所以求值器要认 hasSome。 */
+  access: [] as Row[],
   /** 每张表上一次 findMany 交回给代码的那批行——用它断言「只读了 id，没读正文」。 */
   returned: {} as Record<string, Row[]>,
   txOps: [] as string[],
@@ -42,6 +44,8 @@ function satisfies(value: unknown, condition: unknown): boolean {
   if (typeof condition !== 'object') return value === condition;
   const c = condition as Record<string, unknown>;
   if ('in' in c) return (c.in as unknown[]).includes(value);
+  // 数组列的「至少命中一个」：访问表按 memoryIds 找轮次用的就是它。
+  if ('hasSome' in c) return Array.isArray(value) && (c.hasSome as unknown[]).some((v) => value.includes(v));
   return value === condition;
 }
 
@@ -121,6 +125,24 @@ function taskClient(sink: string[]) {
 }
 
 /**
+ * 检索访问表（任务书 7.1）。只支持 deleteMany：这一屏只关心「忘记之后痕迹还在不在」。
+ *
+ * 它**不做级联**，也不该做——真库上 sourceMessageId 那条外键会在消息被删时带走整行，
+ * 而记忆被忘记时数组里那个 id 不会自己消失，只能显式删。所以断言看的正是显式删。
+ */
+function accessClient(sink: string[]) {
+  return {
+    deleteMany: ({ where }: { where: unknown }) => {
+      sink.push('access_delete');
+      const kept = db.access.filter((turn) => !matches(turn, where));
+      const count = db.access.length - kept.length;
+      db.access = kept;
+      return Promise.resolve({ count });
+    }
+  };
+}
+
+/**
  * 一张普通的行集合：只支持 findMany / deleteMany，够派生清理用。
  *
  * 这张替身**不做外键级联**——真库上 `ReflectionCitation.memoryId` 是 `onDelete: Cascade`，
@@ -178,6 +200,7 @@ vi.mock('@/lib/prisma', () => ({
         memoryExclusion: exclusionClient(db.txOps),
         memoryPolicySignal: signalClient(db.txOps),
         cognitiveTask: taskClient(db.txOps),
+        memoryAccessTurn: accessClient(db.txOps),
         reflectionRecord: tableClient('reflection', 'reflections', db.txOps),
         reflectionCitation: tableClient('citation', 'citations', db.txOps),
         decisionRecord: tableClient('decision', 'decisions', db.txOps),
@@ -196,6 +219,7 @@ vi.mock('@/lib/prisma', () => ({
     memoryExclusion: exclusionClient(db.topOps),
     memoryPolicySignal: signalClient(db.topOps),
     cognitiveTask: taskClient(db.topOps),
+    memoryAccessTurn: accessClient(db.topOps),
     // 派生清理同样只许走事务客户端：这三张表出现在 topOps 里就等于「删了记忆、洞察留在原地」。
     reflectionRecord: tableClient('reflection', 'reflections', db.topOps),
     reflectionCitation: tableClient('citation', 'citations', db.topOps),
@@ -258,6 +282,7 @@ beforeEach(() => {
   db.citations = [];
   db.decisions = [];
   db.messages = [];
+  db.access = [];
   db.returned = {};
   db.txOps = [];
   db.topOps = [];
@@ -1065,5 +1090,96 @@ describe('删除要连带清掉派生出来的洞察与决策（门槛 2，11-04
     await purgeMemoriesByChat('chat-1', USER);
 
     expect(db.returned.message).toEqual([{ id: 'msg-1' }]);
+  });
+});
+
+/**
+ * 检索访问记录（任务书 7.1 那张表）跟着忘记一起走。
+ *
+ * 这一簇里最关键的是**用哪个集合**删：那批 id 是「这次要抹掉的那些记忆」，
+ * 不是「这一轮发生在哪次对话」。那张表上连 chatId 列都没有，所以拿会话去删根本无从下手——
+ * 而「忘记这次对话产生的记忆」如果按检索发生的会话清，会把用户别的对话里正常发生过的检索抹掉。
+ * 下面那条用例把两个集合摆成明显不同的一批，代码用错集合（比如改成按消息、按别的方式）就会红。
+ */
+function accessTurn(id: string, overrides: Row = {}): Row {
+  return {
+    id,
+    userId: USER,
+    sourceMessageId: `msg-${id}`,
+    memoryIds: ['mem-1'],
+    createdAt: new Date('2026-11-05T10:00:00.000Z'),
+    ...overrides
+  };
+}
+
+describe('忘记要连带清掉检索访问痕迹（任务书 7.1）', () => {
+  it('删一条记忆 ⇒ 提到它的轮次整行走，走的是同一个事务', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.access = [
+      accessTurn('acc-1', { memoryIds: ['mem-1'] }),
+      accessTurn('acc-2', { memoryIds: ['mem-9'] })
+    ];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.txOps).toContain('access_delete');
+    expect(db.topOps).toEqual([]);
+    expect(db.access.map((turn) => turn.id)).toEqual(['acc-2']);
+  });
+
+  it('删一条 = 删整条版本链：旧版本的访问痕迹也一起走', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-0', row('mem-0', { chatId: null }));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0')];
+    db.access = [
+      accessTurn('acc-old', { memoryIds: ['mem-0'] }),
+      accessTurn('acc-mixed', { memoryIds: ['mem-9', 'mem-1'] }),
+      accessTurn('acc-clean', { memoryIds: ['mem-9'] })
+    ];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    // 混合那一轮整行走，不是把 id 从数组里挑出来：残缺的组合比没有组合更误导。
+    expect(db.access.map((turn) => turn.id)).toEqual(['acc-clean']);
+  });
+
+  it('按会话忘记清的是「被删的那批记忆」，不是「在这个会话里发生的检索」', async () => {
+    db.rows.set('mem-1', row('mem-1', { chatId: 'chat-1' }));
+    db.rows.set('mem-2', row('mem-2', { chatId: 'chat-2' }));
+    db.access = [
+      // 这一轮发生在 chat-1，带的是来自 chat-2 的记忆——那条记忆这次不删，所以痕迹也不许跟着会话走。
+      accessTurn('acc-stay', { memoryIds: ['mem-2'] }),
+      accessTurn('acc-go', { memoryIds: ['mem-1'] }),
+      accessTurn('acc-other-user', { userId: OTHER, memoryIds: ['mem-1'] })
+    ];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.access.map((turn) => turn.id)).toEqual(['acc-stay', 'acc-other-user']);
+  });
+
+  it('清空全部 ⇒ 这个用户的访问行全走，别人的一条不动', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.rows.set('mem-other', row('mem-other', { userId: OTHER }));
+    db.access = [accessTurn('acc-1'), accessTurn('acc-2', { userId: OTHER })];
+    const { purgeAllMemories } = await forgetting();
+
+    await purgeAllMemories(USER);
+
+    expect(db.access.map((turn) => turn.id)).toEqual(['acc-2']);
+  });
+
+  it('没有可删的记忆时不发访问表的写：一次空删除也是多余的往返', async () => {
+    db.access = [accessTurn('acc-1', { memoryIds: ['mem-9'] })];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    const result = await purgeMemoriesByChat('chat-none', USER);
+
+    expect(result).toMatchObject({ purged: 0 });
+    expect(db.txOps).not.toContain('access_delete');
+    expect(db.access).toHaveLength(1);
   });
 });

@@ -218,6 +218,7 @@ model User {
   decisionOutcomes DecisionOutcome[]
   reflections      ReflectionRecord[]
   reflectionCitations ReflectionCitation[]
+  memoryAccessTurns   MemoryAccessTurn[]
   attachments      Attachment[]
   loginLogs        LoginLog[]
   auditLogs        AuditLog[]           @relation("AuditActor")
@@ -284,6 +285,7 @@ model Message {
   attachments Attachment[]
   memories    MemoryItem[]    @relation("MemorySource")
   tasks       CognitiveTask[] @relation("CognitiveTaskSource")
+  accessTurns MemoryAccessTurn[] @relation("MemoryAccessTurnSource")
   decisions   DecisionRecord[] @relation("DecisionSource")
   outcomes    DecisionOutcome[] @relation("OutcomeSource")
 
@@ -824,4 +826,35 @@ model ReflectionCitation {
   @@index([userId, reflectionId])
   @@index([userId, memoryId])
   @@index([userId, decisionId])
+}
+
+/// 这一轮对话把哪几条记忆带进了提示词（任务书 7.1「记忆被再次调用时」）。
+///
+/// 一轮一行，不是一条记忆一行：注入上限是 8 条（memory-module.ts:44），
+/// 一轮回一行就是一次写入，一轮记八列就得动 MemoryItem 那一行——而 `assessConfidence`
+/// 读的正是那一行（supersededAt、validTo）。访问列和置信度的输入长在一张表上，
+/// 「检索次数不能直接提高事实可信度」这条红线就从结构约束退化成一句自觉。
+///
+/// 这一行里只有 id，没有正文，抄 CognitiveTask 的口径（本文件那张表的注释）：
+/// 「没有可以放正文的列」比「我们承诺不放正文」难违反得多。
+///
+/// 幂等靠库层 @@unique(sourceMessageId)：一条消息重发（重试、连点）不该记成两次访问，
+/// 否则「最近 200 轮里被带到 3 次」里有一多半是重试。
+///
+/// memoryIds 是字符串数组，外键管不到它——所以「永久删除一条记忆」必须显式删掉引用过它的行
+/// （src/lib/cognitive/forgetting.ts 的三条 purge 各删一次，测试是 cognitive-access.test.ts）。
+/// chatId 故意只当普通列用（不建外键）：「忘记这次对话产生的记忆」不删会话，
+/// 得按这一列把行收走；而会话真被删掉时，行会跟着 sourceMessage 那条外键一起走。
+model MemoryAccessTurn {
+  id              String   @id @default(uuid())
+  userId          String
+  sourceMessageId String
+  memoryIds       String[]
+  createdAt       DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceMessage Message  @relation("MemoryAccessTurnSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceMessageId])
+  @@index([userId, createdAt])
 }

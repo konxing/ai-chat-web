@@ -156,6 +156,30 @@ export async function listEvidence(memoryId: string, userId: string): Promise<Ev
   }));
 }
 
+/**
+ * 一屏记忆的再巩固检查要看的两列：方向和时间（任务书 7.1）。
+ *
+ * 和 assessMemories 同一个理由：一次查完，不逐条往返。说明文字的密文这里不取——
+ * 检查只看「什么时候、哪个方向」，把密文读回来等于多一处解密和一处失败可能。
+ * 方向映射仍然只有 fromDbKind 一份，所以这个函数留在证据账本里，不搬到 reconsolidation.ts。
+ */
+export async function listEvidenceRows(
+  userId: string,
+  memoryIds: readonly string[]
+): Promise<Array<{ memoryId: string; kind: EvidenceKind; createdAt: string }>> {
+  if (memoryIds.length === 0) return [];
+  const rows = await prisma.memoryEvidence.findMany({
+    where: { userId, memoryId: { in: [...memoryIds] } },
+    orderBy: { createdAt: 'asc' },
+    select: { memoryId: true, kind: true, createdAt: true }
+  });
+  return rows.map((row) => ({
+    memoryId: row.memoryId,
+    kind: fromDbKind(row.kind),
+    createdAt: row.createdAt.toISOString()
+  }));
+}
+
 function decryptNote(row: EvidenceRow, viewerUserId: string): string | null {
   if (!row.noteCiphertext) return null;
   if (row.userId !== viewerUserId) return null;

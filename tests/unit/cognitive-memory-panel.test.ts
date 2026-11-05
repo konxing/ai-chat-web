@@ -57,6 +57,62 @@ describe('归档的文案逐字钉住（11-05 批准）', () => {
   });
 });
 
+/**
+ * 再巩固标记和访问次数（任务书 7.1 在这一屏的落点）。
+ *
+ * 这一簇断言守的是三条：
+ * 一、中文只在 memory-display 里有一份。界面自己拼句子，就等于允许它和服务端那句漂移。
+ * 二、数字只能来自服务端交回来的那份旁表，界面不许把 200 的常量抄一份——
+ *    抄的那一份会先过期，而且截断时说出来的窗口是个假数。
+ * 三、没有标记和零次访问不许摆空芯片：满屏的空标签和没有标签一样吵，但会假装「算过了」。
+ */
+describe('再巩固标记与访问次数（任务书 7.1）', () => {
+  it('GET 交回来的四样旁表在响应类型里都得有，不然是界面自己编的数', () => {
+    expect(PANEL).toContain('reviews: Record<string, ReconsolidationFlag[]>;');
+    expect(PANEL).toContain('access: Record<string, number>;');
+    expect(PANEL).toContain('accessWindow: number;');
+    expect(PANEL).toContain('accessCapped: boolean;');
+  });
+
+  it('标记的中文走标签表，界面上不许出现「新的支持信息」「已过期」这类自己写的话', () => {
+    expect(PANEL_CODE).toContain('RECONSOLIDATION_LABELS');
+    expect(PANEL_CODE).not.toContain('新的支持信息');
+    expect(PANEL_CODE).not.toContain('需要更新摘要');
+    expect(PANEL_CODE).not.toContain('需要修改关联关系');
+  });
+
+  it('次数和截断句子都走纯函数，界面一个字都不抄', () => {
+    expect(PANEL_CODE).toContain('describeAccessCount(accessWindow, count)');
+    expect(PANEL_CODE).toContain('describeAccessCap(accessCapped, accessWindow)');
+    expect(PANEL_CODE).not.toContain('里被带到');
+    expect(PANEL_CODE).not.toContain('访问记录比这一屏多');
+  });
+
+  it('窗口轮数用的是响应里的 accessWindow，不是把 200 写进组件', () => {
+    expect(PANEL_CODE).not.toMatch(/最近 200 轮/);
+    expect(PANEL_CODE).toContain('accessWindow');
+  });
+
+  it('有标记才挂芯片、有记录才报次数：零和空数组不许渲染', () => {
+    expect(PANEL_CODE).toMatch(/flags\.length > 0/);
+    expect(PANEL_CODE).toMatch(/count !== undefined[\s\S]{0,400}describeAccessCount/);
+  });
+
+  it('这些标记只出现在当前有效那一份里，归档那份一个字都不摆', () => {
+    // 归档行不参与再巩固检查（服务端也没给它算），界面去读 reviews[archivedId] 只会拿到 undefined，
+    // 但更硬的断言是：已归档区块里根本不许出现这套芯片。
+    const archivedBlock = PANEL_CODE.slice(PANEL_CODE.indexOf('{archived.length > 0 ? ('));
+    expect(archivedBlock).not.toContain('RECONSOLIDATION_LABELS');
+    expect(archivedBlock).not.toContain('describeAccessCount');
+  });
+
+  it('界面不自算置信度：档位只从旁表读，标记不参与评分（任务书 7.1 的红线）', () => {
+    expect(PANEL_CODE).not.toContain('assessConfidence');
+    expect(PANEL_CODE).not.toContain('assessWithCounts');
+    expect(PANEL_CODE).not.toContain('listAccessStats');
+  });
+});
+
 describe('控件必须有消费者（任务书 8.2 禁止假交互）', () => {
   it('归档按钮打到归档路由，恢复按钮打到恢复路由', () => {
     expect(PANEL_CODE).toContain('/archive' + '`');

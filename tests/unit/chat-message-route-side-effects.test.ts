@@ -79,6 +79,7 @@ let tables: {
   memoryItem: MockTable;
   memoryPolicy: MockTable;
   memoryEvidence: MockTable;
+  memoryAccessTurn: MockTable;
 } | undefined;
 
 function cognitiveTables() {
@@ -86,7 +87,11 @@ function cognitiveTables() {
     preference: createTable({ idField: 'userId' }),
     memoryItem: createTable(),
     memoryPolicy: createTable(),
-    memoryEvidence: createTable()
+    memoryEvidence: createTable(),
+    // 检索访问表（任务书 7.1）。唯一约束照 schema 的 @@unique([sourceMessageId]) 建，
+    // 少了这张表，recordMemoryAccess 会把 `undefined.create` 的 TypeError 一起吞进自己的
+    // catch，于是下面三条用例能在「访问永远写不进去」的状态下绿着——和 cognitiveTask 那个 delegate 同一个理由。
+    memoryAccessTurn: createTable({ unique: [['sourceMessageId']] })
   };
   return tables;
 }
@@ -232,6 +237,9 @@ vi.mock('@/lib/prisma', async () => {
       memoryEvidence: {
         groupBy: (args: { by: string[]; where?: Record<string, unknown>; _count: Record<string, boolean> }) =>
           cognitiveTables().memoryEvidence.groupBy(args)
+      },
+      memoryAccessTurn: {
+        create: (args: { data: Record<string, any> }) => cognitiveTables().memoryAccessTurn.create(args)
       },
       $transaction: (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx)
     }
@@ -550,5 +558,57 @@ describe('done 帧里的引用清单', () => {
 
     // 缺字段和空数组在界面上是两件事：前者永远等不到那一句提示。
     expect(text).toContain('"memoryIds":[]');
+  });
+});
+
+/**
+ * 7.1 的写入点：一轮一行，落在 `controller.close()` **之后**。
+ *
+ * 「并行任务不应该阻塞主回复」在这一片是靠**位置**保证的，不是靠新机制——字节已经全部交给客户端
+ * 才写这一行，所以这里断的不是「快」，而是两件事：闸门关着时连写都不写，以及写坏了也不许碰那一帧和审计。
+ */
+describe('这一轮的检索访问', () => {
+  it('记忆开着的成功轮次：写一行，而且这一行里只有 id', async () => {
+    cognitiveTables().preference.seed(preferenceRow({ memoryEnabled: true }));
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    await post();
+
+    const rows = [...cognitiveTables().memoryAccessTurn.rows.values()];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: USER.id, memoryIds: ['mem-1'] });
+    // 这张表上没有 chatId：「这一轮发生在哪次对话」等于 sourceMessageId 那条消息所在的会话，
+    // 多一列没有读者；而「忘记这次对话产生的记忆」要的集合是记忆的**来源**会话，跟它不是一回事。
+    expect('chatId' in rows[0]).toBe(false);
+    expect(rows[0].sourceMessageId).toBe(ctx.rows.find((row) => row.role === 'USER')?.id);
+    // 访问表里没有正文：被带进提示词的是哪句话，只有 id。
+    expect(JSON.stringify(rows[0])).not.toContain('我在用 Prisma');
+  });
+
+  it('八个开关全关：一行也不写', async () => {
+    cognitiveTables().preference.seed(preferenceRow());
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+
+    await post();
+
+    expect(cognitiveTables().memoryAccessTurn.rows.size).toBe(0);
+  });
+
+  it('访问写坏了也不影响 done 帧与审计：这一轮的回答已经交付完了', async () => {
+    cognitiveTables().preference.seed(preferenceRow({ memoryEnabled: true }));
+    cognitiveTables().memoryItem.seed(await memoryRow('mem-1', '我在用 Prisma'));
+    const table = cognitiveTables().memoryAccessTurn;
+    const pristine = table.create;
+    table.create = () => Promise.reject(new Error('driver exploded with 我在用 Prisma in it'));
+
+    const { text } = await post();
+
+    table.create = pristine;
+    expect(text).toContain('"type":"done"');
+    expect(text).toContain('"memoryIds":["mem-1"]');
+    expect(ctx.audit).toHaveLength(1);
+    expect(ctx.audit[0]).toMatchObject({ action: 'chat.message', status: 'SUCCESS' });
+    expect(ctx.taskRows).toHaveLength(1);
+    expect(JSON.stringify(ctx.audit)).not.toContain('exploded');
   });
 });

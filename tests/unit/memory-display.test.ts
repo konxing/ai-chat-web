@@ -24,6 +24,8 @@ import {
   TYPE_LABELS,
   TYPE_ORDER,
   describeConfidenceFactor,
+  describeAccessCap,
+  describeAccessCount,
   describeMemoryListCap,
   describeArchivedListCap,
   describePolicySummary,
@@ -192,6 +194,23 @@ describe('两份列表的截断说明', () => {
   it('已归档那一份到上限：说的是归档，别和上面那句混成一条', () => {
     expect(describeArchivedListCap(true, 200)).toBe(
       '已归档的记忆比这一屏多：这里只列出最近 200 条，更早的没有读进来。'
+    );
+  });
+});
+
+describe('再巩固的访问说法（任务书 7.1）', () => {
+  it('次数句子把窗口轮数说出来：不报名字的那一句会被读成「一辈子就 3 次」', () => {
+    expect(describeAccessCount(120, 3)).toBe('最近 120 轮对话里被带到 3 次');
+  });
+
+  it('窗口取服务端实际扫过的轮数，句子不自己写死 200', () => {
+    expect(describeAccessCount(7, 2)).toBe('最近 7 轮对话里被带到 2 次');
+  });
+
+  it('窗口被 200 轮上限截断时要说「更早的没算」，没截断一个字都不出', () => {
+    expect(describeAccessCap(false, 120)).toBe('');
+    expect(describeAccessCap(true, 200)).toBe(
+      '访问记录比这一屏多：这里只统计最近 200 轮对话，更早的轮次没有算进来。'
     );
   });
 });

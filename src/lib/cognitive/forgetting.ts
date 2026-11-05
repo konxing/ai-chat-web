@@ -5,6 +5,7 @@ import { fromDbMemoryContext, type MemoryContext } from './policy';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
 import { cancelCognitiveTasks } from './task-queue';
+import { deleteAccessForMemories, deleteAllAccess } from './access';
 import type { Prisma } from '@prisma/client';
 
 /**
@@ -24,9 +25,10 @@ import type { Prisma } from '@prisma/client';
  * 因为折叠不到后继而单独成事件（`timeline.ts:96-101`），于是用户删掉的内容换了一副样子回来。
  * 所以 purged 报的是行数不是事件数，界面那句话得跟着说清。
  *
- * 派生数据当前有五种：演化边、排除规则、还没跑的认知任务（任务书 §6 的 CognitiveTask）、
- * 引用了被删记忆的洞察（ReflectionRecord 加它的 ReflectionCitation），以及某次对话产生的决策
- * （DecisionRecord）。撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
+ * 派生数据当前有六种：演化边、排除规则、还没跑的认知任务（任务书 §6 的 CognitiveTask）、
+ * 引用了被删记忆的洞察（ReflectionRecord 加它的 ReflectionCitation）、某次对话产生的决策
+ * （DecisionRecord），以及检索访问痕迹（任务书 7.1 的 MemoryAccessTurn）。
+ * 撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
  * 用户看到的「忘记这次对话」会在下一次轮询时被 worker 推翻。
  *
  * 洞察按 11-04 判的甲处理：**整条删掉**，连同它全部的引用行。只靠外键级联是最坏的结果——
@@ -212,6 +214,9 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, []));
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
     await recordSources(tx, userId, rows);
+    // 记忆没了，它留下的检索痕迹也跟着走（任务书 7.1 那张表）。按**被删的这批 id** 清，
+    // 不按会话清：那张表上没有会话列，而「这一轮检索发生在哪次对话」和这里的来源会话本来也不是同一件事。
+    await deleteAccessForMemories(tx, userId, ids);
     // 来源那次对话还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
     // 挡不住换个说法的那一句。没有来源对话的记忆不去动别人的队列。
     if (head.chatId) await cancelCognitiveTasks(tx, { userId, chatId: head.chatId });
@@ -246,6 +251,8 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
     await detachEdges(tx, userId, ids);
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
     await recordSources(tx, userId, rows);
+    // 同上：清的是这批被删记忆的检索痕迹。这一轮一行都没删到就已经返回了，不会发空写。
+    await deleteAccessForMemories(tx, userId, ids);
     // 用户点的是一次按钮：删掉 5 条技术项目记忆算一条证据，不是五条，
     // 否则一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
     for (const context of contexts) if (recordSignals) await recordPolicySignal(tx, userId, context);
@@ -273,6 +280,8 @@ export async function purgeAllMemories(userId: string): Promise<PurgeResult> {
     await tx.reflectionCitation.deleteMany({ where: { userId } });
     await tx.reflectionRecord.deleteMany({ where: { userId } });
     await tx.decisionRecord.deleteMany({ where: { userId } });
+    // 访问痕迹按同一个范围清：这个用户的记忆一行不剩，留着痕迹就是留着一批指向已删内容的 id。
+    await deleteAllAccess(tx, userId);
     return { purged: result.count, contexts: [] };
   });
 }

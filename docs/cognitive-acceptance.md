@@ -1236,4 +1236,84 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 - **8.2 的引用行会多一行说明**：归档一条曾在本轮被引用的记忆，点开数字看到的是「已不在你的有效记忆里（可能已被更新、删除或归档）」，
   不是默默少列一条——这是既有形状，本片只改了那句话的字面，而那句由 `cognitive-citation-display.test.ts:98` 逐字钉住（先红后绿）。
 
+## 7.1：检索再巩固——先把「被调用」变成库里的一个事实（11-05 片 a）
+
+任务书 7.1 原文列了五项检查，末尾两句是红线：
+
+```
+记忆被再次调用时，检查：
+- 是否出现了新的支持信息。   - 是否出现了新的反例。   - 是否已经过时。
+- 是否需要更新摘要。         - 是否需要修改关联关系。
+检索次数不能直接提高事实可信度。
+访问频率只能影响检索排序，不能替代证据。
+```
+
+**开工前这片是 0%，而且卡在一个更基本的事实上：「被再次调用」这件事当天根本没有留下凭据。**
+`selectMemoryCandidates` 挑完、`renderMemoryBlock` 拼完，流关掉以后，库里查不出「那一轮真进了提示词的是哪几条」。
+没有凭据，五项检查一项都谈不上验收。所以这片第一步不是算标记，是**把调用记成一行**。
+
+### 五项检查的诚实账（做三项，两项判为无法验收，不发明）
+
+| 检查 | 今天有没有 | 这一片 |
+|---|---|---|
+| 新的支持信息 | 有：`recordRestatement` 会补一条 SUPPORTS（`memory-module.ts:274-288`），证据行带 `createdAt` | **做**：`createdAt > recordedAt` 才算新的 |
+| 新的反例 | **行**有（`reviseMemory` 写 CONTRADICTS，`memories.ts:424`），**发现**没有 | **只报库里已有的行**。词法反例发现不接进来，见 `docs/cognitive-acceptance.md:537-570` 那次实测 36 条候选 0 条真是反例 |
+| 已经过时 | 全有，读侧：`validTo` / `supersededAt` | **做**，且与 `confidence.ts:72` 用同一个 `<=`，不留两处口径 |
+| 需要更新摘要 | **「记忆摘要」这个东西不存在**：`MemoryItem` 没有摘要列 | **不做**。不发明一个没有库存的对象来凑一项 |
+| 需要修改关联关系 | **没有可写的关系表**（2a 那次校准的结论，`cognitive-relations-calibration.test.ts:7-29`），派生图是只读的 | **不做**。检查将来能从只读派生邻居回答，动作没有可写的地方 |
+
+### 代码事实（一张新表、一个纯函数、两个旁表字段、一屏标记）
+
+| 环节 | 位置 | 只干什么 |
+|---|---|---|
+| 数据表 | `prisma/schema.prisma:848-860` | `MemoryAccessTurn { id, userId, sourceMessageId, memoryIds String[], createdAt }`。**只有 id，没有正文**（抄 `CognitiveTask` 的口径）；`@@unique([sourceMessageId])` 是幂等锚点；**没有 chatId**：「这一轮发生在哪次对话」等于 `sourceMessageId` 那条消息所在的会话，多一列没有读者，而会话真删时那条外键是 CASCADE，消息一走这一行自己就走 |
+| 为什么不放在 `MemoryItem` 上 | 同上，加一条静态用例 | 一轮最多注入 8 条（`memory-module.ts:44`），计数列放进那一行就等于挨着 `assessConfidence` 正在读的 `supersededAt` / `validTo`——红线只能靠自觉。放进另一张表，红线靠形状守着 |
+| 迁移 | `prisma/migrations/20261106000000_memory_access/migration.sql` | 建表 + 唯一索引 + `(userId, createdAt)` + 两条 CASCADE 外键。**这一支未执行**（下面边界第一条） |
+| 写入 | `src/lib/cognitive/access.ts:64`（`recordMemoryAccess`） | 空列表返回 false、`P2002` 返回 false、任何其他失败也只返回 false 并记一条只带 id 的日志。契约照抄 `enqueueCognitiveTask` |
+| 写入点 | `src/app/api/chats/[id]/messages/route.ts:171-175` | 在 `controller.close()`（`:154`）**之后**。「并行任务不应该阻塞主回复」靠位置保证，不靠新机制，所以位置本身有一条静态用例守着（P2） |
+| 统计 | `src/lib/cognitive/access.ts:91`（`listAccessStats`） | 取 `MAX_ROWS + 1` 行只为了知道有没有被截断——「恰好读了 200 轮」和「还有更多轮没读」在数字上一样，在诚实程度上不一样 |
+| 检查 | `src/lib/cognitive/reconsolidation.ts:54`（`reviewMemory`）/ `:79`（`reviewMemories`） | **纯函数**：输入是已经查回来的列和证据条，输出标记数组，不算分、不排序、不碰库。三种终态（被取代 / 归档 / 撤回）不产标记 |
+| 证据的批量读 | `src/lib/cognitive/evidence.ts:166`（`listEvidenceRows`） | 一屏一次查完，只取 `memoryId / kind / createdAt`，说明文字的密文不经过这条路。方向映射仍只有 `fromDbKind` 一份，所以这个读留在证据账本里，不搬进 `reconsolidation.ts` |
+| API | `src/app/api/account/cognitive/memories/route.ts:70-73,81,103-106` | GET 多带 `reviews` / `access` / `accessWindow` / `accessCapped` 四个字段，与置信度、标题**并行**发出。`reviews` 对每条记忆都有一项（空数组 ≠ 缺席）；`accessWindow` 报**实际扫过的轮数**，不把 `MEMORY_ACCESS_MAX_ROWS` 抄给界面 |
+| 文案 | `src/lib/cognitive/memory-display.ts:125`（`RECONSOLIDATION_LABELS`）/ `:157`（`describeAccessCount`）/ `:162`（`describeAccessCap`） | 三个纯函数/常量，只产出句子 |
+| 界面 | `src/components/settings/memory-panel.tsx:515`（标记芯片）/ `:523`（「最近 N 轮里被带到 M 次」）/ `:424`（截断提示） | 芯片用中性 `chip`，不用琥珀色——琥珀色那一档已经是「可信度低」，「值得回看一眼」不是「不可信」 |
+| 忘记连带清理 | `src/lib/cognitive/forgetting.ts:218`（单条）/ `:254`（按来源会话）/ `:283`（清空全部） | 派生数据从五种变第六种。删的口径是**被删的那批记忆 id**，整行删（不是把 id 从数组里挑出来——一个已删记忆的 id 本身就是被删内容的痕迹，而残缺的组合比没有组合更误导） |
+
+### 「检索次数不能提高可信度」这一条怎么证（不靠注释）
+
+三层，缺一层都只是一句承诺：
+
+| 层 | 手段 | 用例 |
+|---|---|---|
+| 结构 | 访问表与 `MemoryItem` 分开；`ConfidenceInput`（`confidence.ts:35-45`）与 `ConfidenceSubject`（`evidence.ts:58-64`）里没有访问字段 | `cognitive-access.test.ts` 「访问计数不放在 MemoryItem 上」「这张表里没有正文列」 |
+| 依赖 | `confidence.ts` / `evidence.ts` / `retrieval.ts` / `memory-module.ts` 四个文件不许 import 访问模块 | 同文件「置信度与挑记忆那一侧根本不 import 访问模块」。**这一条本片返工过**：原判词写作 `not.toContain('cognitive/access')`，而同目录的引用写作 `'./access'`——P1 探针实测漏过，已改成匹配 import 语句本身（`/from\s+['"][^'"]*\/access['"]/`），两种写法都咬得住 |
+| 行为 | 喂 0 次与 60 次访问，要求置信度输出 `JSON.stringify` **逐字节相同**；再加一条正向对照（多一条真的支持证据必须变），否则上一条是在测一台没接上任何东西的机器 | 同文件「访问不改变置信度（行为证明）」两条 |
+
+### 先红与变异探针
+
+| 步骤 | 结果 |
+|---|---|
+| 先红 | 服务层 16 条、纯函数 15 条、路由 8 条、忘记 5 条、写入点 3 条、文案 2 条、面板 7 条**先写后红**——`access.ts` / `reconsolidation.ts` 两个模块当时不存在，动态 `import` 直接失败；`listEvidenceRows` 未导出时按命名导入报 `does not provide an export`；面板那批用 `stripComments` 后逐项扫描，「接线了但没渲染」当场抓住 |
+| 本片新增用例 | **63 条**：`cognitive-access.test.ts` 21 + `cognitive-reconsolidation.test.ts` 17（两个新文件）+ 路由 8 + 忘记 5 + 面板 7 + 文案 2 + 写入点 3 |
+| 实现后 | 全量 **81 个文件 1179 条**绿，`npx tsc --noEmit` 干净。评测快照**未重生**：这一片不改排序、不改注入，`cognitive-eval-snapshot.test.ts` 逐字节比对原样通过 |
+| P1 让置信度吃访问计数（`evidence.ts` import `listAccessStats` 并把次数抬进 `score`） | **6 红**：行为证明那条 + 批量置信度 5 条（替身库里没有访问表时 `listAccessStats` 直接抛，也是红）。**但第一轮跑的时候静态守卫是绿的**——它当时只查 `cognitive/access` 字样，放走了 `'./access'`。补强后再喂同一条 import 变异：**1 红**，咬住了 |
+| P2 把写入挪到 `controller.close()` 之前 | **1 红**（「访问记录写在 done 帧和 close() 之后」）。这条用例是探针逼出来的：先前没有任何用例区分位置——`recordMemoryAccess` 自己不抛，所以「写坏了不影响那一帧」那条测不出挪动 |
+| P3 `listAccessStats` 的 `where` 去掉 `userId` | **1 红**（「别人的轮次一条也不进来」） |
+| P4 `newSupport` 改成统计 `recordedAt` 之前的证据 | **4 红**：纯函数两条（创建时那条基线证据、更早的证据）、路由一条（「证据只喂给纯函数，路由不改这个口径」）、外加标记顺序那条——多出来的 `newSupport` 挤进了原本只有 `['outdated']` 的那条 |
+| P5 按会话忘记不删访问痕迹 | **1 红**（「按会话忘记清的是被删的那批记忆，不是在这个会话里发生的检索」） |
+| P6 让代码多产出一个 `needsSummary` 标记 | **第一轮 0 红**——「标签恰好三项」那条只钉住了 `RECONSOLIDATION_LABELS` 这张表，钉不住产标记的那只手。补上「证据再多也只产这三项」这条行为用例后重跑同一条变异：**1 红**。这正是这片要记的一条：表对了，不等于产出对了 |
+
+探针逐个当场回滚，回滚后立刻 `grep` 复核当前内容；全程只用字面替换，不碰 `git checkout` / `git stash`。
+
+### 这一片的边界
+
+- **迁移未执行**：`20261106000000_memory_access` 只写了文件。这一支不落库，`recordMemoryAccess` 每次都在 `prisma.memoryAccessTurn` 上抛，被自己的 catch 吞成 `false`——**于是「被再次调用」今天仍然只是一句不写进库的话，`reviews` 与 `access` 会一直是空**。命令在末段，由他跑。
+- **真库上这张表的形状没实测过**：`memoryIds String[]` 的 `hasSome` 谓词、`@@unique([sourceMessageId])` 的重发行为、`sourceMessageId` 的 CASCADE 在 PostgreSQL 17 上具体编成什么 SQL，全部只有内存求值器验过。归档那一片做过真库回滚探针（上面 7.2 那节），这片没有——没有他的批准不动库。
+- **界面没有真渲染验收**：`memory-panel.tsx` 过了类型检查，并有静态断言（文案只从 `RECONSOLIDATION_LABELS` 与两个纯函数出来、界面里不许出现「需要更新摘要」「需要修改关联关系」这两个词、不许硬编码「最近 200 轮」、已归档那份不渲染标记）。但静态断言只证明源码写了这一行，不证明 React 画出来了。
+- **不碰排序**：这一片只让访问成为事实 + 把标记摆出来。`retrieval.ts` 一行没改，所以「访问频率只能影响检索排序」那半句今天仍然是**未实现**——排序入口在片 f（向量臂通了才有 A/B 可比）。红线此刻守住的是「不许拿访问顶替证据」，不是「访问已经参与排序」。
+- **窗口是 200 轮，且会说话**：超过 200 轮以后的访问不计入 `count`，`capped` 为真，界面摆一句「访问记录比这一屏多：这里只统计最近 N 轮对话」。所以那个数字是**下限**，不是全生命周期条数。
+- **「忘记这次对话」不清这一轮在这段对话里发生过的检索**：只有被删的那批记忆的检索痕迹走。留着的 `acc-stay` 是真实发生过的历史，删掉它等于篡改另一件事；而真的删除整个会话时，那些行靠 `sourceMessageId` 外键自己走。
+- **两项无法验收的检查不会出现在界面上**：不摆控件、不给文案、不产标记。「摘要」与「关联关系」将来若落地，得先有可写的位置，再回来加第四、第五项——顺序不能反。
+
+
 

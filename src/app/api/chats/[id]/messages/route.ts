@@ -22,6 +22,7 @@ import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/li
 import { streamChatCompletion } from '@/lib/ai';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
+import { recordMemoryAccess } from '@/lib/cognitive/access';
 import { enqueueCognitiveTask } from '@/lib/cognitive/task-queue';
 
 export const runtime = 'nodejs';
@@ -163,6 +164,14 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           chatId,
           sourceMessageId: userMessage.id,
           kind: 'MEMORY'
+        });
+        // 同一时刻记下「这一轮真的带了哪几条记忆进提示词」（任务书 7.1 的那次调用）。
+        // 和上面那条欠账一样：只有答完的轮次才记，写在 close() 之后，自己不抛（access.ts），
+        // 而且只有 id。没带记忆就不写行，那个判断在 recordMemoryAccess 里。
+        await recordMemoryAccess({
+          userId: user.id,
+          sourceMessageId: userMessage.id,
+          memoryIds: citedMemoryIds
         });
       } catch (err) {
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';

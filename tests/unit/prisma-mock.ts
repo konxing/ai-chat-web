@@ -7,8 +7,9 @@
  * 时间比较、排序、自增、唯一约束冲突都补齐，并且只有一份实现。
  *
  * 队列/worker 之外，它现在还是 `chat-message-route-side-effects.test.ts` 那条**读侧**断言的替身，
- * 所以 `notIn`、顶层 `AND`/`OR`、`groupBy`、`findUnique` 按 `memories.ts` / `evidence.ts` /
- * `preferences.ts` 的真实谓词形状补齐——一处能力只服务一个真实消费者，不预先铺没人用的分支。
+ * 所以 `notIn`、顶层 `AND`/`OR`、`groupBy`、`findUnique`、标量数组的 `hasSome` 按
+ * `memories.ts` / `evidence.ts` / `preferences.ts` / `access.ts` 的真实谓词形状补齐——
+ * 一处能力只服务一个真实消费者，不预先铺没人用的分支。
  *
  * 它依旧是**求值器不是 SQL**：`updateMany` 的并发安全靠的是真库的行锁，这里换不来。
  * 这一层能证明的是协议形状，不是原子性——边界写在 docs/cognitive-acceptance.md。
@@ -37,6 +38,8 @@ export function satisfies(field: unknown, condition: Condition): boolean {
   const c = condition as Record<string, unknown>;
   if ('notIn' in c) return !(c.notIn as unknown[]).includes(field);
   if ('in' in c) return (c.in as unknown[]).includes(field);
+  // 标量列数组（`String[]`）的「至少命中一个」：访问表按 memoryIds 找轮次用的就是它。
+  if ('hasSome' in c) return Array.isArray(field) && (c.hasSome as unknown[]).some((v) => field.includes(v));
   if ('not' in c && !('lt' in c) && !('lte' in c) && !('gt' in c) && !('gte' in c)) {
     return !satisfies(field, c.not);
   }

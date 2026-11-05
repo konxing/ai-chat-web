@@ -4,7 +4,9 @@ import { rateLimit } from '@/lib/rate-limit';
 import { writeAudit } from '@/lib/audit';
 import { memoryPurgeSchema } from '@/lib/validation';
 import { listMemories, MEMORY_LIST_MAX_ROWS } from '@/lib/cognitive/memories';
-import { assessMemories } from '@/lib/cognitive/evidence';
+import { assessMemories, listEvidenceRows } from '@/lib/cognitive/evidence';
+import { reviewMemories } from '@/lib/cognitive/reconsolidation';
+import { listAccessStats, type AccessStats, type MemoryAccessStat } from '@/lib/cognitive/access';
 import { purgeAllMemories, purgeMemoriesByChat } from '@/lib/cognitive/forgetting';
 import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
 import { listChatTitles } from '@/lib/chats';
@@ -38,6 +40,15 @@ const PURGE_WINDOW_MS = 60 * 60 * 1000;
  * `capped` / `archivedCapped` 是两份列表各自的 200 行上限标志（口径和时间线、洞察那屏一样）：
  * 服务层读多少行界面就列多少行，到顶的那一批不报出来的话，「这里没有更早的」就会被读成
  * 「更早的没发生过」。两个标志分开算，是因为少掉的那批分属两个桶，混成一个数就说不清少了什么。
+ *
+ * `reviews` / `access` 是任务书 7.1 那一屏的两份旁表。它们都不进置信度：
+ * 置信度只由 evidence.ts + confidence.ts 那一份算出来，而这里的标记只回答「这条值得回看一眼」，
+ * 访问次数只是「这一轮把它带进过提示词」的事实计数。两条红线（检索次数不提可信度、
+ * 访问频率不替代证据）由 tests/unit/cognitive-access.test.ts 的逐字节相等用例守着。
+ *
+ * `accessWindow` 取的是**实际扫过的轮数**，不把 `MEMORY_ACCESS_MAX_ROWS` 抄给界面：
+ * 抄的那一份会先过期。归档那一份不参与再巩固检查——被收起的行已经不是当前说法了，
+ * 给它挂「有新的支持信息」只会把注意力引向一排不该再进提示词的行。
  */
 export async function GET(req: Request) {
   return api(async () => {
@@ -48,15 +59,38 @@ export async function GET(req: Request) {
       listMemories(user.id),
       listMemories(user.id, { archivedOnly: true })
     ]);
-    const [chats, confidence] = await Promise.all([
+    const [chats, confidence, evidenceRows, access] = await Promise.all([
       listChatTitles(
         user.id,
         memories.map((memory) => memory.chatId)
       ),
       memories.length === 0
         ? Promise.resolve(new Map<string, Confidence>())
-        : assessMemories(user.id, memories)
+        : assessMemories(user.id, memories),
+      listEvidenceRows(user.id, memories.map((memory) => memory.id)),
+      memories.length === 0
+        ? Promise.resolve<AccessStats>({ byMemory: new Map<string, MemoryAccessStat>(), scannedTurns: 0, capped: false })
+        : listAccessStats(user.id)
     ]);
+    const byMemory = new Map<string, typeof evidenceRows>();
+    for (const row of evidenceRows) {
+      const list = byMemory.get(row.memoryId);
+      if (list) list.push(row);
+      else byMemory.set(row.memoryId, [row]);
+    }
+    const reviews = reviewMemories(
+      // MemoryDto 没有 archivedAt 这一列：listMemories 的默认桶本来就排除了归档行，
+      // 所以这里恒为 null 不是「假设没归档」，是这一批的定义。
+      memories.map((memory) => ({
+        id: memory.id,
+        origin: memory.origin,
+        recordedAt: memory.recordedAt,
+        validTo: memory.validTo,
+        supersededAt: memory.supersededAt,
+        archivedAt: null
+      })),
+      byMemory
+    );
     return {
       memories,
       archived,
@@ -65,7 +99,11 @@ export async function GET(req: Request) {
       chats,
       confidence: Object.fromEntries(
         [...confidence].map(([id, entry]) => [id, { band: entry.band, factors: entry.factors }])
-      )
+      ),
+      reviews: Object.fromEntries(reviews),
+      access: Object.fromEntries([...access.byMemory].map(([id, stat]) => [id, stat.count])),
+      accessWindow: access.scannedTurns,
+      accessCapped: access.capped
     };
   });
 }

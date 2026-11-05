@@ -1,6 +1,7 @@
 import type { MemoryDto, MemoryOrigin, MemoryRevisionAction, TimePrecision } from './memories';
 import type { MemoryContext, MemoryRetention, MemoryType } from './policy';
 import type { ConfidenceBand, ConfidenceFactor } from './confidence';
+import type { ReconsolidationFlag } from './reconsolidation';
 
 /**
  * 记忆的前端展示词汇：枚举的中文标签 + 有效区间回显。
@@ -116,6 +117,18 @@ export function describeConfidenceFactor(factor: ConfidenceFactor): string {
 }
 
 /**
+ * 再巩固标记（任务书 7.1）的中文。三项，不是五项——
+ * 「需要更新摘要」「需要修改关联关系」今天没有可检查的东西（记忆没有摘要列，
+ * 也没有可写的关系表），所以不摆一个永远不亮的芯片，也不摆一个永远亮着的。
+ * 措辞说凭据不说结论：标记只回答「这条值得回看一眼」，它不改置信度。
+ */
+export const RECONSOLIDATION_LABELS: Record<ReconsolidationFlag, string> = {
+  newSupport: '记下之后又出现过新的支持信息',
+  contradiction: '出现过相反的说法',
+  outdated: '已经过了有效期'
+};
+
+/**
  * 「记忆」那一屏两份列表的截断说明（任务书 7.2 之后，当前有效和已归档各自有 `MEMORY_LIST_MAX_ROWS` 上限）。
  *
  * 条数取**实际列出的行数**，不把服务端的常量抄一份到界面：抄的那一份会先过期，
@@ -132,6 +145,23 @@ export function describeMemoryListCap(capped: boolean, shownCount: number): stri
 export function describeArchivedListCap(capped: boolean, shownCount: number): string {
   if (!capped) return '';
   return `已归档的记忆比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
+}
+
+/**
+ * 任务书 7.1 的那次「被再次调用」在界面上的说法。
+ *
+ * 句子必须把**窗口**一起说出来：光讲「被带到 3 次」，用户读到的是一个没有边界的总数，
+ * 而它只是最近若干轮的计数。轮数取服务端实际扫过的那一份（`accessWindow`），
+ * 不把 `MEMORY_ACCESS_MAX_ROWS` 抄进界面——抄的那一份会先过期，截断时还是个假数。
+ */
+export function describeAccessCount(turns: number, count: number): string {
+  return `最近 ${turns} 轮对话里被带到 ${count} 次`;
+}
+
+/** 窗口截断说明，口径和上面两份列表一样：不说出来，「更早的没带过」就会被当成「更早的没发生」。 */
+export function describeAccessCap(capped: boolean, turns: number): string {
+  if (!capped) return '';
+  return `访问记录比这一屏多：这里只统计最近 ${turns} 轮对话，更早的轮次没有算进来。`;
 }
 
 export interface PolicySummaryInput {

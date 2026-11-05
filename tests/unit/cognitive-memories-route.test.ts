@@ -30,6 +30,14 @@ const db = vi.hoisted(() => ({
   confidence: new Map<string, Record<string, unknown>>(),
   evidenceCalls: [] as Array<{ memoryId: string; userId: string }>,
   evidenceRows: [] as Array<Record<string, unknown>>,
+  evidenceListCalls: [] as Array<{ userId: string; ids: string[] }>,
+  evidenceListRows: [] as Array<{ memoryId: string; kind: string; createdAt: string }>,
+  accessCalls: [] as string[],
+  accessStats: { byMemory: new Map<string, { memoryId: string; count: number; lastAt: string }>(), scannedTurns: 0, capped: false } as {
+    byMemory: Map<string, { memoryId: string; count: number; lastAt: string }>;
+    scannedTurns: number;
+    capped: boolean;
+  },
   titleCalls: [] as Array<{ userId: string; chatIds: Array<string | null> }>,
   audits: [] as Array<Record<string, unknown>>,
   stored: new Map<string, Record<string, unknown>>()
@@ -180,6 +188,25 @@ vi.mock('@/lib/cognitive/evidence', () => ({
   listEvidence: (memoryId: string, userId: string) => {
     db.evidenceCalls.push({ memoryId, userId });
     return Promise.resolve(db.evidenceRows);
+  },
+  // 再巩固检查要的那一份批量读：只有 id、方向和时间，正文一个字段都没有。
+  listEvidenceRows: (userId: string, memoryIds: string[]) => {
+    db.evidenceListCalls.push({ userId, ids: memoryIds });
+    return Promise.resolve(
+      db.evidenceListRows.filter((row) => memoryIds.includes(row.memoryId))
+    );
+  }
+}));
+
+/**
+ * 访问统计表：真实现读 MemoryAccessTurn 那张表（tests/unit/cognitive-access.test.ts 测过它自己），
+ * 这一屏只关心路由有没有把 count / window / capped 交到界面上，所以给一份可控的替身。
+ */
+vi.mock('@/lib/cognitive/access', () => ({
+  MEMORY_ACCESS_MAX_ROWS: 200,
+  listAccessStats: (userId: string) => {
+    db.accessCalls.push(userId);
+    return Promise.resolve(db.accessStats);
   }
 }));
 
@@ -267,6 +294,10 @@ beforeEach(() => {
   db.confidence = new Map();
   db.evidenceCalls = [];
   db.evidenceRows = [];
+  db.evidenceListCalls = [];
+  db.evidenceListRows = [];
+  db.accessCalls = [];
+  db.accessStats = { byMemory: new Map(), scannedTurns: 0, capped: false };
   db.titleCalls = [];
   db.audits = [];
   db.stored.clear();
@@ -381,6 +412,103 @@ describe('读：用户看 AI 记了自己什么', () => {
     expect(theirs.response.status).toBe(404);
     expect(theirs.payload.error.code).toBe('MEMORY_NOT_FOUND');
     expect(db.revisionCalls).toHaveLength(1);
+  });
+});
+
+describe('再巩固检查与访问统计跟着列表一起回（任务书 7.1）', () => {
+  it('记下之后又出现过支持证据：这一条带回 newSupport 标记', async () => {
+    store(memoryDto({ content: '我在用 Prisma', recordedAt: '2026-11-02T10:00:00.000Z' }));
+    db.evidenceListRows = [
+      { memoryId: 'mem-1', kind: 'supports', createdAt: '2026-11-03T09:00:00.000Z' }
+    ];
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.reviews).toEqual({ 'mem-1': ['newSupport'] });
+  });
+
+  it('过了有效期的带回 outdated，两种同时成立按固定顺序排', async () => {
+    store(memoryDto({ validTo: '2020-01-01T00:00:00.000Z' }));
+    db.evidenceListRows = [
+      { memoryId: 'mem-1', kind: 'supports', createdAt: '2999-01-01T00:00:00.000Z' }
+    ];
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.reviews['mem-1']).toEqual(['newSupport', 'outdated']);
+  });
+
+  it('没有证据的记忆在 reviews 里是一条空数组：「没标记」不等于「没算」', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    store(memoryDto({ id: 'mem-2', content: '周末去爬山' }));
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.reviews).toEqual({ 'mem-1': [], 'mem-2': [] });
+  });
+
+  it('记录之前的证据不算新的：证据只喂给纯函数，路由不改这个口径', async () => {
+    store(memoryDto({ recordedAt: '2026-11-02T10:00:00.000Z' }));
+    db.evidenceListRows = [
+      { memoryId: 'mem-1', kind: 'supports', createdAt: '2026-11-01T10:00:00.000Z' }
+    ];
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.reviews['mem-1']).toEqual([]);
+  });
+
+  it('已归档那一份不进再巩固检查：证据只按当前列表的 id 查', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    store(memoryDto({ id: 'arc-1', archivedAt: '2026-11-05T10:00:00.000Z' }));
+
+    const { payload } = await call('GET');
+
+    expect(db.evidenceListCalls).toEqual([{ userId: 'user-a', ids: ['mem-1'] }]);
+    expect(Object.keys(payload.data.reviews)).toEqual(['mem-1']);
+  });
+
+  it('访问统计带回每条的次数、窗口轮数和截断标志', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    db.accessStats = {
+      byMemory: new Map([['mem-1', { memoryId: 'mem-1', count: 3, lastAt: '2026-11-04T10:00:00.000Z' }]]),
+      scannedTurns: 120,
+      capped: false
+    };
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.access).toEqual({ 'mem-1': 3 });
+    // 窗口取实际扫过的轮数：把服务端的 200 抄进界面，那份常量会先过期。
+    expect(payload.data.accessWindow).toBe(120);
+    expect(payload.data.accessCapped).toBe(false);
+  });
+
+  it('访问窗口被截断时标志为真，界面要说「更早的没算」', async () => {
+    store(memoryDto({ content: '我在用 Prisma' }));
+    db.accessStats = {
+      byMemory: new Map([['mem-1', { memoryId: 'mem-1', count: 200, lastAt: '2026-11-04T10:00:00.000Z' }]]),
+      scannedTurns: 200,
+      capped: true
+    };
+
+    const { payload } = await call('GET');
+
+    expect(payload.data.accessCapped).toBe(true);
+  });
+
+  it('一条记忆都没有时，置信度和访问的读一次都不发', async () => {
+    const { payload } = await call('GET');
+
+    expect(payload.data.memories).toEqual([]);
+    expect(db.assessCalls).toEqual([]);
+    expect(db.accessCalls).toEqual([]);
+    expect(payload.data.reviews).toEqual({});
+    expect(payload.data.access).toEqual({});
+    expect(payload.data.accessWindow).toBe(0);
+    // 证据那条只可能带着空 id 列表被调用——真实现自己会在零 id 时短路，不发查询
+    // （tests/unit/cognitive-reconsolidation.test.ts 钉的是它自己），所以这里钉的是「没多读一行」。
+    for (const entry of db.evidenceListCalls) expect(entry.ids).toEqual([]);
   });
 });
 
