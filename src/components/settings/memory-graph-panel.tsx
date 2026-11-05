@@ -8,6 +8,7 @@ import { Alert, EmptyState, LoadingBlock, useToast } from '@/components/ui';
 import {
   GRAPH_CONTEXT_COLORS,
   GRAPH_EDGE_LABELS,
+  describeAssociationGate,
   describeGraphBudget,
   describeNotAGraph,
   isGraphDrawable,
@@ -19,7 +20,7 @@ import type { GraphEdgeKind, MemoryGraph } from '@/lib/cognitive/memory-graph';
 /**
  * 记忆网络那一屏（任务书 8.2 的界面）。
  *
- * 四条形状是从后端和判词直接落下来的，不是审美选择：
+ * 五条形状是从后端和判词直接落下来的，不是审美选择：
  *
  * 一、**手写 SVG，不引图形库**。d3-force / cytoscape 那一类会替用户算出一张**位置有意义**的图，
  *    而那批坐标既不在库里也解释不了——正是 2a 那次阈值校准判掉的东西。这里的坐标只有一个用途：
@@ -35,6 +36,11 @@ import type { GraphEdgeKind, MemoryGraph } from '@/lib/cognitive/memory-graph';
  * 四、**开关和闸门各管一头**。界面上关着时连请求都不发；服务端那两道闸门（`associationEnabled`
  *    与 `memoryEnabled`）绕过去照样 409，界面上的「关」不是唯一那道闸。
  *    `associationEnabled` 这一屏是它第一个消费者——在那之前它只是库里的一个布尔值。
+ *
+ * 五、**情境那列 `allowAssociation` 挡的是线，不是点**。被关掉的行还在图上、还能点开，
+ *    只是不为它画关联线（更新关系照旧）。这条界线和「隐藏」的界线差得很远，所以界面上必须说条数：
+ *    画得出来时念 `describeAssociationGate`，画不出来时那个数字由 `describeNotAGraph` 说——
+ *    同一个数在两句里，所以这两句在界面上互斥，不能同时冒出来。
  */
 
 const GRAPH_URL = '/api/account/cognitive/graph';
@@ -127,6 +133,8 @@ export function MemoryGraphPanel() {
 
   const selected = graph?.nodes.find((node) => node.id === selectedId) ?? null;
   const drawable = graph !== null && isGraphDrawable(graph);
+  /** 闸门句只在画得出图时摆：画不出来时那句「还不是一张图」已经把同一个条数说过了，两句同时出现就是重复。 */
+  const gateNote = graph && drawable ? describeAssociationGate(graph.associationGated) : '';
 
   return (
     <section className="panel p-5 sm:p-6">
@@ -159,6 +167,7 @@ export function MemoryGraphPanel() {
         <div className="mt-5 space-y-3">
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
           {graph ? describeGraphBudget(graph).map((sentence) => <Alert key={sentence} tone="info">{sentence}</Alert>) : null}
+          {gateNote ? <Alert tone="info">{gateNote}</Alert> : null}
 
           {loading ? (
             <LoadingBlock label="加载记忆网络" />
@@ -268,7 +277,7 @@ export function MemoryGraphPanel() {
             </div>
           ) : (
             <div className="space-y-3">
-              <Alert tone="info">{describeNotAGraph(graph.nodes.length, graph.edges.length)}</Alert>
+              <Alert tone="info">{describeNotAGraph(graph.nodes.length, graph.edges.length, graph.associationGated)}</Alert>
               {/* 画不出图的时候退回列表：条数、内容、主题都在，只是不装成一张网络。 */}
               {graph.nodes.map((node) => (
                 <div key={node.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">

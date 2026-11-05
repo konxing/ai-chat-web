@@ -20,6 +20,10 @@ const db = vi.hoisted(() => ({
   memoryEnabled: false,
   preferencesThrows: false,
   preferencesCalls: [] as string[],
+  policyCalls: [] as string[],
+  policiesThrows: false,
+  /** null = 用应用里那份默认策略表；用例只在要改 `allowAssociation` 那一列时才自己造一张。 */
+  policies: null as Record<string, unknown> | null,
   listCalls: Array<{ userId: string; filters: unknown }>(),
   edgeCalls: [] as string[],
   citationCalls: [] as string[],
@@ -50,6 +54,18 @@ vi.mock('@/lib/cognitive/preferences', () => ({
     });
   }
 }));
+
+vi.mock('@/lib/cognitive/policy', async (importActual) => {
+  const actual = await importActual<typeof import('@/lib/cognitive/policy')>();
+  return {
+    ...actual,
+    getMemoryPolicies: (userId: string) => {
+      db.policyCalls.push(userId);
+      if (db.policiesThrows) return Promise.reject(new Error('数据库连接中断'));
+      return Promise.resolve((db.policies ?? actual.DEFAULT_MEMORY_POLICIES) as never);
+    }
+  };
+});
 
 vi.mock('@/lib/cognitive/memories', () => ({
   listMemories: (userId: string, filters?: unknown) => {
@@ -111,6 +127,9 @@ beforeEach(() => {
   db.memoryEnabled = true;
   db.preferencesThrows = false;
   db.preferencesCalls = [];
+  db.policyCalls = [];
+  db.policiesThrows = false;
+  db.policies = null;
   db.listCalls = [];
   db.edgeCalls = [];
   db.citationCalls = [];
@@ -180,6 +199,71 @@ describe('闸门：开关关掉是真的不读', () => {
 
     expect(response.status).toBe(200);
     expect(db.preferencesCalls).toEqual(['user-a']);
+  });
+});
+
+describe('策略表：这一屏是 allowAssociation 唯一的运行时读者', () => {
+  it('闸门关着时连策略表都不读：这一屏不开，就没有必要知道七行策略', async () => {
+    db.associationEnabled = false;
+    db.memories = [memoryRow()];
+
+    const { response } = await call();
+
+    expect(response.status).toBe(409);
+    expect(db.policyCalls).toEqual([]);
+    expect(db.listCalls).toEqual([]);
+  });
+
+  it('闸门开着时读一次，读的是 session 用户自己的：查询串里的 userId 换不掉它', async () => {
+    db.memories = [memoryRow()];
+
+    const { response } = await call('?userId=user-b');
+
+    expect(response.status).toBe(200);
+    expect(db.policyCalls).toEqual(['user-a']);
+  });
+
+  it('策略表真的交给了派生层：关掉关联的那个情境不做共引用的锚点', async () => {
+    // mem-1 落在 emotionalSupport（默认表里 allowAssociation 就是关的），另外两条在开着的情境里。
+    db.memories = [
+      memoryRow({ id: 'mem-1', context: 'emotionalSupport', chatId: null }),
+      memoryRow({ id: 'mem-2', chatId: null, recordedAt: '2026-11-03T10:00:00.000Z' }),
+      memoryRow({ id: 'mem-3', chatId: null, recordedAt: '2026-11-04T10:00:00.000Z' })
+    ];
+    db.citations = [
+      { reflectionId: 'ref-1', memoryId: 'mem-1' },
+      { reflectionId: 'ref-1', memoryId: 'mem-2' },
+      { reflectionId: 'ref-1', memoryId: 'mem-3' }
+    ];
+
+    const { payload } = await call();
+
+    expect(payload.data.edges).toEqual([{ from: 'mem-2', to: 'mem-3', kind: 'coCitation' }]);
+    expect(payload.data.associationGated).toBe(1);
+  });
+
+  it('associationGated 原样透出：界面那句「有几条按策略没连线」说的是这个数，不是它自己数的', async () => {
+    db.memories = [memoryRow({ id: 'mem-1', context: 'personalReflection' })];
+
+    const { payload } = await call();
+
+    expect(payload.data.associationGated).toBe(1);
+  });
+
+  /**
+   * 这一条是这一片最容易被写歪的地方：`try { policies = await ... } catch { policies = 全开 }`
+   * 看起来最「不影响用户」，实际是把用户明确关掉的闸门在读取失败时打开了。
+   * 所以这里要的是报错——和 `memory-module.ts` 读不到保留期就整模块失败同一个口径。
+   */
+  it('策略表读不出来时报错，不许当成「全都允许」把用户挡掉的线画出来', async () => {
+    db.policiesThrows = true;
+    db.memories = [memoryRow({ id: 'mem-1' }), memoryRow({ id: 'mem-2', chatId: 'chat-2' })];
+
+    const { response, payload } = await call();
+
+    expect(response.status).toBe(500);
+    expect(payload.error.code).toBe('INTERNAL_ERROR');
+    expect(payload.data).toBeUndefined();
   });
 });
 

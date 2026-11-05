@@ -16,8 +16,10 @@ import {
  * 输出：动作 + 采纳的情境 + 保留期 + 三个下游许可；不含原文任何片段。
  * 测试：tests/unit/cognitive-write-decision.test.ts
  *
- * LINK 和 DELETE 仍然没有分支：前者要的是记忆之间的关系（Phase 2 片C），
- * 后者要的是用户点下「删除」这个动作（Phase 6 界面），都不该由词法猜出来。
+ * LINK 和 DELETE 都没有分支，而且这两个缺口是**关掉的**，不是待建：
+ * 关系全部从库里已经存在的行推导（2a 那次阈值校准判的就是不建关系表），所以「建立关联」永远不会
+ * 成为一个由词法猜出来的写入动作；DELETE 是用户点出来的动作，三种忘记（纠正/归档/永久删除）各有自己的
+ * 入口和路由，不在这一层。这一层只决定「这条候选要不要落库、以什么身份落库」。
  */
 export type MemoryWriteAction = 'WRITE' | 'UPDATE' | 'EPHEMERAL' | 'ASK_CONFIRM' | 'IGNORE';
 

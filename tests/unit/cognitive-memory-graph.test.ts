@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveMemoryGraph, type MemoryGraphSource } from '@/lib/cognitive/memory-graph';
+import { DEFAULT_MEMORY_POLICIES, type MemoryContext, type MemoryPolicy } from '@/lib/cognitive/policy';
 import type { MemoryDto } from '@/lib/cognitive/memories';
 
 /**
@@ -45,7 +46,19 @@ function citation(reflectionId: string, memoryId: string) {
 }
 
 function source(overrides: Partial<MemoryGraphSource> = {}): MemoryGraphSource {
-  return { memories: [], edges: [], citations: [], ...overrides };
+  return { memories: [], edges: [], citations: [], policies: DEFAULT_MEMORY_POLICIES, ...overrides };
+}
+
+/**
+ * 只动「关联」这一列，其余照默认策略表。
+ * 整张表换来换去会让用例之间互相依赖——那条「同主题不成边」的用例改个类型就能顺带把闸门也改了。
+ */
+function policiesWith(overrides: Partial<Record<MemoryContext, boolean>>): Record<MemoryContext, MemoryPolicy> {
+  const copy = { ...DEFAULT_MEMORY_POLICIES };
+  for (const [context, allowed] of Object.entries(overrides) as [MemoryContext, boolean][]) {
+    copy[context] = { ...copy[context], allowAssociation: allowed };
+  }
+  return copy;
 }
 
 describe('deriveMemoryGraph — 节点', () => {
@@ -363,8 +376,108 @@ describe('deriveMemoryGraph — 预算', () => {
       groups: [],
       capped: { nodes: false, edges: false },
       totalNodes: 0,
-      totalEdges: 0
+      totalEdges: 0,
+      associationGated: 0
     });
+  });
+});
+
+describe('deriveMemoryGraph — ⑤ 情境策略的「参与关联」这一列（任务书 2.2 唯一的运行时消费者）', () => {
+  // 三条同在 chat-1：最早那条（a）落在关掉关联的情境里。
+  // 「先照样连好再按端点删边」的写法在这里会一根线都不剩——那正是这一组用例要挡住的错法。
+  function chatTrio(contextOfFirst: MemoryContext): MemoryDto[] {
+    return [
+      memory({ id: 'a', context: contextOfFirst, chatId: 'chat-1', recordedAt: '2026-11-01T10:00:00.000Z' }),
+      memory({ id: 'b', chatId: 'chat-1', recordedAt: '2026-11-02T10:00:00.000Z' }),
+      memory({ id: 'c', chatId: 'chat-1', recordedAt: '2026-11-03T10:00:00.000Z' })
+    ];
+  }
+
+  it('关掉关联的那条不做星形的锚点：剩下两条照常连，锚点换成池里最早的那条', () => {
+    const graph = deriveMemoryGraph(
+      source({ memories: chatTrio('emotionalSupport'), policies: DEFAULT_MEMORY_POLICIES })
+    );
+    expect(graph.edges).toEqual([{ from: 'b', to: 'c', kind: 'sameChat' }]);
+  });
+
+  it('打开关联时同一批数据连出两根线：上一条用例少的那根是闸门挡的，不是数据本来就没有', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: chatTrio('emotionalSupport'),
+        policies: policiesWith({ emotionalSupport: true })
+      })
+    );
+    expect(graph.edges).toEqual([
+      { from: 'a', to: 'b', kind: 'sameChat' },
+      { from: 'a', to: 'c', kind: 'sameChat' }
+    ]);
+  });
+
+  it('共引用也一样：关掉的那条不参与，剩下两条照常连', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: chatTrio('emotionalSupport').map((row) => ({ ...row, chatId: null })),
+        citations: [
+          { reflectionId: 'r-1', memoryId: 'a' },
+          { reflectionId: 'r-1', memoryId: 'b' },
+          { reflectionId: 'r-1', memoryId: 'c' }
+        ]
+      })
+    );
+    expect(graph.edges).toEqual([{ from: 'b', to: 'c', kind: 'coCitation' }]);
+  });
+
+  it('演化边不受这一列影响：被哪一条改过是库里记着的事实，不是系统的联想', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: [
+          memory({ id: 'old', context: 'emotionalSupport', chatId: null }),
+          memory({ id: 'new', context: 'general', chatId: null, recordedAt: '2026-11-02T10:00:00.000Z' })
+        ],
+        edges: [edge('new', 'old')]
+      })
+    );
+    expect(graph.edges).toEqual([{ from: 'old', to: 'new', kind: 'update' }]);
+  });
+
+  it('闸门只动线，不动点：节点、分组、总条数都和没闸门时一样', () => {
+    const gated = deriveMemoryGraph(source({ memories: chatTrio('emotionalSupport') }));
+    const open = deriveMemoryGraph(source({ memories: chatTrio('emotionalSupport'), policies: policiesWith({ emotionalSupport: true }) }));
+    expect(gated.nodes.map((node) => node.id)).toEqual(open.nodes.map((node) => node.id));
+    expect(gated.groups).toEqual(open.groups);
+    expect(gated.totalNodes).toBe(open.totalNodes);
+  });
+
+  it('策略表里少一个情境时按关着处理：拿不准的时候宁可少连线，也不替他决定让谁参与联想', () => {
+    const missing = { ...DEFAULT_MEMORY_POLICIES } as Partial<Record<MemoryContext, MemoryPolicy>>;
+    delete missing.learning;
+    const graph = deriveMemoryGraph(
+      source({
+        memories: chatTrio('learning'),
+        policies: missing as Record<MemoryContext, MemoryPolicy>
+      })
+    );
+    expect(graph.edges).toEqual([{ from: 'b', to: 'c', kind: 'sameChat' }]);
+  });
+
+  it('associationGated 数的是被挡在关联池外的点，不是被省的线：两个数会各自漂移，界面要说的是前者', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: [
+          memory({ id: 'a', context: 'emotionalSupport', chatId: 'chat-1' }),
+          memory({ id: 'b', context: 'personalReflection', chatId: 'chat-2' }),
+          memory({ id: 'c', chatId: 'chat-3' })
+        ]
+      })
+    );
+    // 两条各自待在自己那一场对话里：一根线也不会因为闸门而「本来有现在没有」，可它们确实不进关联。
+    expect(graph.associationGated).toBe(2);
+    expect(graph.edges).toEqual([]);
+  });
+
+  it('全开时 associationGated 是 0：提示句在不需要时不许摆出来', () => {
+    const graph = deriveMemoryGraph(source({ memories: chatTrio('general'), policies: policiesWith({}) }));
+    expect(graph.associationGated).toBe(0);
   });
 });
 

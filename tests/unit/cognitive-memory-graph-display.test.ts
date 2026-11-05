@@ -10,6 +10,7 @@ import {
   GRAPH_EDGE_LABELS,
   GRAPH_MAX_EDGES,
   GRAPH_MAX_NODES,
+  describeAssociationGate,
   describeGraphBudget,
   describeNotAGraph,
   isGraphDrawable,
@@ -53,6 +54,7 @@ function graph(overrides: Partial<MemoryGraph> = {}): MemoryGraph {
     capped: { nodes: false, edges: false },
     totalNodes: 0,
     totalEdges: 0,
+    associationGated: 0,
     ...overrides
   };
 }
@@ -80,19 +82,58 @@ describe('isGraphDrawable — 什么时候才配叫一张图', () => {
 
 describe('describeNotAGraph — 画不出来时说的是哪个数', () => {
   it('一条记忆都没有时说的是「没有一个点」，不是「没有关联」', () => {
-    expect(describeNotAGraph(0, 0)).toBe('你还没有一条记忆，所以这张图上没有一个点。');
+    expect(describeNotAGraph(0, 0, 0)).toBe('你还没有一条记忆，所以这张图上没有一个点。');
   });
 
   it('有记忆但推不出任何关系时，说的是那句「不猜」', () => {
-    expect(describeNotAGraph(7, 0)).toBe(
+    expect(describeNotAGraph(7, 0, 0)).toBe(
       '现在还不是一张图：你的 7 条记忆之间没有更新边，也没有共来源会话。图只从已经存在的关系里推导，不猜。'
     );
   });
 
   it('点不够但有连线时不许复用那句「没有更新边」：这时候线是有的，缺的是点', () => {
-    expect(describeNotAGraph(2, 1)).toBe(
+    expect(describeNotAGraph(2, 1, 0)).toBe(
       '2 个点、1 根线连不成一张图：这两个点之间确实有关系，可三个点以上的连线才叫网络。'
     );
+  });
+
+  /**
+   * 闸门这一条是这一片新加的用例，它挡的是一句**当时会真的撒谎**的话：
+   * 零线有可能是「同一场对话里的那些行被策略挡在关联池外」造成的，
+   * 那时候说「没有共来源会话」就是拿系统的闸门冒充库里的空缺。
+   */
+  it('零线但有闸门时不许说「没有共来源会话」：那是闸门挡的，库里没有这件事没说出口', () => {
+    expect(describeNotAGraph(7, 0, 2)).toBe(
+      '现在还不是一张图：你的 7 条记忆之间有 2 条按你的情境策略不参与关联，' +
+        '剩下这些之间既没有被更新的，也没有同一场对话里一起记下的。图只从已经存在的关系里推导，不猜。'
+    );
+  });
+
+  it('闸门句只在零线时插进去：点太少那一支说的还是点数，跟闸门没关系', () => {
+    expect(describeNotAGraph(2, 1, 5)).toBe(
+      '2 个点、1 根线连不成一张图：这两个点之间确实有关系，可三个点以上的连线才叫网络。'
+    );
+  });
+
+  it('没有记忆时闸门条数再大也不提：那 0 条记忆里没有任何一条，两句会互相打脸', () => {
+    expect(describeNotAGraph(0, 0, 3)).toBe('你还没有一条记忆，所以这张图上没有一个点。');
+  });
+});
+
+describe('describeAssociationGate — 闸门挡了几条就要说几条', () => {
+  it('一条都没被挡时空串：不需要时报一句「没有东西被挡」是噪音', () => {
+    expect(describeAssociationGate(0)).toBe('');
+  });
+
+  it('报的是条数，并且当场说清挡的只有关联线、不是那条记忆本身', () => {
+    expect(describeAssociationGate(3)).toBe(
+      '这张图上有 3 条记忆按你的情境策略不参与关联：图上不为它们画关联线，它们自己的更新关系照样画。'
+    );
+  });
+
+  it('句子里只有条数：参数就是一个数字，界面因此不可能把某条记忆的正文带进这句提示', () => {
+    const sentence = describeAssociationGate(12);
+    expect(sentence.match(/\d+/g)).toEqual(['12']);
   });
 });
 

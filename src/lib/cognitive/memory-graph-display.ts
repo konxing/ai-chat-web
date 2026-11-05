@@ -65,13 +65,37 @@ export function isGraphDrawable(graph: MemoryGraph): boolean {
  * 画不出来时的那句话。三种情形分开说，因为「缺什么」不一样：
  * 没有记忆、有记忆但推不出关系、有关系但点太少。
  * 复用同一句「没有更新边」去描述第三种会当场说谎——那时候线是有的。
+ *
+ * 第三个参数是关联闸门挡掉的条数，它只改第二支：零线既可能是「库里本来就没有共来源会话」，
+ * 也可能是「有，但那些行按情境策略不进关联池」。这两种在界面上必须不一样——
+ * 把用户的开关读成他的数据的空缺，这一屏就在替他做他没做过的判断。
  */
-export function describeNotAGraph(nodeCount: number, edgeCount: number): string {
+export function describeNotAGraph(nodeCount: number, edgeCount: number, associationGated: number): string {
   if (nodeCount === 0) return '你还没有一条记忆，所以这张图上没有一个点。';
   if (edgeCount === 0) {
+    if (associationGated > 0) {
+      return (
+        `现在还不是一张图：你的 ${nodeCount} 条记忆之间有 ${associationGated} 条按你的情境策略不参与关联，` +
+        '剩下这些之间既没有被更新的，也没有同一场对话里一起记下的。图只从已经存在的关系里推导，不猜。'
+      );
+    }
     return `现在还不是一张图：你的 ${nodeCount} 条记忆之间没有更新边，也没有共来源会话。图只从已经存在的关系里推导，不猜。`;
   }
   return `${nodeCount} 个点、${edgeCount} 根线连不成一张图：这两个点之间确实有关系，可三个点以上的连线才叫网络。`;
+}
+
+/**
+ * 关联闸门的提示。0 时给空串，由界面自己决定摆不摆——不需要时报一句「没东西被挡」是噪音。
+ *
+ * 这句只报条数，而且当场说清挡的是**线**不是**行**：那几条记忆仍然在图上，仍然能被点开。
+ * 一句「这些记忆已隐藏」会把一个策略读成一次删除，那是这一屏最不该说的话。
+ */
+export function describeAssociationGate(associationGated: number): string {
+  if (associationGated <= 0) return '';
+  return (
+    `这张图上有 ${associationGated} 条记忆按你的情境策略不参与关联：` +
+    '图上不为它们画关联线，它们自己的更新关系照样画。'
+  );
 }
 
 /**

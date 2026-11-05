@@ -1,4 +1,4 @@
-import { MEMORY_CONTEXTS, type MemoryContext, type MemoryType } from './policy';
+import { MEMORY_CONTEXTS, type MemoryContext, type MemoryPolicy, type MemoryType } from './policy';
 import type { MemoryDto } from './memories';
 import type { TimelineEdge } from './timeline';
 
@@ -21,6 +21,14 @@ import type { TimelineEdge } from './timeline';
  *
  * 四、**预算要说出来**。节点 ≤120、边 ≤240，超了就留最近那批并把 `capped` 交给界面。
  * 宁可明说「这里画不全」，也不把整库塞进一个 SVG 让浏览器转圈。
+ *
+ * 五、**这一列有人读了**：情境策略里的 `allowAssociation` 在这张图上是硬闸门。
+ * 它是那张七情境策略表里最后一个没有运行时消费者的字段（`allowUserProfile` 归画像、
+ * `allowReflection` 归洞察，各自有读者），而「这类东西不要拿去联想」这句话只有画布的
+ * 入口拦得住。挡的只有**派生出来的两种线**（同一场对话、同一条洞察一起提到）——
+ * 那两条是这一片造出来的说法。演化边不挡：那条线是库里 `MemoryRevision` 记着的既成事实，
+ * 用户关的是「系统拿它去联想」，不是「他自己的改口历史」。
+ * 点也不挡：把一条记忆从自己的网络视图里抹掉，比多画一个孤立的点更容易被读成「库里没有这条」。
  */
 
 /** 画布上限。两份读列表各自的硬上限是 200 行，这里留出的余量足够让图不吞掉整库。 */
@@ -38,6 +46,8 @@ export interface MemoryGraphSource {
   /** 演化边（复用时间线那份四列形状，不解密理由）。 */
   edges: TimelineEdge[];
   citations: GraphCitation[];
+  /** 七情境策略表。这里只读 `allowAssociation` 一列，别的列一个都不看。 */
+  policies: Record<MemoryContext, MemoryPolicy>;
 }
 
 export type GraphEdgeKind = 'update' | 'sameChat' | 'coCitation';
@@ -72,13 +82,20 @@ export interface MemoryGraph {
   /** 截断之前的真实条数：`capped` 那句提示要说的是这个数，不是画布上的数。 */
   totalNodes: number;
   totalEdges: number;
+  /** 画布上因为情境关掉「参与关联」而没进关联池的点数。一根线都没省的时候这个数也要说。 */
+  associationGated: number;
 }
 
-export function deriveMemoryGraph({ memories, edges, citations }: MemoryGraphSource): MemoryGraph {
+export function deriveMemoryGraph({ memories, edges, citations, policies }: MemoryGraphSource): MemoryGraph {
   const ordered = orderNodes(memories);
   const retained = ordered.slice(-GRAPH_MAX_NODES);
   const present = new Set(retained.map((node) => node.id));
   const byId = new Map(retained.map((node) => [node.id, node]));
+
+  /** 关联池：情境关掉 `allowAssociation` 的行不进这个集合——它既不做锚点，也不做成员。 */
+  const associated = new Set(
+    retained.filter((node) => policies[node.context]?.allowAssociation === true).map((node) => node.id)
+  );
 
   const candidates: GraphEdge[] = [];
   const seen = new Set<string>();
@@ -97,7 +114,12 @@ export function deriveMemoryGraph({ memories, edges, citations }: MemoryGraphSou
     push(revision.previousId, revision.memoryId, 'update');
   }
   // ② 同一场对话：星形挂到这段对话里最早记下的那一条。
-  for (const group of groupBy(retained, (node) => node.chatId)) {
+  // 过滤放在分组之前而不是补一道端点检查：那样锚点会是「这场对话里最早的一条」，
+  // 而它一旦关了关联，整场对话的星形就整体塌了——用户关掉一条，凭的是什么也不该让别人的线消失。
+  for (const group of groupBy(
+    retained.filter((node) => associated.has(node.id)),
+    (node) => node.chatId
+  )) {
     if (group.members.length < 2) continue;
     const anchor = group.members[0]!;
     for (const member of group.members.slice(1)) push(anchor.id, member.id, 'sameChat');
@@ -105,7 +127,7 @@ export function deriveMemoryGraph({ memories, edges, citations }: MemoryGraphSou
   // ③ 共引用：同一条洞察一起引用过的记忆之间连边，同样星形。
   // 引用行先按 (reflectionId, memoryId) 排：读回来的那批是「最近 200 条、按时间倒序」，
   // 那个次序不是这里的输入契约，靠它决定边的先后就等于让上限一截、边的先后跟着晃。
-  const citationRows = citations.filter((row) => present.has(row.memoryId)).sort(compareCitations);
+  const citationRows = citations.filter((row) => associated.has(row.memoryId)).sort(compareCitations);
   for (const group of groupBy(citationRows, (row) => row.reflectionId)) {
     const members = distinctMembers(group.members, byId);
     if (members.length < 2) continue;
@@ -119,7 +141,9 @@ export function deriveMemoryGraph({ memories, edges, citations }: MemoryGraphSou
     groups: buildGroups(retained),
     capped: { nodes: ordered.length > GRAPH_MAX_NODES, edges: candidates.length > GRAPH_MAX_EDGES },
     totalNodes: ordered.length,
-    totalEdges: candidates.length
+    totalEdges: candidates.length,
+    // 数的是画布上的点：被预算截掉那批本来就不在这张图上，把它们算进「因为策略没连线」会是另一个数。
+    associationGated: retained.length - associated.size
   };
 }
 

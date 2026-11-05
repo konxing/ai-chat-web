@@ -22,16 +22,18 @@ import type { EmotionTransparency } from '@/lib/cognitive/preferences';
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
  *
  * 只渲染真有代码在消费的字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、
- * 是否允许整理进画像、保留期，再加上一个全局的「情绪标注」档位。
- * 同一张策略表里只剩「关联」一项没有消费者——grep 得到的是它的存储和校验声明，
- * 没有任何运行时代码读它；偏好表里的 `emotionEnabled` 同理。把它们做成能拨的控件，
- * 就是任务书第八节点名禁止的「用假的交互代替」，所以一个都不放，接口和存储原样留着。
+ * 是否允许整理进画像、是否允许拿去联想、保留期，再加上一个全局的「情绪标注」档位。
+ * 这张策略表里今天没有消费者的只剩 `emotionEnabled`——它在偏好表里，grep 得到的是存储和校验声明，
+ * 没有任何运行时代码读它。把它做成能拨的控件，就是任务书第八节点名禁止的「用假的交互代替」，
+ * 所以不放，接口和存储原样留着。
  *
- * 「允许反思」是 11-04 补上的：洞察扫描（reflection-sweep.ts）真按这一列过闸。
- * 「允许整理进画像」是 11-05（片 d）补上的：画像候选（profile-candidates.ts）真按这一列过闸，
- * 关掉之后这种情境里记下的内容既不作为候选，也不作为洞察候选的依据。
+ * 三个下游许可各是哪天有了读者才拿到控件的：
+ * 「允许反思」11-04（洞察扫描 `reflection-sweep.ts` 真按这一列过闸）；
+ * 「允许整理进画像」11-05 片 d（画像候选 `profile-candidates.ts:62`）；
+ * 「允许拿去联想」11-06 片 j（记忆网络的关联池 `memory-graph.ts:97`——关掉那种情境的行不做锚点、
+ * 也不做成员，但点还在图上、更新关系照旧）。
  *
- * 一屏同时只展开一张卡：七种情境各自六个控件，全摊开就是四十二控件同屏，
+ * 一屏同时只展开一张卡：七种情境各自七个控件，全摊开就是四十九控件同屏，
  * 谁也说不清刚才那一下点的是哪一条。这条规矩和「记忆」那一屏一致。
  */
 
@@ -52,13 +54,14 @@ const EMOTION_LABELS: Record<EmotionTransparency, string> = {
   explicit: '用，并说明有几条和情绪有关'
 };
 
-/** 只有这六个字段能被这一屏改动，草稿就只装这六个，免得把没消费者的字段一起回写。 */
+/** 只有这七个字段能被这一屏改动，草稿就只装这七个，免得把没消费者的字段一起回写。 */
 interface Draft {
   allowPersistence: boolean;
   allowedMemoryTypes: MemoryType[];
   requireConfirmation: boolean;
   allowReflection: boolean;
   allowUserProfile: boolean;
+  allowAssociation: boolean;
   retention: MemoryRetention;
 }
 
@@ -69,6 +72,7 @@ function toDraft(policy: MemoryPolicy): Draft {
     requireConfirmation: policy.requireConfirmation,
     allowReflection: policy.allowReflection,
     allowUserProfile: policy.allowUserProfile,
+    allowAssociation: policy.allowAssociation,
     retention: policy.retention
   };
 }
@@ -79,6 +83,7 @@ function isSameDraft(left: Draft, right: Draft): boolean {
     left.requireConfirmation === right.requireConfirmation &&
     left.allowReflection === right.allowReflection &&
     left.allowUserProfile === right.allowUserProfile &&
+    left.allowAssociation === right.allowAssociation &&
     left.retention === right.retention &&
     [...left.allowedMemoryTypes].sort().join(',') === [...right.allowedMemoryTypes].sort().join(',')
   );
@@ -339,6 +344,21 @@ export function MemoryPolicyPanel() {
                       </label>
                       <p className="mt-1.5 text-[11.5px] text-white/35">
                         关掉后，这种情境里记下的内容不再作为画像候选的依据。
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="flex items-start gap-2 text-[13px] text-white/75">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 accent-emerald-400"
+                          checked={draft.allowAssociation}
+                          onChange={(e) => setDraft({ ...draft, allowAssociation: e.target.checked })}
+                        />
+                        允许把这种情境拿去联想
+                      </label>
+                      <p className="mt-1.5 text-[11.5px] text-white/35">
+                        关掉后，这种情境里的记忆不再和别的记忆连关联线；它自己的更新关系照旧。
                       </p>
                     </div>
 

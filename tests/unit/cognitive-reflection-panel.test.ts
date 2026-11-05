@@ -10,8 +10,8 @@ import { describe, expect, it } from 'vitest';
  * 一、**批准的文案不许被悄悄改掉**。2026-11-04 那张逐字表是他过目的产物，改一个标点就等于改了
  *    用户看到的句子；把这些句子钉在这里，下次有人顺手「润色」一下就会红。
  * 二、**不许出现没有消费者的交互**。2 判的是乙：改写这一版不给入口；状态机只有 PENDING 一个入口；
- *    画像与关联两列至今没有运行时代码读它们。这三条任何一条破了，界面上就会出现一个必然报错或
- *    必然无效的控件——那正是任务书第八节点名禁止的「用假的交互代替」。
+ *    策略表的三个下游许可各自要先有运行时读者才拿到控件（画像列片 d、关联列片 j）。
+ *    这三条任何一条破了，界面上就会出现一个必然报错或必然无效的控件——那正是任务书第八节点名禁止的「用假的交互代替」。
  *
  * 界面本身（像素、点击、真实数据下的排布）**不在这里验收**，报告里明说它是无法验收项。
  */
@@ -94,9 +94,36 @@ describe('不许有没人消费的交互', () => {
     expect(PANEL_CODE).not.toContain("status === 'PENDING' ? (");
   });
 
-  it('关联一列至今没有消费者，策略面板不许给它控件；画像一列片 d 起有，必须给', () => {
-    expect(stripComments(POLICY_PANEL)).not.toContain('allowAssociation');
-    expect(stripComments(POLICY_PANEL)).toContain('allowUserProfile');
+  /**
+   * 11-04 那版这条是「关联一列没有消费者，所以不给控件」。片 j 给它在记忆网络的派生层
+   * 找到了读者（`memory-graph.ts` 的关联池），按仓库自己的立场——先有代码读它，再给它控件——
+   * 这一列现在有复选框了。三条一起钉，是因为「哪个字段有读者」这件事只能靠这里逐条记账。
+   */
+  it('三个下游许可都有消费者了，所以三个都有控件', () => {
+    for (const field of ['allowReflection', 'allowUserProfile', 'allowAssociation']) {
+      expect(stripComments(POLICY_PANEL)).toContain(field);
+      expect(POLICY_PANEL).toContain(`draft.${field}`);
+      expect(POLICY_PANEL).toMatch(new RegExp(`checked=\\{draft\\.${field}\\}`));
+    }
+  });
+
+  it('关联那一列的说法：关的是「连线」，不是那条记忆本身', () => {
+    expect(POLICY_PANEL).toContain('关掉后，这种情境里的记忆不再和别的记忆连关联线；它自己的更新关系照旧。');
+  });
+
+  /**
+   * 钉的是「加了复选框不等于改得动」：这一屏用 `isSameDraft(draft, toDraft(policy))` 算脏，
+   * 脏了才让存。草稿里多一个字段而脏检查漏了它，用户单独拨这个开关时界面永远显示「没有改动」，
+   * 保存按钮死着——控件在，路不通。所以字段表从源码里读，不在这儿抄一份。
+   */
+  it('草稿里的每个字段都参与脏检查：漏一个就存不了那一个改动', () => {
+    const draftBlock = POLICY_PANEL.match(/interface Draft \{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const sameBlock = POLICY_PANEL.match(/function isSameDraft\([\s\S]*?\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const fields = [...draftBlock.matchAll(/^\s+(\w+):/gm)].map((match) => match[1]);
+    expect(fields.length).toBeGreaterThanOrEqual(6);
+    for (const field of fields) {
+      expect(sameBlock).toContain(field);
+    }
   });
 });
 

@@ -61,6 +61,23 @@ describe('这一屏说的话', () => {
     expect(PANEL_CODE).not.toMatch(/总[计数].{0,6}-\s*(nodes|edges)\.length/);
   });
 
+  /**
+   * 闸门那句和「还不是一张图」那句是同一个数字的两种说法，所以这两句在界面上互斥：
+   * 画不出来时由 `describeNotAGraph` 把条数说进那一句里，画得出来时才轮到这独立的一句。
+   * 钉法用「调用点只有一处 + 那一处由 drawable 决定」——比数句子更稳，改文案不会误红。
+   */
+  it('闸门提示来自 describeAssociationGate，且只在画得出图时说', () => {
+    expect(PANEL_CODE.match(/describeAssociationGate\(graph\.associationGated\)/g)).toHaveLength(1);
+    expect(PANEL_CODE).toMatch(/drawable \? describeAssociationGate\(graph\.associationGated\) : ''/);
+    expect(PANEL_CODE).not.toContain('不参与关联');
+  });
+
+  it('第三参数得是画布自己带的 associationGated：界面不许另数一遍被挡的条数', () => {
+    expect(PANEL_CODE).toContain('describeNotAGraph(graph.nodes.length, graph.edges.length, graph.associationGated)');
+    // 旧的两句形状：以 `edges.length)` 收尾就说明第三个参数没传。
+    expect(PANEL_CODE).not.toMatch(/describeNotAGraph\([^)]*edges\.length\)/);
+  });
+
   it('点的位置不表示任何东西，这句话要摆在界面上', () => {
     expect(PANEL).toContain('点的位置只为了铺开不重叠，不表示任何东西。');
   });
