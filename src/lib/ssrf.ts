@@ -122,18 +122,28 @@ function dispatcherFor(target: ResolvedTarget): Dispatcher {
   return dispatcher;
 }
 
-function pinnedLookup(target: ResolvedTarget): LookupFunction {
+/**
+ * 把校验过的地址交回给连接层。
+ *
+ * 为什么不是「挑一个」：`dns.lookup(all, verbatim)` 的返回顺序由对面给什么决定，本机实测
+ * `ark.cn-beijing.volces.com` 先回 AAAA 再回 A，而这条线上 v6 出去是黑的——旧实现取
+ * `candidates[0]`，于是每一条对话都撞在那个死地址上报「无法连接模型服务」，对面 IPv4
+ * 其实活着。所以整组交回去，并把 IPv4 排在前面：先试这条路，走不通再由连接层换下一个，
+ * 而防 DNS rebinding 的语义没变——交回去的仍然只有校验过的那批。
+ */
+export function pinnedLookup(target: ResolvedTarget): LookupFunction {
   return (_hostname, options, callback) => {
     const requested = options.family;
     const family = requested === 6 || requested === 'IPv6' ? 6 : requested === 4 || requested === 'IPv4' ? 4 : undefined;
-    const candidates = family ? target.addresses.filter((a) => a.family === family) : target.addresses;
-    const chosen = candidates[0] || target.addresses[0];
-    if (!chosen) {
+    const filtered = family ? target.addresses.filter((a) => a.family === family) : target.addresses;
+    const candidates = filtered.length ? filtered : target.addresses;
+    if (!candidates.length) {
       callback(new Error('No validated address'), '', 0);
       return;
     }
-    if (options.all) callback(null, [{ address: chosen.address, family: chosen.family }]);
-    else callback(null, chosen.address, chosen.family);
+    const ordered = [...candidates].sort((a, b) => (a.family === b.family ? 0 : a.family === 4 ? -1 : 1));
+    if (options.all) callback(null, ordered);
+    else callback(null, ordered[0]!.address, ordered[0]!.family);
   };
 }
 

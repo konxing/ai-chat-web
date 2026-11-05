@@ -1,9 +1,10 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ApiError } from '@/lib/http';
 import { resetEnvCacheForTests } from '@/lib/env';
-import { joinApiPath, resolveProviderTarget, safeFetch } from '@/lib/ssrf';
+import { joinApiPath, pinnedLookup, resolveProviderTarget, safeFetch } from '@/lib/ssrf';
 
 function expectCode(fn: () => Promise<unknown>, code: string) {
   return fn().then(
@@ -143,3 +144,50 @@ describe('joinApiPath', () => {
     expect(joinApiPath('https://api.example.com', 'models')).toBe('https://api.example.com/models');
   });
 });
+
+/**
+ * 钉住地址解析（本机实测换来的）：`dns.lookup(all, verbatim)` 对
+ * `ark.cn-beijing.volces.com` 先回 AAAA 再回 A，而这条机器上 v6 出去是黑的——
+ * 旧实现只取 `candidates[0]`，于是每次对话都撞在同一个死地址上报
+ * 「无法连接模型服务」，对面 IPv4 其实活得好好的。
+ * 这一组用例钉的是「把校验过的地址全交回去，v4 排在前面」，不是「只准用 v4」。
+ */
+describe('pinnedLookup 交回哪几个地址', () => {
+  const v6 = { address: '2406:d440:204:ae00::1', family: 6 as const };
+  const v4 = { address: '118.196.65.58', family: 4 as const };
+  const both = { url: new URL('https://ark.cn-beijing.volces.com/api/v3'), addresses: [v6, v4], allowPrivate: false };
+
+  function look(target: unknown, options: { all?: boolean; family?: number | string }) {
+    return new Promise<{ address: string }[] | string>((resolve, reject) => {
+      pinnedLookup(target as never)(
+        'ark.cn-beijing.volces.com',
+        options as never,
+        (err: Error | null, ...args: unknown[]) => {
+          if (err) reject(err);
+          else resolve(args[0] as { address: string }[] | string);
+        }
+      );
+    });
+  }
+
+  const addressesOf = (given: { address: string }[] | string) =>
+    typeof given === 'string' ? [given] : given.map((item) => item.address);
+
+  it('全都要：校验过的两个地址都交回去，让连接层自己换着试', async () => {
+    expect(addressesOf(await look(both, { all: true, family: 0 }))).toEqual([v4.address, v6.address]);
+  });
+
+  it('点名要 IPv6 时不塞 v4 进去：过滤仍按调用方要求的地址族来', async () => {
+    expect(addressesOf(await look(both, { all: true, family: 'IPv6' }))).toEqual([v6.address]);
+  });
+
+  it('只解析出一个 v6、却被要求 v4 时照旧交回那个 v6：不许把自己过滤成空', async () => {
+    expect(addressesOf(await look({ ...both, addresses: [v6] }, { all: false, family: 4 }))).toEqual([v6.address]);
+  });
+
+  it('dispatcher 用的就是这一个解析器：不是另起一份没测过的实现', () => {
+    const source = readFileSync('src/lib/ssrf.ts', 'utf8');
+    expect(source).toMatch(/lookup:\s*pinnedLookup\(target\)/);
+  });
+});
+
