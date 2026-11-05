@@ -35,3 +35,21 @@ export function decisionDetailRows(
     return text === null ? [] : [{ label, text }];
   });
 }
+
+/**
+ * 空态那句话里举的说法（任务书 5.5 界面那一半的诚实性）。
+ *
+ * 面板原来写「你在对话里说「我决定……」时，这里会出现待确认的候选」。对着 v1 的词表看，
+ * 那是空头承诺：`我决定` 只在动词表里，类别词表要的是 `我决定用 / 我改用 / 我打算学`
+ * 这一类硬短语（那条边界是实测出来的，记在验收文档片P-3 第八节）。
+ *
+ * 空态是用户和这一屏的第一次接触，它说错了用户就会以为自己说了却没被记下来，
+ * 于是开始把「系统没记」理解成「我表达得不好」。所以这里只举真能产出候选的说法，
+ * 例子由 `cognitive-decision-intake-copy.test.ts` 拿去跑真实抽取器，不由注释担保；
+ * 以后词表扩了，加进来的例子必须先通过那一道，这句话才不会跑在能力前面。
+ */
+export const DECISION_INTAKE_EXAMPLES = ['我决定用', '我改用', '我打算学'] as const;
+
+const quotedExamples = DECISION_INTAKE_EXAMPLES.map((example) => `「${example}……」`);
+
+export const DECISION_EMPTY_STATE_DESCRIPTION = `你在对话里说${quotedExamples.join('')}这类明确说法时，这里会出现待确认的候选。`;

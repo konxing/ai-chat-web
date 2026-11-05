@@ -6,7 +6,10 @@ import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
 import { outcomeFacetRows } from '@/lib/cognitive/outcome-display';
-import { decisionDetailRows } from '@/lib/cognitive/decision-display';
+import {
+  DECISION_EMPTY_STATE_DESCRIPTION,
+  decisionDetailRows
+} from '@/lib/cognitive/decision-display';
 
 /**
  * 决策记忆那一屏（任务书 5.5 的界面）。
@@ -206,7 +209,7 @@ export function DecisionPanel() {
             <EmptyState
               icon={<Scale className="h-5 w-5" />}
               title="还没有决策记录"
-              description="你在对话里说「我决定……」时，这里会出现待确认的候选。"
+              description={DECISION_EMPTY_STATE_DESCRIPTION}
             />
           ) : (
             SECTIONS.map((section) => {
