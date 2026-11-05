@@ -28,6 +28,7 @@ import {
   describeAccessCount,
   describeMemoryListCap,
   describeArchivedListCap,
+  describeCandidateListCap,
   describePolicySummary,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
@@ -194,6 +195,17 @@ describe('两份列表的截断说明', () => {
   it('已归档那一份到上限：说的是归档，别和上面那句混成一条', () => {
     expect(describeArchivedListCap(true, 200)).toBe(
       '已归档的记忆比这一屏多：这里只列出最近 200 条，更早的没有读进来。'
+    );
+  });
+
+  /**
+   * 待确认那一池也到 200 条为止。这句必须存在：不报出来，用户会以为门口就这几句，
+   * 而实际是最旧的那些已经被挤掉了——他那句话系统还想不想问，答案就此失踪。
+   */
+  it('待确认到上限时单独一句，报的是实际列出的条数', () => {
+    expect(describeCandidateListCap(false, 4)).toBe('');
+    expect(describeCandidateListCap(true, 200)).toBe(
+      '等你回答的话比这一屏多：这里只列出最近 200 条，更早的没有读进来。'
     );
   });
 });

@@ -8,7 +8,7 @@ import { assessMemories, listEvidenceRows } from '@/lib/cognitive/evidence';
 import { reviewMemories } from '@/lib/cognitive/reconsolidation';
 import { listAccessStats, type AccessStats, type MemoryAccessStat } from '@/lib/cognitive/access';
 import { purgeAllMemories, purgeMemoriesByChat, purgeMemoriesByContext } from '@/lib/cognitive/forgetting';
-import { learnAfterPurge } from '@/lib/cognitive/policy-learner';
+import { learnAfterSignals } from '@/lib/cognitive/policy-learner';
 import { listChatTitles } from '@/lib/chats';
 import type { Confidence } from '@/lib/cognitive/confidence';
 
@@ -143,7 +143,7 @@ export async function DELETE(req: Request) {
       if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
       const result = await purgeAllMemories(user.id);
       // 清空全部不产生学习证据，所以这里永远是空数组：一次重置不该被读成「七个情境都记太多了」。
-      const learned = await learnAfterPurge(user.id, result.contexts);
+      const learned = await learnAfterSignals(user.id, result.contexts);
       await audit(req, user, 'user.memory_purge_all', 'user', user.id, result.purged, learned);
       return { purged: result.purged, learned };
     }
@@ -152,7 +152,7 @@ export async function DELETE(req: Request) {
       const limit = rateLimit(`memory-purge-context:${user.id}`, PURGE_CONTEXT_LIMIT, PURGE_WINDOW_MS);
       if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
       const result = await purgeMemoriesByContext(scope.context, user.id);
-      const learned = await learnAfterPurge(user.id, result.contexts);
+      const learned = await learnAfterSignals(user.id, result.contexts);
       await audit(req, user, 'user.memory_purge_by_context', 'context', scope.context, result.purged, learned);
       return { purged: result.purged, learned };
     }
@@ -160,7 +160,7 @@ export async function DELETE(req: Request) {
     const limit = rateLimit(`memory-purge-chat:${user.id}`, PURGE_CHAT_LIMIT, PURGE_WINDOW_MS);
     if (!limit.ok) return jsonError(429, 'RATE_LIMITED', `操作过于频繁，请在 ${limit.retryAfterSec} 秒后重试`);
     const result = await purgeMemoriesByChat(scope.chatId, user.id);
-    const learned = await learnAfterPurge(user.id, result.contexts);
+    const learned = await learnAfterSignals(user.id, result.contexts);
     await audit(req, user, 'user.memory_purge_by_chat', 'chat', scope.chatId, result.purged, learned);
     return { purged: result.purged, learned };
   });

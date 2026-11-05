@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Archive, ArchiveRestore, Brain, History, Pencil, Scale, Trash2, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
+import { MemoryCandidatesPanel } from './memory-candidates-panel';
 import {
   CONFIDENCE_BAND_LABELS,
   CONTEXT_LABELS,
@@ -545,6 +546,12 @@ export function MemoryPanel() {
           关闭只停止新的读写，已存下的记忆仍在下面这份列表里。要逐条停掉，用「归档」。
         </Alert>
       ) : null}
+
+      {/*
+        待确认那块排在记忆列表**上面**，也不跟着总开关消失：那些句子是没答过的原话，
+        关掉长期记忆之后用户更需要一个地方把它们答掉（口径同 `candidates/route.ts` 头上的裁决）。
+      */}
+      <MemoryCandidatesPanel onConfirmed={() => void load()} />
 
       <div className="mt-5 space-y-2.5">
         {loadError ? <Alert tone="error">{loadError}</Alert> : null}

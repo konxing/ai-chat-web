@@ -20,6 +20,7 @@ import { getCognitivePreferences, type EmotionTransparency } from './preferences
 import { rankMemories, rankMemoriesHybrid, type NumericVector } from './retrieval';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
+import { proposeCandidate } from './memory-candidates';
 import { resolveTemporalFrame } from './temporal';
 import type { MemoryDto, MemoryOrigin } from './memories';
 
@@ -29,7 +30,7 @@ import type { MemoryDto, MemoryOrigin } from './memories';
  * 读：按这一轮的提问召回记忆（关键词重合度，不是时间倒序），过掉不在保留期内的，
  * 再渲染成一段「数据不是指令」的文本交给上下文构建。
  * 写：抽候选 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
- * WRITE 落新行、UPDATE 走演化。
+ * WRITE 落新行、UPDATE 走演化、ASK_CONFIRM 进待确认候选。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
  *
  * 读侧的「过滤 + 召回」和「渲染」各自是一个纯函数（selectMemoryCandidates / renderMemoryBlock），
@@ -40,7 +41,8 @@ import type { MemoryDto, MemoryOrigin } from './memories';
  *
  * LINK 和 DELETE 这里没有分支，而且这两个缺口是关掉的：关系全部从库里已有的行派生（2a 判的是不建关系表），
  * 「建立关联」因此永远不会是一次写入动作；删除走的是用户点出来的三种忘记，各有自己的服务与路由。
- * ASK_CONFIRM 也只表现为「不落库」——没有界面就不能假装问过用户。
+ * ASK_CONFIRM 有分支（片M）：它写进待确认候选表，用户点「记住」之后才成为记忆——
+ * 在此之前这句话在任何读路径上都看不见，所以它既不是「记住了」也不是「问过了」，它是「在等用户回答」。
  */
 export const MEMORY_READ_MAX_ITEMS = 8;
 export const MEMORY_READ_MAX_CHARS = 1500;
@@ -238,6 +240,9 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   const superseded = new Set<string>();
 
   let written = 0;
+  // 「先问再记」问出去的句子单独计数：它没进长期库，只是存着等用户哪天去答，不当场打断他，
+  // 所以不该吃掉那一轮两条的落库额度。
+  let proposed = 0;
   // 这一轮真正落定的行（新建或演化都算），留给循环之后补向量。
   const vectors: Array<{ id: string; text: string }> = [];
   for (const candidate of candidates) {
@@ -263,13 +268,32 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       policies,
       supersedeId: previousId
     });
-    if (plan.decision !== 'WRITE' && plan.decision !== 'UPDATE') continue;
 
     // 规则抽出来的是用户原话，所以来源是「亲口说」而不是「系统推断」。
     // 时间那一栏交给 temporal：这句话里确实有一个能落地的时间说法，才落 validFrom；
     // 解析不出来就维持 unknown——「不知道说的是什么时候」是合法状态，编一个起点不是。
     const saidAt = turn.occurredAt ?? new Date();
     const frame = resolveTemporalFrame(candidate.text, saidAt);
+
+    // 「先问再记」问出来的是一句**还没被用户答应**的话，所以它不写记忆行、也不进向量：
+    // 它进的是另一张表。这里断了才是错的——那句话会凭空消失，用户的策略空转（片M 修的就是这个）。
+    if (plan.decision === 'ASK_CONFIRM') {
+      if (proposed >= MEMORY_WRITE_MAX_PER_TURN) break;
+      await proposeCandidate({
+        userId: turn.userId,
+        chatId: turn.chatId,
+        sourceMessageId: turn.sourceMessageId ?? null,
+        type: candidate.type,
+        context: plan.context,
+        content: candidate.text,
+        precision: frame?.precision ?? 'unknown',
+        validFrom: frame?.validFrom ?? null
+      });
+      proposed += 1;
+      continue;
+    }
+    if (plan.decision !== 'WRITE' && plan.decision !== 'UPDATE') continue;
+
     const entry = {
       userId: turn.userId,
       chatId: turn.chatId,

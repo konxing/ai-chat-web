@@ -16,8 +16,10 @@ import type { Prisma } from '@prisma/client';
  *
  * 立场是「系统无条件记住一切是错的」，但学习层能做的只有收紧，而且必须克制：
  *
- * 一、只认明确操作。这里只有「永久删除」算证据。撤回不算——用户撤回可能只是
- *    不想让 AI 再用这一条，不等于抱怨这个情境记太多；改记忆更不算，那是想让它记对。
+ * 一、只认明确操作。这里算证据的只有两种：把一句话**永久删掉**，和对着一条待确认候选
+ *    说「不要记」。它们说的是同一件事——「这句话我不想要你记住」——所以共用同一个闸门、
+ *    同一张信号表、同一条阈值。撤回不算，用户撤回可能只是不想让 AI 再用这一条，
+ *    不等于抱怨这个情境记太多；改记忆更不算，那是想让它记对。
  *    聊天次数、停留时间这类弱信号一律不用（任务书明令禁止）。
  * 二、分情境学。技术项目里连删三条，不许顺手把私人倾诉也收紧。
  * 三、先攒证据，够 3 次、且在 30 天窗口内，才生成并应用候选更新。
@@ -92,8 +94,8 @@ export async function policyLearningEnabled(userId: string): Promise<boolean> {
   }
 }
 
-/** 删除完成、事务提交之后调用：证据够了就把这个情境收紧成「先问再记」。 */
-export async function learnFromPurge(userId: string, context: MemoryContext): Promise<LearningOutcome> {
+/** 操作提交之后调用：证据够了就把这个情境收紧成「先问再记」。名字里不写「删除」，因为拒绝也算一次。 */
+export async function learnFromSignals(userId: string, context: MemoryContext): Promise<LearningOutcome> {
   const state = await readLearningState(userId, context);
   if (state.manualOverrideAt) return { applied: false, reason: 'manual_override' };
   // 收紧过一次就不再重复：再删也只是同一件事的重复表达，不该反复盖时间戳。
@@ -113,22 +115,22 @@ export async function learnFromPurge(userId: string, context: MemoryContext): Pr
 }
 
 /**
- * 删除提交之后，对每个受影响的情境各跑一次学习，返回真的被收紧的那些。
+ * 一次删除或一次拒绝提交之后，对每个受影响的情境各跑一次学习，返回真的被收紧的那些。
  *
  * 学习失败不许让删除失败：行已经删掉了，那是用户要的结果，
  * 不能因为附带效果报错就把 200 变成 500、让用户以为没删掉。
  * 日志里只有 userId 和情境，没有正文，也没有错误原文（任务书 5.5）。
  */
-export async function learnAfterPurge(
+export async function learnAfterSignals(
   userId: string,
   contexts: readonly MemoryContext[]
 ): Promise<MemoryContext[]> {
-  // 闸门放在这里，三条删除链路（单条 / 按会话 / 清空）一起盖住，route 不用各自记得问一遍。
+  // 闸门放在这里，四条链路（单条 / 按会话 / 清空 / 拒绝候选）一起盖住，route 不用各自记得问一遍。
   if (!(await policyLearningEnabled(userId))) return [];
   const learned: MemoryContext[] = [];
   for (const context of contexts) {
     try {
-      const outcome = await learnFromPurge(userId, context);
+      const outcome = await learnFromSignals(userId, context);
       if (outcome.applied) learned.push(context);
     } catch {
       log.warn('cognitive.policy_learning_failed', { userId, context });

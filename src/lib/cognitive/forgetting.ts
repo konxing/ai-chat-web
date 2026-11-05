@@ -4,6 +4,7 @@ import { decryptMemoryContent } from './memories';
 import { fromDbMemoryContext, toDbMemoryContext, type MemoryContext } from './policy';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import { recordExclusions, type ExclusionSource } from './exclusions';
+import { deleteCandidatesBy } from './memory-candidates';
 import { cancelCognitiveTasks } from './task-queue';
 import { deleteAccessForMemories, deleteAllAccess } from './access';
 import type { Prisma } from '@prisma/client';
@@ -25,9 +26,12 @@ import type { Prisma } from '@prisma/client';
  * 因为折叠不到后继而单独成事件（`timeline.ts:96-101`），于是用户删掉的内容换了一副样子回来。
  * 所以 purged 报的是行数不是事件数，界面那句话得跟着说清。
  *
- * 派生数据当前有六种：演化边、排除规则、还没跑的认知任务（任务书 §6 的 CognitiveTask）、
+ * 派生数据当前有七种：演化边、排除规则、还没跑的认知任务（任务书 §6 的 CognitiveTask）、
  * 引用了被删记忆的洞察（ReflectionRecord 加它的 ReflectionCitation）、某次对话产生的决策
- * （DecisionRecord），以及检索访问痕迹（任务书 7.1 的 MemoryAccessTurn）。
+ * （DecisionRecord）、检索访问痕迹（任务书 7.1 的 MemoryAccessTurn），以及还没被回答的
+ * 待确认候选（任务书 1.2 的 ASK_CONFIRM，片M）。
+ * 候选这一种和别处不一样：它和记忆之间**没有外键**，级联帮不上忙，同一句话是两张表唯一的共同点，
+ * 所以「删一条记忆」得拿被删的正文去撞候选的 contentHash，而「忘记这次对话」按 chatId 列扫。
  * 撤任务必须和删行在同一个事务里：否则记忆删完了，事务外那条还排着队，
  * 用户看到的「忘记这次对话」会在下一次轮询时被 worker 推翻。
  *
@@ -68,12 +72,17 @@ export interface PurgeResult {
   contexts: MemoryContext[];
 }
 
-/** 删掉的内容要进排除表，否则用户下次说同一句话它又被记回来了（任务书 7.3）。 */
+/**
+ * 删掉的内容要进排除表，否则用户下次说同一句话它又被记回来了（任务书 7.3）。
+ *
+ * 这份明文同时交回调用方：单条删除还要拿它去撞候选表的 contentHash——那一头和这张表
+ * 没有外键，「确认过的那一条」只认「说的是不是同一句话」。
+ */
 async function recordSources(
   tx: Prisma.TransactionClient,
   userId: string,
   rows: readonly PurgeTargetRow[]
-): Promise<void> {
+): Promise<ExclusionSource[]> {
   const sources: ExclusionSource[] = [];
   for (const row of rows) {
     try {
@@ -89,6 +98,7 @@ async function recordSources(
     }
   }
   if (sources.length > 0) await recordExclusions(tx, userId, sources);
+  return sources;
 }
 
 /** 摘开指向这批行的演化边。userId 带在条件里：别人的边一条都不许碰。 */
@@ -213,7 +223,15 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     // 这一条**不碰决策行**——「忘掉这条记忆」不是「忘记这次对话」（7.3 的两件事）。
     await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, []));
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
-    await recordSources(tx, userId, rows);
+    const sources = await recordSources(tx, userId, rows);
+    // 用户点过「记住」的那一句在候选表里还有一条同样的行：不清它，删掉的这句话
+    // 转头就在「待确认」那一屏继续露着。排除规则上面已经替这句记过，这里只删不补。
+    await deleteCandidatesBy(
+      tx,
+      userId,
+      { contents: sources.map((source) => source.content) },
+      { recordExclusions: false }
+    );
     // 记忆没了，它留下的检索痕迹也跟着走（任务书 7.1 那张表）。按**被删的这批 id** 清，
     // 不按会话清：那张表上没有会话列，而「这一轮检索发生在哪次对话」和这里的来源会话本来也不是同一件事。
     await deleteAccessForMemories(tx, userId, ids);
@@ -246,6 +264,9 @@ export async function purgeMemoriesByChat(chatId: string, userId: string): Promi
     if (decisionIds.length > 0) {
       await tx.decisionRecord.deleteMany({ where: { userId, id: { in: decisionIds } } });
     }
+    // 候选排在「有没有记忆可删」那一行之前，理由和上面撤账、收决策同一句：
+    // 这一轮可能只问出了两句还没答的话，一行记忆都没落地，但用户忘记的是这次对话。
+    await deleteCandidatesBy(tx, userId, { chatId }, { recordExclusions: true });
     if (rows.length === 0) return { purged: 0, contexts: [] };
     const contexts = [...new Set(rows.map((row) => fromDbMemoryContext(row.context)))];
     await detachEdges(tx, userId, ids);
@@ -292,6 +313,10 @@ export async function purgeMemoriesByContext(
     const ids = rows.map((row) => row.id);
     // 洞察先于删记忆：等引用行被外键级联带走，就找不到「谁引用过它」了（甲 +「1算」）。
     await deleteInsights(tx, userId, await insightIdsCiting(tx, userId, ids, []));
+    // 候选按 context 列扫，排在「有没有记忆可删」之前：这个主题可能只问出过几句没答的话。
+    // 「按主题忘记不撤认知任务」那条理由不适用于它——候选行自己就带着 context，
+    // 一次欠账会落成哪个主题确实还没定，但已经问出口的这两句定了。
+    await deleteCandidatesBy(tx, userId, { context }, { recordExclusions: true });
     if (rows.length === 0) return { purged: 0, contexts: [] };
     await detachEdges(tx, userId, ids);
     const result = await tx.memoryItem.deleteMany({ where: { userId, id: { in: ids } } });
@@ -323,6 +348,9 @@ export async function purgeAllMemories(userId: string): Promise<PurgeResult> {
     await tx.reflectionCitation.deleteMany({ where: { userId } });
     await tx.reflectionRecord.deleteMany({ where: { userId } });
     await tx.decisionRecord.deleteMany({ where: { userId } });
+    // 待确认的那一堆同样按用户清干净，但不补排除：清空是「重新开始」，
+    // 下一轮再说同一句话，系统可以再问一次——这和「永久别再记」是两回事。
+    await deleteCandidatesBy(tx, userId, {}, { recordExclusions: false });
     // 访问痕迹按同一个范围清：这个用户的记忆一行不剩，留着痕迹就是留着一批指向已删内容的 id。
     await deleteAllAccess(tx, userId);
     return { purged: result.count, contexts: [] };

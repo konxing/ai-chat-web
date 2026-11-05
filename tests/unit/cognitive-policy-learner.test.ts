@@ -115,11 +115,11 @@ async function policy() {
 
 /** 记一条信号并跑一次学习，模拟「用户永久删除了一条这个情境的记忆」。 */
 async function purgeOnce(userId: string, context: Context) {
-  const { recordPolicySignal, learnFromPurge } = await learner();
+  const { recordPolicySignal, learnFromSignals } = await learner();
   const { prisma } = await import('@/lib/prisma');
   // 真实现收的是事务客户端（信号要和删除同一个事务）；这里没有事务要测，直接把 prisma 当 tx 传。
   await recordPolicySignal(prisma as never, userId, context);
-  return learnFromPurge(userId, context);
+  return learnFromSignals(userId, context);
 }
 
 async function currentPolicy(context: Context) {
@@ -177,7 +177,7 @@ describe('达到证据条件才生效', () => {
   });
 
   it('窗口外的旧信号不算证据', async () => {
-    const { recordPolicySignal, learnFromPurge } = await learner();
+    const { recordPolicySignal, learnFromSignals } = await learner();
     const { prisma } = await import('@/lib/prisma');
     const stale = new Date(Date.now() - 31 * DAY_MS);
     for (let index = 0; index < 3; index += 1) {
@@ -185,14 +185,14 @@ describe('达到证据条件才生效', () => {
       db.signals[db.signals.length - 1]!.createdAt = stale;
     }
 
-    const outcome = await learnFromPurge(USER, 'technicalProject');
+    const outcome = await learnFromSignals(USER, 'technicalProject');
 
     expect(outcome).toMatchObject({ applied: false, reason: 'insufficient_evidence' });
     expect((await currentPolicy('technicalProject')).requireConfirmation).toBe(false);
   });
 
   it('第 30 天内的信号仍然算', async () => {
-    const { recordPolicySignal, learnFromPurge } = await learner();
+    const { recordPolicySignal, learnFromSignals } = await learner();
     const { prisma } = await import('@/lib/prisma');
     const fresh = new Date(Date.now() - 29 * DAY_MS);
     for (let index = 0; index < 3; index += 1) {
@@ -200,7 +200,7 @@ describe('达到证据条件才生效', () => {
       db.signals[db.signals.length - 1]!.createdAt = fresh;
     }
 
-    await expect(learnFromPurge(USER, 'technicalProject')).resolves.toMatchObject({ applied: true });
+    await expect(learnFromSignals(USER, 'technicalProject')).resolves.toMatchObject({ applied: true });
   });
 
   it('别人的信号不算自己的证据', async () => {
@@ -318,8 +318,8 @@ describe('用户亲手改过就不许再学', () => {
 
 describe('开关关了就不学（任务书 7.4 门槛 9 的策略学习层）', () => {
   /**
-   * 只攒证据、不跑学习：purgeOnce 里那步 learnFromPurge 会把策略当场收紧，
-   * 用它就没法证明收紧是闸门放开之后 learnAfterPurge 干的了。
+   * 只攒证据、不跑学习：purgeOnce 里那步 learnFromSignals 会把策略当场收紧，
+   * 用它就没法证明收紧是闸门放开之后 learnAfterSignals 干的了。
    */
   async function threeSignals(userId: string, context: Context) {
     const { recordPolicySignal } = await learner();
@@ -327,22 +327,22 @@ describe('开关关了就不学（任务书 7.4 门槛 9 的策略学习层）',
     for (let i = 0; i < 3; i += 1) await recordPolicySignal(prisma as never, userId, context);
   }
 
-  it('关掉之后 learnAfterPurge 返回空，证据够了也不收紧策略', async () => {
+  it('关掉之后 learnAfterSignals 返回空，证据够了也不收紧策略', async () => {
     db.adaptiveEnabled = false;
     await threeSignals(USER, 'technicalProject');
-    const { learnAfterPurge } = await learner();
+    const { learnAfterSignals } = await learner();
 
-    const learned = await learnAfterPurge(USER, ['technicalProject']);
+    const learned = await learnAfterSignals(USER, ['technicalProject']);
 
     expect(learned).toEqual([]);
     expect(db.policies.size).toBe(0);
   });
 
-  it('开着才照旧收紧：同样的三条证据，learnAfterPurge 报出被改的情境', async () => {
+  it('开着才照旧收紧：同样的三条证据，learnAfterSignals 报出被改的情境', async () => {
     await threeSignals(USER, 'technicalProject');
-    const { learnAfterPurge } = await learner();
+    const { learnAfterSignals } = await learner();
 
-    const learned = await learnAfterPurge(USER, ['technicalProject']);
+    const learned = await learnAfterSignals(USER, ['technicalProject']);
 
     expect(learned).toEqual(['technicalProject']);
     expect((await currentPolicy('technicalProject')).requireConfirmation).toBe(true);
@@ -351,9 +351,9 @@ describe('开关关了就不学（任务书 7.4 门槛 9 的策略学习层）',
   it('偏好读不出来当关：什么都不学，也不要把错误冒到删除链路上', async () => {
     db.adaptiveEnabled = null;
     await threeSignals(USER, 'general');
-    const { learnAfterPurge } = await learner();
+    const { learnAfterSignals } = await learner();
 
-    await expect(learnAfterPurge(USER, ['general'])).resolves.toEqual([]);
+    await expect(learnAfterSignals(USER, ['general'])).resolves.toEqual([]);
     expect(db.policies.size).toBe(0);
   });
 });

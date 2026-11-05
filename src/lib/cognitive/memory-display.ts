@@ -148,6 +148,17 @@ export function describeArchivedListCap(capped: boolean, shownCount: number): st
 }
 
 /**
+ * 待确认那一池的截断说明，口径和上面两份一样：报的是服务端实际列出的条数。
+ *
+ * 这一句比另两份更要紧：被挤掉的是最旧的、用户一句都没答过的原话，它们还密文存在库里。
+ * 不报出来，「这里就这几句」会被读成「系统只问过我这几句」。
+ */
+export function describeCandidateListCap(capped: boolean, shownCount: number): string {
+  if (!capped) return '';
+  return `等你回答的话比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
+}
+
+/**
  * 任务书 7.1 的那次「被再次调用」在界面上的说法。
  *
  * 句子必须把**窗口**一起说出来：光讲「被带到 3 次」，用户读到的是一个没有边界的总数，

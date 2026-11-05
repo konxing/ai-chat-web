@@ -29,6 +29,8 @@ const db = vi.hoisted(() => ({
   messages: [] as Row[],
   /** 检索访问行（任务书 7.1 那张表）：memoryIds 是数组列，所以求值器要认 hasSome。 */
   access: [] as Row[],
+  /** 待确认候选行（片M 那张表）：忘记要连带把它扫掉，所以这里也要看得见、删得掉。 */
+  candidates: [] as Row[],
   /** 每张表上一次 findMany 交回给代码的那批行——用它断言「只读了 id，没读正文」。 */
   returned: {} as Record<string, Row[]>,
   /**
@@ -178,6 +180,34 @@ function tableClient(name: string, key: 'reflections' | 'citations' | 'decisions
   };
 }
 
+/**
+ * 待确认候选表（片M）。
+ *
+ * 它**不跟随外键级联**：`MemoryCandidate` 和 `MemoryItem` 之间没有外键，候选行认的是自己那一列
+ * （chatId / context / contentHash）。所以这里每条断言看的都是「代码显式扫」——
+ * 忘了写那一次扫描，真库上一行候选都不会少，而用户的「忘记这次对话」会显得已经生效。
+ */
+function candidateClient(sink: string[]) {
+  return {
+    findMany: ({ where, select }: { where?: unknown; select?: Record<string, boolean> } = {}) => {
+      sink.push('candidate_find');
+      const rows = db.candidates.filter((row) => matches(row, where));
+      return Promise.resolve(
+        rows.map((row) =>
+          select ? Object.fromEntries(Object.keys(select).map((field) => [field, row[field]])) : { ...row }
+        )
+      );
+    },
+    deleteMany: ({ where }: { where?: unknown } = {}) => {
+      sink.push('candidate_delete');
+      const kept = db.candidates.filter((row) => !matches(row, where));
+      const count = db.candidates.length - kept.length;
+      db.candidates = kept;
+      return Promise.resolve({ count });
+    }
+  };
+}
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: (run: (tx: unknown) => Promise<unknown>) =>
@@ -209,6 +239,7 @@ vi.mock('@/lib/prisma', () => ({
         memoryPolicySignal: signalClient(db.txOps),
         cognitiveTask: taskClient(db.txOps),
         memoryAccessTurn: accessClient(db.txOps),
+        memoryCandidate: candidateClient(db.txOps),
         reflectionRecord: tableClient('reflection', 'reflections', db.txOps),
         reflectionCitation: tableClient('citation', 'citations', db.txOps),
         decisionRecord: tableClient('decision', 'decisions', db.txOps),
@@ -228,6 +259,7 @@ vi.mock('@/lib/prisma', () => ({
     memoryPolicySignal: signalClient(db.topOps),
     cognitiveTask: taskClient(db.topOps),
     memoryAccessTurn: accessClient(db.topOps),
+    memoryCandidate: candidateClient(db.topOps),
     // 派生清理同样只许走事务客户端：这三张表出现在 topOps 里就等于「删了记忆、洞察留在原地」。
     reflectionRecord: tableClient('reflection', 'reflections', db.topOps),
     reflectionCitation: tableClient('citation', 'citations', db.topOps),
@@ -291,6 +323,7 @@ beforeEach(() => {
   db.decisions = [];
   db.messages = [];
   db.access = [];
+  db.candidates = [];
   db.returned = {};
   db.readFilters = [];
   db.txOps = [];
@@ -674,7 +707,8 @@ describe('清空全部', () => {
 });
 
 /**
- * 学习证据（任务书 1.3）。只有永久删除算证据，而且一次操作只算一次——
+ * 学习证据（任务书 1.3）。删除这一头算证据（另一头是拒绝待确认候选，见 `cognitive-memory-candidates.test.ts`），
+ * 而且一次操作只算一次——
  * 按会话删掉 5 条技术项目记忆是一次点击，不是五次表达，
  * 按行记证据的话一次批量清理就能把阈值刷满，那不再是「反复表达同一个意思」。
  */
@@ -1121,6 +1155,35 @@ function accessTurn(id: string, overrides: Row = {}): Row {
   };
 }
 
+/**
+ * 一条待确认候选。正文同样用真加密，但 AAD 是候选自己那一套配方
+ * （`memory-candidate:v1:${userId}:${id}`）——用记忆的配方造出来的行，
+ * 服务层解不开，于是「解不开也照样删」那条用例会假绿。
+ *
+ * `contentHash` 默认填一个占位串，只有按「同一句话」匹配的那几条用例才去算真的哈希：
+ * 那是候选和记忆之间唯一的绑定，造错它，删一条记忆时那条候选就该留下，
+ * 于是「删掉的话不许在待确认那一屏活着」这条红线测了个空。
+ */
+function candidate(id: string, overrides: Row = {}, content = '我决定辞职'): Row {
+  const userId = String(overrides.userId ?? USER);
+  return {
+    id,
+    userId,
+    chatId: 'chat-1',
+    sourceMessageId: 'msg-1',
+    type: 'DECISION',
+    context: 'DECISION_MAKING',
+    contentCiphertext: encryptString(content, `memory-candidate:v1:${userId}:${id}`),
+    contentHash: `hash-${id}`,
+    status: 'PENDING',
+    validPrecision: 'UNKNOWN',
+    validFrom: null,
+    decidedAt: null,
+    createdAt: new Date('2026-11-05T10:00:00.000Z'),
+    ...overrides
+  };
+}
+
 describe('忘记要连带清掉检索访问痕迹（任务书 7.1）', () => {
   it('删一条记忆 ⇒ 提到它的轮次整行走，走的是同一个事务', async () => {
     db.rows.set('mem-1', row('mem-1'));
@@ -1398,5 +1461,154 @@ describe('按主题忘记（任务书 7.3 的「忘记某个主题」）', () =>
     expect(db.commits).toBe(1);
     expect(db.topOps).toEqual([]);
     expect(db.txOps).toContain('exclude');
+  });
+});
+
+/**
+ * 待确认候选也在这条红线里（任务书 7.4 门槛 2「派生数据按策略清理」，片M-5）。
+ *
+ * 它和别的派生行有一处不一样，而这一处决定了下面每一条断言的形状：候选行**不是**记忆的附属，
+ * 它和记忆之间没有外键，靠 contentHash 和「同一句话」绑定。所以：
+ *
+ * 一、它可能比记忆活得久——用户从没点过「记住」，那句话就只存在于候选表里，
+ *     「忘记这次对话」此时删了 0 行记忆，但门口那两句原话还是得请走；
+ * 二、确认过的那一条会**原样复制**成记忆，所以删一条记忆时同一句话的候选行必须跟着走，
+ *     否则用户在「记忆」那一屏删掉的东西，转头在「待确认」那一屏还看得见；
+ * 三、清掉候选行等于拆掉「这句不再问」的那把锁（它是 contentHash 唯一约束本身），
+ *     所以这三条忘记要把被清的候选原话补进排除表——只有清空全部例外：
+ *     那是重新开始，不是「这些话永远别再记」，和记忆那一条同一个理由。
+ */
+describe('忘记要连带清掉待确认候选', () => {
+  it('忘记这次对话 ⇒ 这个会话的候选一起走，别的会话和别人的留着', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.candidates = [
+      candidate('cand-1'),
+      candidate('cand-2', { chatId: 'chat-2' }),
+      candidate('cand-3', { userId: OTHER })
+    ];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.candidates.map((item) => item.id)).toEqual(['cand-2', 'cand-3']);
+    expect(db.topOps).toEqual([]);
+  });
+
+  it('这次对话一句记忆都没落地 ⇒ 候选照样清：用户忘记的是这次对话，不是那几行记忆', async () => {
+    db.candidates = [candidate('cand-1'), candidate('cand-2', { status: 'REJECTED' })];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    const result = await purgeMemoriesByChat('chat-1', USER);
+
+    expect(result.purged).toBe(0);
+    expect(db.candidates).toEqual([]);
+  });
+
+  it('被清掉的候选原话进排除表：已经答过「不」的那句，不能因为清了会话再来问一遍', async () => {
+    const { exclusionHash } = await import('@/lib/cognitive/exclusions');
+    db.candidates = [candidate('cand-1', { status: 'REJECTED' }, '我决定辞职')];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.exclusions.map((item) => item.contentHash)).toEqual([exclusionHash(USER, '我决定辞职')]);
+  });
+
+  it('按主题忘记 ⇒ 这个主题的候选一起走，别的话题留着', async () => {
+    db.rows.set('mem-goal', row('mem-goal', { context: 'PERSONAL_GOAL' }));
+    db.candidates = [
+      candidate('cand-1', { context: 'PERSONAL_GOAL' }),
+      candidate('cand-2', { context: 'GENERAL' }),
+      candidate('cand-3', { context: 'PERSONAL_GOAL', userId: OTHER })
+    ];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    await purgeMemoriesByContext('personalGoal', USER);
+
+    expect(db.candidates.map((item) => item.id)).toEqual(['cand-2', 'cand-3']);
+  });
+
+  it('这个主题一条记忆都没有 ⇒ 该主题的候选还是清，且不发一次空删除之外的写', async () => {
+    db.candidates = [candidate('cand-1', { context: 'LEARNING' })];
+    const { purgeMemoriesByContext } = await forgetting();
+
+    const result = await purgeMemoriesByContext('learning', USER);
+
+    expect(result.purged).toBe(0);
+    expect(db.candidates).toEqual([]);
+    expect(db.txOps.filter((op) => op === 'candidate_delete')).toHaveLength(1);
+  });
+
+  it('清空全部 ⇒ 候选全清，但不建排除：重新开始不等于把这些话永久拉黑', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.candidates = [candidate('cand-1'), candidate('cand-2', { userId: OTHER })];
+    const { purgeAllMemories } = await forgetting();
+
+    await purgeAllMemories(USER);
+
+    expect(db.candidates.map((item) => item.id)).toEqual(['cand-2']);
+    expect(db.exclusions).toEqual([]);
+  });
+
+  it('删一条记忆 ⇒ 确认过它的那一条候选跟着走：删掉的话不许在「待确认」那一屏活着', async () => {
+    const { exclusionHash } = await import('@/lib/cognitive/exclusions');
+    db.rows.set('mem-1', row('mem-1', {}, '我决定辞职'));
+    db.candidates = [
+      candidate('cand-1', { status: 'CONFIRMED', contentHash: exclusionHash(USER, '我决定辞职') }, '我决定辞职'),
+      candidate('cand-2', { chatId: 'chat-1' }, '我还想去另一个城市')
+    ];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    // 另一句同会话的候选留着：单条删除的范围是「这一件事」，不是「这次对话」。
+    expect(db.candidates.map((item) => item.id)).toEqual(['cand-2']);
+  });
+
+  it('整条版本链的每一版都比一遍：候选挂在被纠正掉的旧说法上也要跟着走', async () => {
+    const { exclusionHash } = await import('@/lib/cognitive/exclusions');
+    db.rows.set('mem-0', row('mem-0', { supersededAt: new Date() }, '我在用 Prisma'));
+    db.rows.set('mem-1', row('mem-1', { version: 2 }, '我在用 Drizzle'));
+    db.edges = [edge('edge-1', 'mem-1', 'mem-0')];
+    db.candidates = [
+      candidate('cand-old', { status: 'CONFIRMED', contentHash: exclusionHash(USER, '我在用 Prisma') }, '我在用 Prisma')
+    ];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.candidates).toEqual([]);
+  });
+
+  it('候选解不开密也照样删掉，只是不建排除——坏数据不能挡住用户的忘记', async () => {
+    db.candidates = [candidate('cand-1', { contentCiphertext: 'enc:v1:garbage' })];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.candidates).toEqual([]);
+    expect(db.exclusions).toEqual([]);
+  });
+
+  it('这个会话没有候选时不发候选表的删除：一次空写也是多余的往返', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.txOps).toContain('candidate_find');
+    expect(db.txOps).not.toContain('candidate_delete');
+  });
+
+  it('清理在同一个事务里：不许出现「记忆删了、候选留在原地」', async () => {
+    db.rows.set('mem-1', row('mem-1'));
+    db.candidates = [candidate('cand-1')];
+    const { purgeMemoriesByChat } = await forgetting();
+
+    await purgeMemoriesByChat('chat-1', USER);
+
+    expect(db.commits).toBe(1);
+    expect(db.topOps).toEqual([]);
+    expect(db.txOps).toContain('candidate_delete');
   });
 });

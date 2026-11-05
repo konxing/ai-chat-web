@@ -187,7 +187,7 @@ vi.mock('@/lib/cognitive/forgetting', () => ({
 }));
 
 vi.mock('@/lib/cognitive/policy-learner', () => ({
-  learnAfterPurge: (userId: string, contexts: string[]) => {
+  learnAfterSignals: (userId: string, contexts: string[]) => {
     db.learnCalls.push({ userId, contexts });
     return Promise.resolve(db.learned);
   }

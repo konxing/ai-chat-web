@@ -460,10 +460,10 @@ export function MemoryPolicyPanel() {
               disabled={learning === null || learningBusy}
               onChange={(e) => void saveLearning(e.target.checked)}
             />
-            允许系统从永久删除里学习
+            允许系统从你的删除和拒绝里学习
           </label>
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
-            关掉后，永久删除不再攒学习证据；已经收紧过的情境保持现状，删除本身的派生清理一条都不少。
+            关掉后，永久删除和拒绝候选不再攒学习证据；已经收紧过的情境保持现状，删除本身的派生清理一条都不少。
           </p>
           {learning === null ? (
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
@@ -471,7 +471,7 @@ export function MemoryPolicyPanel() {
             </p>
           ) : null}
           <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-white/30">
-            <li>只有永久删除算证据：撤回、编辑记忆、清空全部长期记忆都不算。</li>
+            <li>只有永久删除和拒绝候选算证据：撤回、编辑记忆、清空全部长期记忆、确认候选都不算。</li>
             <li>
               {windowDays} 天内同一个情境攒到 {threshold} 次，才把那个情境改成「先问再记」；
               学习只会更保守，不会放松任何一列。

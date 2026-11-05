@@ -257,6 +257,19 @@ export const reflectionActionSchema = z.discriminatedUnion('action', [
 ]);
 
 /**
+ * 待确认候选的两个动作（任务书 1.2 的 ASK_CONFIRM）。只有两个，而且没有「稍后再问」：
+ * 一句没被答过的话留在门口已经是负担，再给它一个「先搁着」的档位，这屏就长成了一个
+ * 谁都不肯当场回答的收件箱。淘汰按最旧的 PENDING 走（服务层那 200 条上限），不需要第三个按钮。
+ */
+export const memoryCandidateActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('confirm') }),
+  z.object({ action: z.literal('reject') })
+]);
+
+/** 候选状态过滤的白名单，用应用层小写词表——这一屏的 DTO 就是这个形状，不逼界面再翻一次枚举。 */
+export const memoryCandidateStatusSchema = z.enum(['pending', 'confirmed', 'rejected']);
+
+/**
  * 批量永久删除的范围。用可辨识联合而不是「chatId 可选」：
  * scope=chat 时 chatId 必须存在，这条约束由类型系统兜住，路由里就不用再补一次判断。
  * 两个值都来自查询串，所以 chatId 只当作不透明字符串收——归属由服务层的 userId 条件决定。

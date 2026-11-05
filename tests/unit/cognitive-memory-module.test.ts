@@ -14,6 +14,7 @@ const db = vi.hoisted(() => ({
   memoryWritePaused: false,
   creates: [] as Array<Record<string, unknown>>,
   revises: [] as Array<Record<string, unknown>>,
+  proposals: [] as Array<Record<string, unknown>>,
   readRows: [] as Array<Record<string, unknown>>,
   listFilters: [] as unknown[],
   excluded: [] as string[],
@@ -82,6 +83,15 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
     }
   };
 });
+
+vi.mock('@/lib/cognitive/memory-candidates', () => ({
+  // 「先问再记」的出口换成探针：候选表本身在 cognitive-memory-candidates 里测过了，
+  // 这里要测的是写侧有没有在 ASK_CONFIRM 那一支真的去问，而不是继续把这句话丢掉。
+  proposeCandidate: (input: Record<string, unknown>) => {
+    db.proposals.push(input);
+    return Promise.resolve({ id: 'cand-1', created: true });
+  }
+}));
 
 vi.mock('@/lib/cognitive/exclusions', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/cognitive/exclusions')>();
@@ -174,6 +184,7 @@ beforeEach(() => {
   db.memoryWritePaused = false;
   db.creates = [];
   db.revises = [];
+  db.proposals = [];
   db.readRows = [];
   db.listFilters = [];
   db.excluded = [];
@@ -245,12 +256,21 @@ describe('写侧：策略在服务端真的生效', () => {
     expect(db.creates[0]).toMatchObject({ precision: 'unknown', validFrom: null });
   });
 
-  it('决策情境默认要先问用户确认，这一片不假装确认过：不落库', async () => {
+  it('决策情境默认要先问再记：不落库，但这句话必须变成一条待确认候选', async () => {
     db.memoryEnabled = true;
 
-    await write('我纠结了很久，我决定下周三辞职。');
+    await write('我决定下周三辞职。');
 
     expect(db.creates).toEqual([]);
+    expect(db.proposals).toHaveLength(1);
+    expect(db.proposals[0]).toMatchObject({
+      userId: 'user-a',
+      chatId: 'chat-1',
+      sourceMessageId: 'msg-1',
+      type: 'decision',
+      context: 'decisionMaking',
+      content: '我决定下周三辞职'
+    });
   });
 
   it('敏感情境和普通情境分数打平时取最保守的一条，敏感情境不落库', async () => {
@@ -259,6 +279,8 @@ describe('写侧：策略在服务端真的生效', () => {
     await write('我在用 Prisma 时焦虑。');
 
     expect(db.creates).toEqual([]);
+    // 最保守那条是「这个情境根本不留」，不是「问一句」——歧义不许被翻译成一次打扰。
+    expect(db.proposals).toEqual([]);
   });
 
   it('同一句话第二次说不产生重复行', async () => {
@@ -291,6 +313,99 @@ describe('写侧：策略在服务端真的生效', () => {
     await write('我在用 Prisma。我住在杭州。我喜欢喝温水。我打算考研。');
 
     expect(db.creates).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+  });
+});
+
+/**
+ * 片M 接线：策略里那个「先问再记」以前是空转的——`planMemoryWrite` 判出 ASK_CONFIRM 之后，
+ * 写侧只有一句 `continue`，这句话既没记住也没问过，直接消失。现在它进候选表等用户回答。
+ *
+ * 这里逐条钉的是**闸门也得盖住候选**：总开关关着、写入暂停着、内容被永久删除过——
+ * 这三种情况下「问一句」和「落一行」同样是不该发生的写。候选不写记忆行，所以它不占那一轮两条的
+ * 落库额度，但它同样消耗用户的注意力，因此另有自己的一轮两条上限：那句只是存着等用户哪天答，
+ * 不当场打断他，所以落库和提问两笔账各算各的。
+ */
+describe('写侧：先问再记真的去问（ASK_CONFIRM → 待确认候选）', () => {
+  it('候选带上这句话自己的时间口径，不把它压成时间未知', async () => {
+    db.memoryEnabled = true;
+
+    await write('去年我决定辞职。');
+
+    expect(db.proposals).toHaveLength(1);
+    expect(db.proposals[0]).toMatchObject({
+      content: '去年我决定辞职',
+      precision: 'year',
+      validFrom: new Date('2025-01-01T00:00:00.000Z')
+    });
+  });
+
+  it('长期记忆总开关关着时，连一句「要不要记」都不问', async () => {
+    db.memoryEnabled = false;
+
+    await write('我纠结了很久，我决定下周三辞职。');
+
+    expect(db.proposals).toEqual([]);
+  });
+
+  it('暂停长期记忆写入时也不问：暂停的是这条链路的全部动作', async () => {
+    db.memoryEnabled = true;
+    db.memoryWritePaused = true;
+
+    await write('我纠结了很久，我决定下周三辞职。');
+
+    expect(db.proposals).toEqual([]);
+    expect(db.exclusionCalls).toEqual([]);
+  });
+
+  it('用户永久删除过的这句话不再问第二遍', async () => {
+    db.memoryEnabled = true;
+    db.excluded = [exclusionHash('user-a', '我决定下周三辞职')];
+
+    await write('我决定下周三辞职。');
+
+    expect(db.proposals).toEqual([]);
+  });
+
+  it('库里已经有同一句话时按重复陈述处理，不再问一遍', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ type: 'decision', content: '我决定下周三辞职' })];
+
+    await write('我决定下周三辞职。');
+
+    expect(db.proposals).toEqual([]);
+    expect(db.creates).toEqual([]);
+  });
+
+  it('一轮最多问两条，第三条这次就不占了', async () => {
+    db.memoryEnabled = true;
+
+    await write('我决定辞职。我定了要不要换房。我选了预算更低的那家。');
+
+    expect(db.proposals).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+    expect(db.creates).toEqual([]);
+  });
+
+  /**
+   * 两条额度各算各的，这里钉的是「各算各的」这件事本身：
+   * 有人把计数器合并成一个（看着更严格），落库就会把问句的位置吃掉——用户设了「先问再记」，
+   * 可这一轮一旦写掉两行，后面那些该问的句子就一句都不问了，策略又回到空转，正是片M 修的那个毛病。
+   */
+  it('落库和问句各算各的额度：落了一行不挤掉问句的位置', async () => {
+    db.memoryEnabled = true;
+
+    await write('我在用 Next.js 15 和 Prisma。我决定辞职。我定了要不要换房。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.proposals).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+  });
+
+  it('用户没设「先问」的情境照常落库，候选表一个都不写', async () => {
+    db.memoryEnabled = true;
+
+    await write('我在用 Next.js 15 和 Prisma。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.proposals).toEqual([]);
   });
 });
 

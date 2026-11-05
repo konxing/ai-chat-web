@@ -12,6 +12,7 @@ import {
   type MemoryType
 } from './policy';
 import type { TimelineEdge } from './timeline';
+import type { Prisma } from '@prisma/client';
 
 export const MEMORY_CONTENT_MAX_CHARS = 1000;
 export const MEMORY_REASON_MAX_CHARS = 500;
@@ -186,6 +187,8 @@ export const toDbMemoryOrigin = toStoredOrigin;
 export const fromDbMemoryOrigin = fromStoredOrigin;
 /** 精度也一样：派生模块（时间线、变化检测）拿到的是界面那套小写，要和数据库那套大写比时只能走这一份映射。 */
 export const toDbTimePrecision = toStoredPrecision;
+/** 反向那一半也走这一份：候选表存的是同一套大写枚举，确认时要读回界面那套小写。 */
+export const fromDbTimePrecision = fromStoredPrecision;
 
 // AAD 里带上 userId 和 schemaVersion：别人的行即使密文到手也解不开，日后换密钥也能按版本迁移。
 const aadFor = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
@@ -201,7 +204,12 @@ export function decryptMemoryContent(
   return decryptString(memory.contentCiphertext, aadFor(memory.userId, memory.id));
 }
 
-function validateContent(content: string): string {
+/**
+ * 记忆正文的校验。导出给待确认候选用（`memory-candidates.ts`）：
+ * 「一句 1200 字的话先攒进候选表、等用户点确认时才报正文太长」是不成立的——那时用户已经答完了。
+ * 所以两处共用这一份，同一句话在候选里能存下来，就必然能在记忆里落下来。
+ */
+export function validateMemoryContent(content: string): string {
   const text = content.trim();
   if (!text) throw new ApiError(400, 'VALIDATION_ERROR', '记忆正文不能为空');
   if (text.length > MEMORY_CONTENT_MAX_CHARS) {
@@ -282,7 +290,7 @@ function toDto(row: MemoryRow, viewerUserId: string): MemoryDto {
 
 /** 校验加组装待写行：新建和演化共用一份，免得两处各自放宽校验。 */
 function prepareMemory(input: MemoryInput, version: number) {
-  const content = validateContent(input.content);
+  const content = validateMemoryContent(input.content);
   validateConfirmation(input.origin, input.confirmedAt);
   const precision = input.precision ?? 'unknown';
   const validFrom = input.validFrom ?? null;
@@ -311,22 +319,31 @@ function prepareMemory(input: MemoryInput, version: number) {
   };
 }
 
-export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
+/**
+ * 在**调用方的事务里**写一条新记忆。
+ *
+ * 抽出来只为一件事：用户点「确认保存」时，「候选行盖戳」和「记忆行落地」必须同生共死。
+ * 走 `createMemory` 会另开一个事务，中途失败就留下「候选已 CONFIRMED、记忆却没有」的半截状态，
+ * 而那状态在界面上表现为「我点了确认，什么都没发生」。
+ */
+export async function createMemoryInTx(tx: Prisma.TransactionClient, input: MemoryInput): Promise<MemoryDto> {
   const memory = prepareMemory(input, 1);
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.memoryItem.create({ data: memory.data });
-    // 那句话本身就是第一条支持证据。少了它，一条刚记下来的记忆在置信度上会显得毫无凭据，
-    // 而「用户亲口说过一次」恰恰是它唯一也是足够的凭据。
-    await recordEvidence(tx, {
-      userId: input.userId,
-      memoryId: memory.id,
-      kind: 'supports',
-      origin: input.origin,
-      sourceMessageId: input.sourceMessageId ?? null,
-      sourceChatId: input.chatId ?? null
-    });
-    return toDto(row as unknown as MemoryRow, input.userId);
+  const row = await tx.memoryItem.create({ data: memory.data });
+  // 那句话本身就是第一条支持证据。少了它，一条刚记下来的记忆在置信度上会显得毫无凭据，
+  // 而「用户亲口说过一次」恰恰是它唯一也是足够的凭据。
+  await recordEvidence(tx, {
+    userId: input.userId,
+    memoryId: memory.id,
+    kind: 'supports',
+    origin: input.origin,
+    sourceMessageId: input.sourceMessageId ?? null,
+    sourceChatId: input.chatId ?? null
   });
+  return toDto(row as unknown as MemoryRow, input.userId);
+}
+
+export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
+  return prisma.$transaction((tx) => createMemoryInTx(tx, input));
 }
 
 export async function listMemories(userId: string, filters: MemoryListFilters = {}): Promise<MemoryDto[]> {
