@@ -10,7 +10,11 @@ import {
   type MemoryContext,
   type MemoryPolicy
 } from '@/lib/cognitive/policy';
-import { getPolicyLearningStates, POLICY_LEARNING_THRESHOLD } from '@/lib/cognitive/policy-learner';
+import {
+  getPolicyLearningStates,
+  POLICY_LEARNING_THRESHOLD,
+  POLICY_LEARNING_WINDOW_DAYS
+} from '@/lib/cognitive/policy-learner';
 
 export const runtime = 'nodejs';
 
@@ -23,12 +27,13 @@ export async function GET(req: Request) {
     const { user } = await requireUser(req);
     // learning 是「这一条是谁定的」：自动收紧过的、用户亲手改过的，界面上要能分辨，
     // 否则学习层替用户做的决定就变成了看不见的暗改。
-    // 阈值一起回给前端：界面上那句「已按你最近 N 次…」必须跟着服务端的常量走，
+    // 阈值和窗口天数一起回给前端：界面上那句「N 天内攒到 M 次」必须跟着服务端的常量走，
     // 写死一个数字在文案里，改了阈值就会变成一句假话。
     return {
       policies: await getMemoryPolicies(user.id),
       learning: await getPolicyLearningStates(user.id),
-      learningThreshold: POLICY_LEARNING_THRESHOLD
+      learningThreshold: POLICY_LEARNING_THRESHOLD,
+      learningWindowDays: POLICY_LEARNING_WINDOW_DAYS
     };
   });
 }

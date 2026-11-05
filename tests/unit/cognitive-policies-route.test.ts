@@ -135,6 +135,17 @@ describe('记忆策略接口', () => {
     expect(payload.data.policies.general).toMatchObject({ allowPersistence: true });
   });
 
+  it('GET 把窗口天数一起回给界面：界面上那句「N 天内」不许写死', async () => {
+    const { POLICY_LEARNING_WINDOW_DAYS, POLICY_LEARNING_THRESHOLD } = await import(
+      '@/lib/cognitive/policy-learner'
+    );
+    const { payload } = await call('GET');
+    expect(payload.data.learningWindowDays).toBe(POLICY_LEARNING_WINDOW_DAYS);
+    // 阈值那一条 11-04 就按同样的规矩办了（片 k 只是把窗口天数补成同一口径）：
+    // 两个数都在接口里，界面拿哪个都不该自己在文案里刻一个。
+    expect(payload.data.learningThreshold).toBe(POLICY_LEARNING_THRESHOLD);
+  });
+
   it('PATCH 只改 session 用户那个情境的一行，请求体里的 userId 不生效', async () => {
     const { payload } = await call('PATCH', {
       userId: 'user-b',

@@ -22,7 +22,8 @@ import type { EmotionTransparency } from '@/lib/cognitive/preferences';
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
  *
  * 只渲染真有代码在消费的字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、
- * 是否允许整理进画像、是否允许拿去联想、保留期，再加上一个全局的「情绪标注」档位。
+ * 是否允许整理进画像、是否允许拿去联想、保留期，再加上一个全局的「情绪标注」档位和
+ * 一个全局的「自动收紧」开关。
  * 这张策略表里今天没有消费者的只剩 `emotionEnabled`——它在偏好表里，grep 得到的是存储和校验声明，
  * 没有任何运行时代码读它。把它做成能拨的控件，就是任务书第八节点名禁止的「用假的交互代替」，
  * 所以不放，接口和存储原样留着。
@@ -32,6 +33,9 @@ import type { EmotionTransparency } from '@/lib/cognitive/preferences';
  * 「允许整理进画像」11-05 片 d（画像候选 `profile-candidates.ts:62`）；
  * 「允许拿去联想」11-06 片 j（记忆网络的关联池 `memory-graph.ts:97`——关掉那种情境的行不做锚点、
  * 也不做成员，但点还在图上、更新关系照旧）。
+ *
+ * 第八个模块开关 `adaptiveMemoryEnabled` 是 11-06 片 k 在这屏补上控件的：它的读者是学习层的闸门
+ * （`policy-learner.ts:88`），而它改的又是这一屏那七行策略，所以控件放在这里而不是模块开关那一屏。
  *
  * 一屏同时只展开一张卡：七种情境各自七个控件，全摊开就是四十九控件同屏，
  * 谁也说不清刚才那一下点的是哪一条。这条规矩和「记忆」那一屏一致。
@@ -92,8 +96,9 @@ function isSameDraft(left: Draft, right: Draft): boolean {
 export function MemoryPolicyPanel() {
   const { push } = useToast();
   const [policies, setPolicies] = useState<Record<MemoryContext, MemoryPolicy> | null>(null);
-  const [learning, setLearning] = useState<Record<MemoryContext, PolicyLearningState> | null>(null);
+  const [learnedByContext, setLearnedByContext] = useState<Record<MemoryContext, PolicyLearningState> | null>(null);
   const [threshold, setThreshold] = useState(0);
+  const [windowDays, setWindowDays] = useState(0);
   const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState<MemoryContext | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -103,6 +108,11 @@ export function MemoryPolicyPanel() {
   const [emotion, setEmotion] = useState<EmotionTransparency | null>(null);
   const [emotionBusy, setEmotionBusy] = useState(false);
   const [emotionError, setEmotionError] = useState('');
+  // 全局的「自动收紧」开关：同样以 null 表示没读到。它决定系统能不能自己改用户策略，
+  // 没读到却点亮一个默认值，等于替用户做了一个他没做过的决定。
+  const [learning, setLearning] = useState<boolean | null>(null);
+  const [learningBusy, setLearningBusy] = useState(false);
+  const [learningError, setLearningError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -110,10 +120,12 @@ export function MemoryPolicyPanel() {
         policies: Record<MemoryContext, MemoryPolicy>;
         learning: Record<MemoryContext, PolicyLearningState>;
         learningThreshold: number;
+        learningWindowDays: number;
       }>(POLICIES_URL);
       setPolicies(data.policies);
-      setLearning(data.learning);
+      setLearnedByContext(data.learning);
       setThreshold(data.learningThreshold);
+      setWindowDays(data.learningWindowDays);
       setLoadError('');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -124,9 +136,9 @@ export function MemoryPolicyPanel() {
     void load();
   }, [load]);
 
-  // 情绪标注住在偏好表里，和策略表是两个接口，所以单独读一次。
+  // 两个全局档位住在偏好表里，和策略表是两个接口，所以单独读一次——但只读一次，两个值同一次带回。
   useEffect(() => {
-    void loadEmotion();
+    void loadPreferences();
   }, []);
 
   function close() {
@@ -197,13 +209,17 @@ export function MemoryPolicyPanel() {
     }
   }
 
-  async function loadEmotion() {
+  async function loadPreferences() {
     try {
-      const data = await apiFetch<{ preferences: { emotionTransparency: EmotionTransparency } }>(PREFERENCES_URL);
+      const data = await apiFetch<{
+        preferences: { emotionTransparency: EmotionTransparency; adaptiveMemoryEnabled: boolean };
+      }>(PREFERENCES_URL);
       setEmotion(data.preferences.emotionTransparency);
+      setLearning(data.preferences.adaptiveMemoryEnabled);
     } catch {
-      // 读失败留在 null：这一档的三个值都会改变模型看到的东西，猜一个默认值等于替用户决定。
+      // 读失败留在 null：这两个值都会改变模型看到的东西或系统能替你做的事，猜一个默认值等于替用户决定。
       setEmotion(null);
+      setLearning(null);
     }
   }
 
@@ -223,6 +239,25 @@ export function MemoryPolicyPanel() {
       setEmotionError(errorMessage(err));
     } finally {
       setEmotionBusy(false);
+    }
+  }
+
+  async function saveLearning(next: boolean) {
+    if (next === learning) return;
+    setLearningBusy(true);
+    setLearningError('');
+    try {
+      const data = await apiFetch<{ preferences: { adaptiveMemoryEnabled: boolean } }>(PREFERENCES_URL, {
+        method: 'PATCH',
+        json: { adaptiveMemoryEnabled: next }
+      });
+      // 同样以服务端回读的值为准：这一档决定系统能不能自己改策略，界面和库不许分叉。
+      setLearning(data.preferences.adaptiveMemoryEnabled);
+      push('自动收紧已更新');
+    } catch (err) {
+      setLearningError(errorMessage(err));
+    } finally {
+      setLearningBusy(false);
     }
   }
 
@@ -258,7 +293,7 @@ export function MemoryPolicyPanel() {
                       {describePolicySummary(policy)}
                     </span>
                     {/* 学习层替用户做的决定不许是隐形的。阈值取自接口，不写死在文案里。 */}
-                    {learning?.[context]?.learnedAt ? (
+                    {learnedByContext?.[context]?.learnedAt ? (
                       <span className="mt-1 block truncate text-[11.5px] text-amber-300/70">
                         已按你最近 {threshold} 次永久删除自动收紧 · 可重置
                       </span>
@@ -411,6 +446,49 @@ export function MemoryPolicyPanel() {
       </div>
 
       <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+        <h3 className="text-[13.5px] text-white/85">自动收紧</h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
+          这一档管的是「系统能不能替你改策略」，和上面七张卡管「记不记、留多久」是两件事。
+        </p>
+
+        <div className="mt-3">
+          <label className="flex items-start gap-2 text-[13px] text-white/75">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-emerald-400"
+              checked={learning === true}
+              disabled={learning === null || learningBusy}
+              onChange={(e) => void saveLearning(e.target.checked)}
+            />
+            允许系统从永久删除里学习
+          </label>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+            关掉后，永久删除不再攒学习证据；已经收紧过的情境保持现状，删除本身的派生清理一条都不少。
+          </p>
+          {learning === null ? (
+            <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+              开关状态没读到。这里不替你猜，因为它决定的是系统能不能自己改你的策略。
+            </p>
+          ) : null}
+          <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-white/30">
+            <li>只有永久删除算证据：撤回、编辑记忆、清空全部长期记忆都不算。</li>
+            <li>
+              {windowDays} 天内同一个情境攒到 {threshold} 次，才把那个情境改成「先问再记」；
+              学习只会更保守，不会放松任何一列。
+            </li>
+            <li>
+              你手动改过的情境归你管，学习层不再碰它；点「恢复默认」会把这一行重新交给学习层，攒下的证据也一起清掉。
+            </li>
+          </ul>
+          {learningError ? (
+            <Alert tone="error" className="mt-2">
+              {learningError}
+            </Alert>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
         <h3 className="text-[13.5px] text-white/85">情绪标注</h3>
         <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
           这一档只改「对话时模型看到的那批记忆里有没有情绪类的那几行」，不改记不记：
@@ -448,10 +526,9 @@ export function MemoryPolicyPanel() {
       </div>
 
       <p className="mt-5 text-[11.5px] leading-relaxed text-white/30">
-        还没做的部分：策略表里的「关联」一列至今没有运行时代码读它，接口能保存但界面上不给控件；
-        偏好表里的情绪总开关同理，能用的情绪控件只有上面那三档。
-        「反思」「写入画像」两列已经有后台真按它们过闸——某个情境不放开反思，那个情境里的记忆就不会出现在洞察里；
-        不放开画像，它就不出现在画像候选里。
+        还没做的部分：偏好表里的情绪总开关至今没有运行时消费者，所以这一屏不给它控件，能用的情绪控件只有上面那三档标注。
+        已经有读者的三列各挡住一件事：某个情境不放开反思，那个情境里的记忆就不出现在洞察里；
+        不放开画像，它就不出现在画像候选里；不放开联想，它就不和别的记忆连关联线。
       </p>
     </section>
   );
