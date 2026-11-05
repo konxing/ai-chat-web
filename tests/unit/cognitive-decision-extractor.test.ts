@@ -57,3 +57,45 @@ describe('决策候选抽取（词法 v1）', () => {
     expect(extractDecisionCandidates('我买了。')).toHaveLength(0);
   });
 });
+
+/**
+ * 任务书 5.2 的「预期结果」和「可选的后续复盘时间」两列此前没有任何生产者。
+ * 这组用例钉的是：能认领的唯一来源是**同一句话里用户自己说出来的那一段**。
+ */
+describe('预期结果与复盘时间：只认同一句里的原话', () => {
+  it('同一句里的预期分句进 expectedOutcome，主题和选择不许被动过', () => {
+    const [candidate] = extractDecisionCandidates('我决定用 PostgreSQL，预计查询能快一倍。');
+    expect(candidate!.topic).toBe('用 PostgreSQL');
+    expect(candidate!.expectedOutcome).toBe('预计查询能快一倍');
+  });
+
+  it('跨句不认领：下一句的希望在没提到决策的那句里，不替他拼成一件事', () => {
+    const [candidate] = extractDecisionCandidates('我决定买这块显卡。我希望能用三年。');
+    expect(candidate!.expectedOutcome).toBeNull();
+  });
+
+  it('没说预期就是 null，不许从「我决定」里推断出一个预期', () => {
+    const [candidate] = extractDecisionCandidates('我打算学 Rust，每周投入十小时。');
+    expect(candidate!.expectedOutcome).toBeNull();
+  });
+
+  it('一句里两个预期分句取第一个：第二个是补充，登记两遍就是把一句话说成两件事', () => {
+    const [candidate] = extractDecisionCandidates('我改用 ClickHouse，预计查询快一倍，希望能省下运维时间。');
+    expect(candidate!.expectedOutcome).toBe('预计查询快一倍');
+  });
+
+  it('「预计三个月后再看」是复盘时间，不是预期结果：同一句不许既是安排又是结果', () => {
+    const [candidate] = extractDecisionCandidates('我决定用 PostgreSQL，预计三个月后再看一次。');
+    expect(candidate!.expectedOutcome).toBeNull();
+    expect(candidate!.sourceSentence).toContain('预计三个月后再看一次');
+  });
+
+  it('sourceSentence 是这一句的原话，句尾标点剥掉，其余不动', () => {
+    const [candidate] = extractDecisionCandidates('我计划考软考，明年上半年报。');
+    expect(candidate!.sourceSentence).toBe('我计划考软考，明年上半年报');
+  });
+
+  it('候选抽取不出来时，预期和复盘也不许单独立一条决策', () => {
+    expect(extractDecisionCandidates('我希望能早点下班。')).toHaveLength(0);
+  });
+});

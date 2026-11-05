@@ -1,5 +1,5 @@
 import { tokenize } from './retrieval';
-import { splitSentences } from './decision-extractor';
+import { CLAUSE_SPLIT_RE, splitSentences } from './decision-extractor';
 
 /**
  * 结果陈述与决策的候选匹配（任务书 5.3 的第一版）。
@@ -65,9 +65,6 @@ const FACETS: ReadonlyArray<{ field: OutcomeFacet; markers: readonly string[] }>
     markers: ['后悔', '幸好', '不值', '满意', '失望', '真香', '上当', '坑', '亏了', '还行', '凑合', '靠谱', '好用', '难用']
   }
 ];
-
-/** 分句边界：只切逗号、顿号、分号。句号以上交给 splitSentences，这里不重复切。 */
-const CLAUSE_SPLIT_RE = /[，,、；;]/;
 
 export function matchOutcomes(
   text: string,

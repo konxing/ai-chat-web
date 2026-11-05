@@ -23,6 +23,8 @@ import { matchOutcomes } from './outcome-extractor';
  * 状态是一条往前走的链：CONFIRMED →（用户给这条决策报过结果并点头）OUTCOME_RECORDED。
  * 所有「已确认」的池子——召回、结果匹配、门槛 8 的计数——都得连着后面的阶段一起算，
  * 否则一条决策越有价值、报过结果之后反而越容易被悄悄筛出去。
+ *
+ * AWAITING_REVIEW 不在这条链上，也没有任何一处会把它写进库：它是读出来的，见 `deriveStatus`。
  */
 export const DECISION_LIST_MAX_ROWS = 100;
 
@@ -62,13 +64,13 @@ export interface DecisionDto {
   createdAt: string;
 }
 
-function toDto(row: DecisionRecord): DecisionDto {
+function toDto(row: DecisionRecord, now: Date): DecisionDto {
   const plain = (field: string, ciphertext: string | null) =>
     ciphertext === null ? null : decryptString(ciphertext, aadFor(row.userId, row.id, field));
   return {
     id: row.id,
     category: row.category,
-    status: row.status,
+    status: deriveStatus(row, now),
     topic: decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topic')),
     choice: decryptString(row.choiceCiphertext, aadFor(row.userId, row.id, 'choice')),
     background: plain('background', row.backgroundCiphertext),
@@ -86,6 +88,23 @@ function toDto(row: DecisionRecord): DecisionDto {
   };
 }
 
+/**
+ * 「待复盘」是读出来的，不是写进去的（照 `reflections.ts` 的 EXPIRED 那一条路）。
+ *
+ * 为什么不能写进库：这一列的真值每天在变，写进库就得有一个每天把所有 CONFIRMED 行
+ * 扫一遍改状态的定时任务，而那条「系统替用户改了状态」的痕迹一旦留下就擦不掉——
+ * 用户撤销、删除、或者换个进程读，看到的是一个库里从来没被任何动作写过的值。
+ *
+ * 为什么只有 CONFIRMED 会派生：这一桶说的是「还没回头看」。已经记过结果的
+ * （OUTCOME_RECORDED）回头看过了；还没确认的（PENDING_CONFIRM）谈不上复盘自己的决定。
+ */
+function deriveStatus(row: DecisionRecord, now: Date): DecisionStatus {
+  if (row.status === 'CONFIRMED' && row.reviewAfter !== null && row.reviewAfter.getTime() <= now.getTime()) {
+    return 'AWAITING_REVIEW';
+  }
+  return row.status;
+}
+
 /** 偏好读不出来按关闭处理，和 manager.ts 的 enabledModules 同一个口径。 */
 export async function decisionModuleEnabled(userId: string): Promise<boolean> {
   try {
@@ -98,14 +117,16 @@ export async function decisionModuleEnabled(userId: string): Promise<boolean> {
 
 export async function listDecisions(
   userId: string,
-  options: { status?: DecisionStatus } = {}
+  input: { now: Date; status?: DecisionStatus }
 ): Promise<DecisionDto[]> {
   const rows = await prisma.decisionRecord.findMany({
-    where: { userId, ...(options.status ? { status: options.status } : {}) },
+    where: { userId },
     orderBy: { createdAt: 'desc' },
     take: DECISION_LIST_MAX_ROWS
   });
-  return rows.map(toDto);
+  const dtos = rows.map((row) => toDto(row, input.now));
+  // 过滤发生在派生之后：AWAITING_REVIEW 没有对应的列值，交给 where 就永远查不到（口径见 `reflections.ts` 的 `state`）。
+  return input.status === undefined ? dtos : dtos.filter((dto) => dto.status === input.status);
 }
 
 export type DecisionAction = 'confirm' | 'reject';
@@ -115,10 +136,9 @@ export async function setDecisionStatus(
   id: string,
   action: DecisionAction
 ): Promise<DecisionDto> {
+  const now = new Date();
   const data: Prisma.DecisionRecordUpdateManyMutationInput =
-    action === 'confirm'
-      ? { status: 'CONFIRMED', confirmedAt: new Date() }
-      : { status: 'REJECTED' };
+    action === 'confirm' ? { status: 'CONFIRMED', confirmedAt: now } : { status: 'REJECTED' };
   const updated = await prisma.decisionRecord.updateMany({
     where: { id, userId, status: 'PENDING_CONFIRM' },
     data
@@ -129,7 +149,9 @@ export async function setDecisionStatus(
     throw new ApiError(409, 'DECISION_NOT_PENDING', '这条决策已经处理过了，不能再确认或拒绝');
   }
   const row = await prisma.decisionRecord.findFirst({ where: { id, userId } });
-  return toDto(row!);
+  // 刚确认的这一行若安排了复盘而且日子已过，回给界面的就是待复盘：和列表读出来的是同一个派生，
+  // 两处不该各判一次。
+  return toDto(row!, now);
 }
 
 /**
@@ -222,7 +244,7 @@ export async function getDecisionWithOutcomes(
 ): Promise<{ decision: DecisionDto; outcomes: OutcomeDto[] } | null> {
   const row = await prisma.decisionRecord.findFirst({ where: { id, userId } });
   if (!row) return null;
-  return { decision: toDto(row), outcomes: await listOutcomes(userId, id) };
+  return { decision: toDto(row, new Date()), outcomes: await listOutcomes(userId, id) };
 }
 
 export type OutcomeLinkAction = 'link' | 'detach';

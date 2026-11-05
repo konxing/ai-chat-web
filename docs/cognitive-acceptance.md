@@ -2876,18 +2876,19 @@ CONFIRMED_DECISION_STATUSES = ['CONFIRMED', 'AWAITING_REVIEW', 'OUTCOME_RECORDED
 | P1-a | 分面去掉 `group[field] === null` 守卫 | 「同一分面只留第一次撞上的分句」1 处 |
 | P1-b | 名额满时直接返回（不再并句） | 「第三条决策不立，但已有那条还能续上分面」1 处 |
 | P1-c | 展示层 null 也出行（`text ?? ''`） | 「派生不出来的列不出行」「四列全空 ⇒ 一行都不摆」2 处 |
-| P2-1 | 删掉 link 时那段 `updateMany` | 推进状态那条 1 处 |
-| P2-2 | detach 也推进 | 「解除不推进」1 处 |
+| P2-1 | 删掉 link 时那段 `updateMany` | 「确认关联把决策推成 OUTCOME_RECORDED」1 处 |
+| P2-2 | detach 也推进 | 「解除归因不回退决策状态」1 处 |
 | P2-3 | sweep 去掉 `linkStatus: 'LINKED'` | DETACHED / CANDIDATE 不算证据 2 处 |
 | P2-4 | 里程碑把 `AWAITING_REVIEW` 也排除 | 「待复盘的决策仍是里程碑」1 处 |
 | P2-5 | lesson 闸门退回 `=== 'OUTCOME_RECORDED'` | 「闸门看证据不看标签」1 处 |
 | P2-6 | 召回池退回 `status: 'CONFIRMED'` | 池子形状 + 「报过结果的决策照样能回忆起来」2 处 |
 | P2-7 | 结果匹配池退回 `status: 'CONFIRMED'` | 池子形状 + 「已记录结果、待复盘的仍然接着报结果」2 处 |
 
-P2-3 要按本来的样子记一笔：**第一次探针没作废**——那一次改动把整行的右括号吃掉了，
-整个文件解析不过，报的是「全文件 44 个用例都红」。那不算变异被咬住，那是探针自己坏了。
-改成语法合法的版本重跑，才是表里那个「恰好 2 处」。这轮的教训写在这儿：
-探针生效的前提是先确认改动是合法代码，否则测的是编译不是行为。
+P2-3 要按本来的样子记一笔：**表里那个「恰好 2 处」是第二次才作数的。**
+第一次我把这行改坏了——sed 把行尾的右括号一起吃掉，整个文件解析不过，报回来的是「这文件 44 个用例全红」。
+那不算变异被咬住，那是探针自己坏了。改成语法合法的版本（直接去掉 `linkStatus` 那一条过滤）重跑，
+才是表里那 2 处。教训写在这儿：探针生效的前提是先确认改动是一段合法代码，
+否则测的是编译能不能过，不是行为对不对。
 
 门禁：`npx tsc --noEmit` 无输出；全量单测 `103 files / 1697 tests` 全绿。
 
@@ -2916,3 +2917,165 @@ P2-3 要按本来的样子记一笔：**第一次探针没作废**——那一�
    `CONFIRMED && reviewAfter <= now ⇒ 待复盘`的派生。这两件是接下来的 P-3 / P-4，不在本片的完成定义里。
 
 换句话说：**这片把一条永远走不通的路修通了，但路上还没有车。**
+
+## 片P-3 / 片P-4：5.2 的三列第一次有生产者，「待复盘」第一次不是空桶（11-06）
+
+上一片末尾那句「路上还没有车」指的就是这三列。本片把它们的车放上去了：
+`expectedOutcome`、`decidedAt`、`reviewAfter` 从此有代码会写，
+`AWAITING_REVIEW` 从此有代码会读出来，面板第五桶不再是硬编码的空。
+
+### 一、补的是哪三个洞
+
+| 位置 | 之前 | 之后 |
+|---|---|---|
+| `DecisionRecord.expectedOutcomeCiphertext`（`prisma/schema.prisma:749`） | schema 有列、DTO 有字段、**写侧一处都不写** ⇒ 恒 NULL | 抽得出同句预期分句才写，写不出留 null（`decision-module.ts:48-51`） |
+| `DecisionRecord.decidedAt`（`:752`） | 恒 NULL，面板只能拿 `createdAt` 顶 | `turn.occurredAt`，缺了才退到当下（`decision-module.ts:40`） |
+| `DecisionRecord.reviewAfter`（`:754`） | 恒 NULL，没有任何解析代码 | 同句原话解析（`review-schedule.ts`），基准是上面那个 `decidedAt` |
+| `DecisionStatus.AWAITING_REVIEW` | schema 有值、面板有桶、`decision-status.ts` 把它算进「已确认」池，**没有一处读者能造出它** | 读侧派生（`decisions.ts:101-106`） |
+| 面板 | 「当初的预期」「计划复盘」两行不存在 | `decision-display.ts` + `decision-panel.tsx:237` |
+
+### 二、`reviewAfter` 为什么不复用 `temporal.ts`
+
+先看的是「能不能省掉一个新模块」，答案是**不能，而且方向正好相反**。
+`temporal.ts:16-18` 的第二条形状写着「未来的说法不落 `validFrom`」——`明年 / 下个月 / 明天`
+整类词压根不在它的词表里，因为把计划写成已经发生是检索侧的红线。
+而这一列要的**恰恰就是那个未来时刻**。共用一张词表的话，要么记忆里长出假的未来起点，
+要么复盘时间永远是 null。所以单独立一个 `review-schedule.ts`，词表只收「数量 + 单位 + 后」。
+
+它和 `temporal.ts` 共享的是判断，不是代码：同一句里两个时长标记 ⇒ null（「取最近的那个」是我们编的规则），
+不给模糊历法词落日期（`明年` 到哪天是我们挑的），认不出来就空着。
+
+口径写死在文件头上（`review-schedule.ts:20-23`）：天=1、周=7、月=30、年=365，
+**唯一例外是「半年」= 6×30 = 180 天**——那是汉语里「六个月」的说法，不是 0.5×365=182.5。
+定长月是一个口径不是历法，差一两天对「该回头看一眼了」这个徽标没有影响；
+真要按月日推算需要用户时区，而时区没有存（同 `temporal.ts:25` 的理由）。
+
+### 三、`expectedOutcome`：只认同一句里的原话
+
+`decision-extractor.ts` 的候选从此多一列，规则三条：
+
+- **必须在同一句里**，且带 `EXPECTATION_MARKERS`（`:50`，八个标记：我预期 / 我预计 / 预计 /
+  本来想 / 我以为 / 希望能 / 我希望 / 指望）。上一句的期待不属于这一条决策。
+- **只取第一个撞上的分句**。一句里两段期待（「预计查询快一倍，希望能省下运维时间」）
+  没有依据判断哪段是「那个」预期，所以留第一段原话，不自作聪明地拼接。
+- **复盘安排不算预期**（`:124` 的 `!hasReviewSchedule(clause)`）。「预计三个月后再看一次」
+  既是「预计…」开头又是安排；两个字段都收它，同一句话就在两列里各存一遍，
+  而它明明只说了复盘时间。`hasReviewSchedule` 存在的理由就是这条界线，不是为了算日期。
+
+有一条**故意没有改**：`choice` 里仍然留着「预计三个月后再看一次」这句。
+它和预期分句的区别不是「算不算另一列」，而是**那一行会不会把同一段字再显示一遍**——
+「计划复盘」那行显示的是一个算出来的日期，不是这句原话，所以没有重复；
+把它从 `choice` 里剔掉反而会让一句 `parseReviewAfter` 认歪了的话（「两三天后」会被读成 3 天后）
+从记录里彻底消失。**宁可重复，不可静默删字。**
+
+分句只在逗号、顿号、分号处切（`CLAUSE_SPLIT_RE`），句号以上交给 `splitSentences`。
+这个正则原本在 `decision-extractor.ts` 和 `outcome-extractor.ts` 各写了一份，
+现在由前者导出、后者引用——两份拷贝的后果不是重复代码，是两边可以各自漂移。
+
+### 四、`decidedAt`：用户说话的那一刻，不是服务器处理到这一条的那一刻
+
+`decidedAt` 取 `turn.occurredAt`；重放历史欠账时它缺席，才退到当下。
+这一列有值比 null 诚实，而且它是 `reviewAfter` 的基准——基准选错，
+「三个月后」就从「他说完那句话的三个月后」变成「队列跑到他那句话那天的三个月后」。
+面板里 `decision.decidedAt ?? decision.createdAt` 那句兑底**仍然保留**，
+但它现在只为本片之前写进去的旧行服务；新行不再需要它圆场。
+
+### 五、片P-4：「待复盘」是读出来的，不是写进去的
+
+`decisions.ts:101-106` 一行派生：
+
+```ts
+if (row.status === 'CONFIRMED' && row.reviewAfter !== null && row.reviewAfter.getTime() <= now.getTime())
+  return 'AWAITING_REVIEW';
+```
+
+为什么在读写而不靠定时任务：一条决策到没到复盘时间，**真值每天在变**。
+要靠库里的列表达它，就得有个任务每天扫一遍把 `CONFIRMED` 改写成 `AWAITING_REVIEW`；
+那条「系统替用户改了状态」的痕迹一旦留下就擦不掉——用户撤销、删除、
+或者换个进程读，看到的是一个库里从来没有被任何动作写过的值。
+这和 6-E 那次 `EXPIRED` 的定局是同一个决定，也复用同一个先例结构
+（`reflections.ts:124` 那句「`state` 过滤发生在派生之后」）。
+
+两个不对称要写清楚：
+
+- **只有 `CONFIRMED` 会派生**。这一桶说的是「还没回头看」：已经记过结果的（`OUTCOME_RECORDED`）
+  回头看过了，还没确认的（`PENDING_CONFIRM`）谈不上复盘自己的决定。
+- **`?status=` 过滤移到派生之后**。代价是真的：它现在只在最近 `DECISION_LIST_MAX_ROWS = 100` 行里筛，
+  不再由 SQL 筛。口径与反思那一侧一致，界面那一屏本来不用这个参数（五桶在前端自己分），
+  所以这是一个只影响 API 调用方的代价，记在 `route.ts:18-20`。
+
+### 六、界面：两列的行序与「null 不出行」
+
+新纯函数 `decision-display.ts`（`:17-37`），和片P-1 的 `outcome-display.ts` 同一形制：
+标签与库里字段一一对应、不重排、不拼接、**null 不出行**。
+这两列的 null 尤其常见——写侧只在用户真的说过期待、真的安排过复盘时才填。
+
+复盘日期走 `memory-display.ts:formatDate`，精度按 `day` 给。
+这一条有测试钉看（不是注释）：`decision-display.ts` 里必须出现 `from './memory-display'`，
+且不得匹配 `getUTCMonth() + 1`——全项目「年月日」那套写法不允许多出第三份拷贝
+（6-G 那次已经统一过一回）。`review-schedule.ts` 算出来的是「第 N 天」这种整日的东西，
+显示到分钟是在替它编一个它没有的精度。
+
+### 七、十一个变异探针，每一个都当场红、当场字面回滚
+
+| 探针 | 改动 | 红了谁 |
+|---|---|---|
+| P3-a | 预期分句去掉 `!hasReviewSchedule(clause)` | 复盘句被当成预期那 2 处 |
+| P3-b | `clauses.filter(() => true)`（预期分句回到 `choice`） | 分列不重复那 2 处 |
+| P3-c | `hits.length !== 1` 改成 `=== 0`（两个时长标记也取第一个） | 「一句两个标记 ⇒ null」那处 |
+| P3-d | 「半年」改成 `Math.round(0.5 * 365)`=183 天 | 半年口径 2 处 |
+| P3-e | `expectedOutcomeCiphertext: null`（字段不写） | 「落进这一列 + 封口绑字段名」1 处 |
+| P3-f | `reviewAfter: null`（解析不接） | 「复盘时间从决策那一刻起算」1 处 |
+| P3-g | `decidedAt = new Date()`（忽略 `turn.occurredAt`） | 决策时间 + 复盘基准 2 处 |
+| P3-h | 展示层 null 也出行（`text ?? ''`） | 「没说过就不出行」+「四列全空」2 处 |
+| P4-a | `deriveStatus` 直接 `return row.status` | 派生本身 + 派生后过滤 2 处 |
+| P4-b | 去掉 `row.status === 'CONFIRMED'` 守卫 | OUTCOME_RECORDED 被抢 + PENDING 不派生 2 处 |
+| P4-c | `status` 放回 Prisma `where`（派生前筛） | 「待复盘查得到」1 处 |
+
+P3-g 红了 2 处而不是 1 处，这比预期好：它顺便证明 `reviewAfter` 的基准真的跟着 `decidedAt`，
+而不是自己另拿一次时钟。P4-c 只红 1 处，因为替身求值器的 `where` 是逐键 `===` 比对，
+`status: 'AWAITING_REVIEW'` 在替身里把两行都筛掉了——**真实 SQL 下它会返回空，
+两者一致，但这仍是替身的推论而不是真库的实测**（同 7.2-h 那条注）。
+
+新增用例分布：`cognitive-review-schedule.test.ts` 12（新文件）、
+`cognitive-decision-extractor.test.ts` 13（+7）、`cognitive-decision-module.test.ts` 9（+6）、
+`cognitive-decision-display.test.ts` 7（新文件）、`cognitive-decisions-service.test.ts` 11（+6）。
+
+门禁：`npx tsc --noEmit` 无输出；全量单测 `105 files / 1735 tests` 全绿。
+
+### 八、诚实的边界
+
+**一、抽取器认得的句式比汉语少。** 为了把三个预期用例跑绿，
+我把测试输入改写了——原话用的是「我决定把 X 换成 Y」，抽不出来。
+这不是测试写错了，是 v1 词表的真实边界：`CATEGORY_MARKERS`（`decision-extractor.ts:62-68`）
+要求 `我决定用 / 我改用 / 我选了` 这一类硬短语，而 `我决定把…换成…` 里
+`VERBS` 认得「我决定」、类别表却认不出那句。当场拿 `npx tsx` 直跑抽了一遍确认，不是推想：
+
+```
+我决定把 PostgreSQL 换成 ClickHouse。 => []
+我打算把周报改成邮件。             => []
+我改用 ClickHouse，预计查询快一倍。 => [{category: TECH_CHOICE, choice: ClickHouse, expectedOutcome: 预计查询快一倍}]
+```
+
+后果是「抽不出来就不记」——方向保守，不会凭空造一条决策，但会漏。**这片没有扩大词表**：
+那是另一个行为片，需自己的先红用例和一批真句实测，不该挂在复盘时间这一片里。
+
+**二、真库里今天仍然量不到。** 跑完照例只读回真库量一次（只打印计数，一行正文都不落地）：
+
+| 度量 | 值 |
+|---|---|
+| `DecisionRecord` 按状态分组 | 空（0 行） |
+| `expectedOutcomeCiphertext` / `decidedAt` / `reviewAfter` 非空 | 0 / 0 / 0 |
+| `DecisionOutcome` 行 / 任一分面非空 | 0 / 0 |
+| `ReflectionRecord` 里 `DECISION_LESSON` | 0 |
+| `CognitivePreference` 行 / `decisionMemoryEnabled` 为真 | 1 / **0** |
+| 参照：用户 / 消息 / 记忆行 / `CognitiveTask` | 2 / 33 / 2 / 0 |
+
+所以本片所有的绿都是替身库的绿：`AWAITING_REVIEW` 到今天为止一次都没从一个真实的
+`CONFIRMED` 行上读出来过。端到端验收属于「他在界面上开决策模块、说一句决定、
+再说一句结果、点一次点头」，那是他的动作。0 行不是缺陷，是闸门：
+`decisionMemoryEnabled` 默认 false、库里也没人为真——我并没有为了「让它有数据」去翻他的开关。
+
+**三、片P 还剩的尾巴**：面板第五桶的文案口径（「待复盘」这桶现在能出东西了，
+那行提示得跟着改），以及上面那条词表边界。前者是 P-5，后者不属于本片。
+

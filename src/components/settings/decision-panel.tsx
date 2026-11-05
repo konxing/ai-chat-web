@@ -6,6 +6,7 @@ import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
 import { outcomeFacetRows } from '@/lib/cognitive/outcome-display';
+import { decisionDetailRows } from '@/lib/cognitive/decision-display';
 
 /**
  * 决策记忆那一屏（任务书 5.5 的界面）。
@@ -34,6 +35,8 @@ interface DecisionDto {
   status: DecisionStatus;
   topic: string;
   choice: string;
+  expectedOutcome: string | null;
+  reviewAfter: string | null;
   decidedAt: string | null;
   confirmedAt: string | null;
   createdAt: string;
@@ -231,6 +234,14 @@ export function DecisionPanel() {
                           <p className="mt-1.5 text-[11.5px] text-white/35">
                             {timeAgo(decision.decidedAt ?? decision.createdAt)}
                           </p>
+                          {decisionDetailRows(decision).map((row) => (
+                            <div key={row.label} className="mt-1 flex gap-1.5 text-[12px]">
+                              <span className="shrink-0 text-white/40">{row.label}</span>
+                              <span className="whitespace-pre-wrap break-words text-white/65">
+                                {row.text}
+                              </span>
+                            </div>
+                          ))}
 
                           {decision.status === 'PENDING_CONFIRM' ? (
                             <div className="flex flex-wrap gap-2 pt-2">

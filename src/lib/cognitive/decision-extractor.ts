@@ -1,4 +1,5 @@
 import type { DecisionCategory } from '@prisma/client';
+import { hasReviewSchedule } from './review-schedule';
 
 /**
  * 决策候选的词法抽取（任务书 5.1 的第一版）。
@@ -10,8 +11,9 @@ import type { DecisionCategory } from '@prisma/client';
  * 两层标记：类别标记是「动词 + 领域」（我决定用 / 我打算买），动词单独列出来是因为
  * 选择内容要取动词之后的部分——「我决定用 X」里被决定的是「用 X」，不是「我决定」。
  *
- * v1 不分离主题与选择：topic 与 choice 同值。任务书 5.2 的其余列（背景/约束/可选方案/
- * 理由/标准/预期/风险）在词法下没有可靠来源，留空比编造好。
+ * v1 不分离主题与选择：topic 与 choice 同值。任务书 5.2 的其余列里，只有「预期结果」
+ * 在词法上有可靠来源（同一句里的预期分句，见下面 EXPECTATION_MARKERS）；
+ * 背景/约束/可选方案/理由/标准/风险六列仍然没有——那些话不在这一句里，留空比编造好。
  *
  * 纯函数，不碰数据库。测试：tests/unit/cognitive-decision-extractor.test.ts
  */
@@ -19,11 +21,42 @@ export const DECISION_CANDIDATE_MIN_CHARS = 4;
 export const DECISION_CANDIDATE_MAX_CHARS = 200;
 export const DECISION_CANDIDATES_PER_TURN = 2;
 
+/**
+ * 分句边界：只切逗号、顿号、分号。句号以上由 `splitSentences` 负责，这里不重复切。
+ * `outcome-extractor` 共用同一个形状，两处的「一句只归一段」才是同一件事。
+ */
+export const CLAUSE_SPLIT_RE = /[，,、；;]/;
+
 export interface DecisionCandidate {
   category: DecisionCategory;
   topic: string;
   choice: string;
+  /** 同一句里的预期分句原话；没说就是 null，不从「我决定」推断出一个预期。 */
+  expectedOutcome: string | null;
+  /**
+   * 这句话的原话（句尾标点已剥）。写侧拿它算 `reviewAfter`——复盘时间必须来自
+   * 决策自己那一句，不能从同一段聊天的别处借。候选行不落库，所以这一列只活在内存里。
+   */
+  sourceSentence: string;
 }
+
+/**
+ * 预期结果的标记。刻意不含「我想」「准备」这类既表意图又表期望的说法：
+ * 「我想着先跑半年再说」里的「想着」不是预期结果，登记进去就是把语气当成了内容。
+ *
+ * 带时长说法的分句（「预计三个月后再看一次」）**不算预期**：那是一句安排，不是一个结果，
+ * 让 reviewAfter 那一列去接它（`hasReviewSchedule` 就是为这条界线导出的）。
+ */
+const EXPECTATION_MARKERS: readonly string[] = [
+  '我预期',
+  '我预计',
+  '预计',
+  '本来想',
+  '我以为',
+  '希望能',
+  '我希望',
+  '指望'
+];
 
 /** 顺序即优先级：一句话同时命中两类时，靠前的类别赢。 */
 const CATEGORY_MARKERS: ReadonlyArray<{ category: DecisionCategory; markers: readonly string[] }> = [
@@ -80,12 +113,29 @@ export function extractDecisionCandidates(text: string): DecisionCandidate[] {
       }
     }
     if (hit === null) continue;
-    const choice = sentence.slice(hit.index + hit.verb.length).trim();
+    const remainder = sentence.slice(hit.index + hit.verb.length);
+    const clauses = remainder
+      .split(CLAUSE_SPLIT_RE)
+      .map((clause) => clause.trim())
+      .filter((clause) => clause.length > 0);
+    const expectedOutcome =
+      clauses.find(
+        (clause) =>
+          EXPECTATION_MARKERS.some((marker) => clause.includes(marker)) && !hasReviewSchedule(clause)
+      ) ?? null;
+    // 一句话说过的内容只归一列：预期分句已经进了 expectedOutcome，就不该再混在「用户选择」里
+    // 显示第二遍。剩下的分句按「，」重接——分句边界本来只在这里有意义。
+    const choice = clauses
+      .filter((clause) => clause !== expectedOutcome)
+      .join('，')
+      .slice(0, DECISION_CANDIDATE_MAX_CHARS);
     if (choice.length < DECISION_CANDIDATE_MIN_CHARS) continue;
     candidates.push({
       category: hit.category,
-      topic: choice.slice(0, DECISION_CANDIDATE_MAX_CHARS),
-      choice: choice.slice(0, DECISION_CANDIDATE_MAX_CHARS)
+      topic: choice,
+      choice,
+      expectedOutcome,
+      sourceSentence: sentence
     });
     if (candidates.length >= DECISION_CANDIDATES_PER_TURN) break;
   }
