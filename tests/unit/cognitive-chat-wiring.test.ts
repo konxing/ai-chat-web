@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { AiProvider } from '@prisma/client';
 import { toOutboundTexts } from './outbound-message';
 
@@ -180,5 +181,39 @@ describe('这一轮引用了哪几条记忆', () => {
 
     expect(messages).toHaveLength(2);
     expect(await cited()).toEqual([]);
+  });
+});
+
+/**
+ * 8.1 唯一的真洞：`runCognitiveReads` 交回的 `failed` 以前被扔掉，
+ * 于是「你自己把这个模块关了」和「模块开着但它挂了」在库里是同一个样子——
+ * 事后谁也没法追问。这两条把区别要回来，第三条钉它确实进了审计。
+ */
+describe('哪一个认知站点挂了要能被事后追问', () => {
+  async function failed(userId = 'user-a') {
+    const { cognitiveFailed } = await rawBuild(userId);
+    return cognitiveFailed;
+  }
+
+  it('站点开着但读挂了：交回挂了的那个模块键', async () => {
+    db.memoryEnabled = true;
+    db.failMemoryRead = true;
+
+    expect(await failed()).toEqual(['memory']);
+  });
+
+  it('站点关着：交回空数组——关了不是挂了，这个字段不许把两者混成一件事', async () => {
+    db.memoryEnabled = false;
+    db.rows = [await memoryRow('user-a', 'mem-1', '我在用 Prisma')];
+
+    expect(await failed()).toEqual([]);
+  });
+
+  it('对话路由把这份清单写进审计的 after：只放模块键，不放正文', () => {
+    const route = readFileSync('src/app/api/chats/[id]/messages/route.ts', 'utf8');
+
+    expect(route).toMatch(/cognitiveFailed/);
+    // 审计里只许出现模块键这一个数组；正文、错误消息都不该顺着这条路进日志。
+    expect(route).toMatch(/after:\s*\{[^}]*cognitiveFailed[^}]*\}/);
   });
 });

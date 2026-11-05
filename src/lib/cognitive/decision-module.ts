@@ -40,7 +40,7 @@ export async function writeDecisionCandidates(turn: CognitiveTurn): Promise<void
   await prisma.decisionRecord.createMany({ data, skipDuplicates: true });
 }
 
-/** 读侧 5-E 才接：现在返回空块，开关开着也不会往上下文里塞任何东西。 */
+/** 读侧只认 `CONFIRMED` 的行（`decisions.ts:252`）：没确认过的候选一个字节都不进上下文。 */
 export const decisionModule: CognitiveModule = {
   key: 'decisionMemory',
   read: (turn) => readDecisionContext({ userId: turn.userId, query: turn.content }),

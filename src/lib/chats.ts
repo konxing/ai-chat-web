@@ -15,7 +15,7 @@ import {
 } from './files';
 import { capabilitiesOf } from './providers';
 import type { AiMessage, ChatContentPart } from './ai';
-import { runCognitiveReads } from './cognitive/manager';
+import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager';
 import { ensureCognitiveModules } from './cognitive/memory-module';
 
 export interface ChatSummary {
@@ -353,12 +353,14 @@ export async function saveAssistantMessage(input: {
 /**
  * 一轮对话发给模型的上下文，以及「这一轮把哪几条记忆带了进去」。
  *
- * 后面那一样是为界面那句引用提示（任务书 8.2）留的：它在服务端算，
- * 因为「带上了」的唯一凭据就是这里拼出来的那份消息，前端无从复算。
+ * 后面那两样都为「这一轮到底发生了什么」能被事后追问而留：`citedMemoryIds` 是界面那句
+ * 引用提示（任务书 8.2）的唯一凭据，`cognitiveFailed` 是审计里那几个模块键（任务书 8.1）。
+ * 都在服务端算，因为凭据就是这里拼出来的那份消息，前端无从复算。
  */
 export interface ConversationContext {
   messages: AiMessage[];
   citedMemoryIds: string[];
+  cognitiveFailed: CognitiveModuleKey[];
 }
 
 export async function buildConversation(input: {
@@ -451,7 +453,9 @@ export async function buildConversation(input: {
   } else {
     messages.push({ role: 'user', content: parts });
   }
-  return { messages, citedMemoryIds };
+  // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
+  // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
+  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {

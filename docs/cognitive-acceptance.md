@@ -1530,7 +1530,82 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 - **情绪三档没在真提示词里量过**：测的是渲染函数的文字和「偏好行 → 引擎 → 模块」这条传递链，没起服务发过一次真请求。`off` 那一档到底省下多少字、`explicit` 那句会不会被模型复述给用户，**无法验收**。
 - **K5 是等效变异，不是通过**：`!== false` 与 `=== true` 今天走不到不同分支。留着它是为了说明：`allowsProfile` 的「拿不准按关」这一层，目前没有任何输入能触发。
 - **两处上限仍是两份常量**：`PROFILE_LIST_MAX_ROWS = 200` 在服务层，界面只许转述服务端说过的话；`USER_MODEL_MAX_ITEMS = 6` 同理由 drift 用例比对（P10 的红因就是这个）。改一处忘另一处会红，但红的是用例不是编译——这是刻意选择（浏览器包里不该 import 服务端的数）。
-- **8.1 对照表那一行还没改**：User Modeling 从今天起由「不存在」变「存在」，但站点对照表的口径统一放在片 e 一次性改，这里不动它。
+- **8.1 对照表那一行当时还没改**：User Modeling 从今天起由「不存在」变「存在」，但站点对照表的口径统一放在片 e 一次性改，这里不动它。（**片 e 已兑现**：那张表现在在本文末尾「8.1：十六个站点摊成一张表」那一节，User Modeling 那一行写的就是「存在（片 d 起）」。留这句是为了记下这一片的口径是「一张表一次改」，不是两处各写各的。）
 
+---
 
+## 8.1：十六个站点摊成一张表 + 「哪个站点挂了」进审计（11-05 片 e）
 
+任务书 8.1 画了一条 16 站点的管线（读侧 11 个 + 聊完之后的 5 个），并要求「并行任务不应该阻塞主回复」。这一片的交付**不是**一条管线：`CognitiveModule` 已经是站点接口，再套一层 `Station/Pipeline` 只有一个消费者、重复那张开关表，理由逐条写在下面。所以这里做两件事——**把 16 个站点的真实下落摊成一张可追问的表**，再**补掉这张表逼出来的唯一一个真洞**。
+
+### 为什么不建站点抽象（四条，带证据）
+
+- **接口已经有了**：`manager.ts:43` 的 `CognitiveModule`（键 + `read` + 可选 `write`）、`:56` 的 `MODULE_SWITCH` 逐键闸、`:53` 的 1000 ms 硬截止、`:88-92` 的错误隔离——四件套齐全，缺的从来不是抽象。
+- **编排器已经有了**：`runCognitiveReads`（`manager.ts:77`）就是那个「按开着的键依次读、单点挂了不带走全链」的循环，唯一调用点在 `chats.ts:404`。
+- **注册表只有三个模块**：`memory-module.ts:352-354` 注册 `memory` / `decisionMemory` / `userModel`。`MODULE_SWITCH` 里另外四个键（`emotion` / `association` / `timeline` / `reflection`）**没有模块挂着**——它们各自的开关由别处的闸门消费（时间线一屏、图一屏、反思后台），不进读管线。这就是下面那张表里「存在但不在这个站点上」那几行的由来。
+- **想把它接到反思读侧也不行**：`cognitive-reflection-states.test.ts:71-80` 明令 `reflections.ts` 不建记忆、不改画像、不 `registerCognitiveModule`。采纳一条洞察只翻状态——多一层管线正好会诱使它「顺手挂进对话链路」。
+
+### 16 站点对照表（+1 行本片新增）
+
+「在不在」只说**任务书点名的那个形状**在不在，不替相邻实现背书。
+
+| 任务书站点 | 在不在 | 落点（今天实测过的行号） |
+|---|---|---|
+| 身份鉴权 | 存在，且在认知之前 | `messages/route.ts:47` `requireUser` → `:49` 限流 → `:56` `getChatOwned`。认知读全部发生在这之后 |
+| 用户模块配置 | 存在 | `manager.ts:78` 每轮读一次偏好行，`:80` 按 `=== true` 筛站点；偏好缺失时 `:79` 直接返回空 |
+| Memory Retrieval | 存在 | `memory-module.ts:88-108` 取池 → 排序 → 算置信度 → 渲染。排序在 `retrieval.ts:75`（关键词）/ `:161`（余弦）/ `:209`（RRF 混合） |
+| Graph Association | **不存在**（作为站点） | 图是**只读派生视图**：`account/cognitive/graph/route.ts:31-34` 两道闸 + `memory-graph.ts` 从记忆行现算。读管线里没有这个键的模块 |
+| Temporal Filtering | 存在，但只两处 | 读侧有效期过滤 `memories.ts:342-345`（`validTo ≥ asOf` 且 `validFrom ≤ asOf`）；写侧时间框架 `temporal.ts:45`。**检索排序不看时间**，只有 `recordedAt desc` 的取行次序（`memories.ts:350`） |
+| User Modeling | 存在（片 d 起） | `user-model-module.ts:48` 读已确认画像条目、`:53` 挂键、`memory-module.ts:354` 注册。开关 `userModelEnabled` 第一次有了真消费者 |
+| Emotion Analysis | **不存在** | 没有任何「分析情绪」的代码：`emotion` 键在 `manager.ts:59` 的开关表里，但**没有模块注册它**。存在的只有呈现档位 `memory-module.ts:149`（`off` 丢行）/`:204`（`explicit` 报条数），它不给用户的情绪命名 |
+| Response Policy | **不存在** | 全仓库无 `responsePolicy` / 回复策略。`MemoryPolicy` 是**写侧**策略（决定记不记），不改回复的一个字 |
+| Context Assembler | 存在 | `chats.ts:390` 基础 system → `:409` 逐块追加认知 system → `:420` 历史窗口 → `:454` 本轮（含附件）。就是那个装配器 |
+| 原有 AI Provider | 存在，未改动 | `ai.ts:111` `streamChatCompletion`，`messages/route.ts:115` 调用。认知块以普通 system 消息递进去，模型侧不知道它来自哪 |
+| 流式回复 | 存在，未改动 | `route.ts:101` `ReadableStream`，`:111` 逐帧 `data: …\n\n` |
+| 后台记忆提取 | 存在，且不阻塞 | `route.ts:154` `close()` **之后**才 `:162` `enqueueCognitiveTask`；真正执行在 `task-worker.ts:186` `runCognitiveWrites`。落库而不是当场跑，所以进程被杀也不丢这一轮 |
+| 事件更新 | **不存在**（是读时派生的改名） | `timeline.ts:65` `deriveTimelineEvents` 把记忆行 + 演化边现算成事件。没有任何「事件表」被写过——这是 4.1 那一片明写的取舍 |
+| 关联更新 | 只有向量这一路，且从没成功过 | 写侧 `memory-module.ts:299` 按 `associationEnabled` 决定补不补向量，`:311-317` 失败只记一条不含正文的告警。**今天实测：`MemoryItem` 2 行、`embeddingCiphertext` 非空 0 行** |
+| 决策候选提取 | 存在，但读侧只认已确认 | 写侧 `decision-module.ts:44-51`（候选 `:48`、结果 `:50`）只落 `PENDING_CONFIRM`；读侧 `decisions.ts:252` 只取 `status='CONFIRMED'`。**实测：`DecisionRecord` 里 `CONFIRMED` 0 行**，所以这一路今天递出去的是空块 |
+| 反思任务触发判断 | 存在 | `task-worker.ts:113` 每轮按「这轮有活的 user」触发 `runReflectionSweep`（`reflection-sweep.ts:139`），冷却由它自己那道条件 UPDATE 保证 |
+| **本轮哪个站点挂了**（本片新增） | 存在 | `manager.ts:89` 收键 → `chats.ts:458` 交回 → `route.ts:237-242` 写进 `writeAudit.after.cognitiveFailed`。**只有模块键，没有正文、没有报错原文**（同 `:91` 那条 `log.warn` 立的规矩） |
+
+**「并行任务不应该阻塞主回复」这一句的判法**：不是并行，是**入队即返回**——`close()` 已经把字节全交给客户端之后才 `enqueueCognitiveTask`（`route.ts:154-162`）。读侧那一半靠 `manager.ts:53` 的每模块 1000 ms 截止兜住，最坏比没有认知多花一秒，不会更多。后台是串行的：`task-worker.ts:55-60` 的 `drain` 锁让「一轮跑完才进下一轮」成为事实。**没有给 `CognitiveTaskKind` 加枚举值**——那是 `schema.prisma` 的迁移，给不存在的站点排队务只会多一种要清尸体。
+
+### 那个真的洞：`failed` 以前被扔掉
+
+`runCognitiveReads` 交回 `{ blocks, failed }`，`chats.ts` 从前只取 `blocks`。后果不是功能坏，是**事后没法追问**：「你自己把这个站点关了」和「站点开着但它挂了」在库里长得一模一样，都是「这一轮没带记忆」。修法是让那个数组穿过两层，落在审计的一个数组上：
+
+| 位置 | 改动 |
+|---|---|
+| `chats.ts:363` | `ConversationContext` 多一个 `cognitiveFailed: CognitiveModuleKey[]`；`:18` 连带 import 那个类型 |
+| `chats.ts:458` | `return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed }` |
+| `messages/route.ts:83` | 解构多取这一个字段 |
+| `messages/route.ts:237-242` | `writeAudit` 的 `after` 里加 `cognitiveFailed`（打完探针后按本文件风格折成多行；断言钉的是**位置**，不是排版） |
+
+一行代码都没改判定——`manager` 那侧的行为早就对了，只是没人接。这也是为什么它单独一片、单独先红。
+
+### 先红
+
+`cognitive-chat-wiring.test.ts` 7 → **10 条**。新增的三条是这张表的追问面：站点开着但读挂了要交回 `['memory']`；站点关着要交回 `[]`（**这个字段不许把两件事混成一件**）；路由确实把它写进了 `after`（静态断言 `readFileSync` + 正则钉住「在 `after` 那个对象里」，而不只是「在文件里」）。
+
+红法（实现前）：`TS2339 Property 'cognitiveFailed' does not exist on type 'ConversationContext'`，两条运行时用例红在 `undefined` 不等于 `['memory']` / `[]`。**这一片又踩到同一个盲区**：`npx tsc --noEmit` 抓到的那条（`ConversationContext` 少字段）vitest 一条都不红——esbuild 只剥类型不求值。
+
+### 变异探针
+
+5 条，逐个当场回滚，仍用仓库外那个小跑批脚本（锚点必须恰好出现一次，`finally` 按字节还原并自证 `RESTORED byte-equal: true`）。
+
+| 探针 | 结果 |
+|---|---|
+| E-P1 `chats.ts` 交回硬编码空数组 | **1 红**：「站点开着但读挂了：交回挂了的那个模块键」 |
+| E-P2 `route.ts` 的 `after` 里去掉这个键 | **1 红**：那条静态断言的 `after: {…cognitiveFailed…}` 正则 |
+| E-P3 把它从 `after` 挪到 `writeAudit` 的同级参数 | **1 红**，红因同上。这条钉的是**位置**：审计的行形状由 `after` 承载，挪出去等于没进库 |
+| E-P4 `manager.ts:89` 不再 `failed.push` | **1 红**：「站点开着但读挂了」。**这条同时证明接线用例没在自证**——它 mock 的只有 prisma，`runCognitiveReads` / `settle` / 截止全是真的 |
+| E-P5 `manager.ts:80` 的筛选从 `=== true` 改成 `!== false` | **1 红**：红的是「站点开着但读挂了」那条，**不是**「站点关着」那条。原因值得记：测试替身的偏好行只填了 `memoryEnabled` 一个键，`!== false` 于是把其余站点当成开着，它们的读在缺模型的 mock 上炸掉，`failed` 多出键。所以「关了不是挂了」那条用例挡不住这个变异，挡住它的是**数组恰等于 `['memory']`** 这个形状 |
+
+### 这一片的边界（含无法验收项）
+
+- **相邻的那个洞没修，也没用例**：`manager.ts:79`——**整行偏好读不出来**时（`readPreferences` 抛错）返回 `{ blocks: [], failed: [] }`，于是「配置面挂了」仍然和「全关着」同形。今天只有 `cognitive.preferences_unavailable` 那条**日志**（`manager.ts:144`）能证明它发生过，库里没有痕迹。不修的代价是失败方向安全（什么都不读、什么都不写），修的代价是给 `CognitiveReadResult` 和审计形状再加一个旋钮。**这一条留给裁决，不混进本片。**
+- **`after.cognitiveFailed` 至今没有真实一行**：要它非空得真有一个站点挂掉，本机 2 条记忆、模块全默认关，跑不出一条非空审计。**「写进了库」这一句目前只有静态断言 + 单测里的 `writeAudit` 参数为证，无法验收真库那一行。**
+- **界面不读这个字段**：`.tsx` 里 `cognitiveFailed` 零命中。它是给排障和审计看的，不是给用户看的——所以按「不摆没人消费的东西」那条规矩，它不该出现在任何屏上；这里它也没成为一个控件，只是一个后端数组。
+- **表里那四处「不存在」一片都没动**：Graph Association、Emotion Analysis、Response Policy、事件更新四行仍写「不存在」（事件更新那一行的真相是「读时派生换了个名字」）。这一片只把 User Modeling 从「不存在」改成「存在」——那是片 d 的成果，今天才落进表。**不建它们**：图是只读派生、情绪呈现是档位、回复策略没有需求来源——凭空建站点违反「认知模块一律默认关，且必须带实测增益」。
+- **行号会漂**：这张表和 `manager.ts` / `chats.ts` 的行号是今天逐一 `grep` 复核过的（上一片就发现旧计划里的 manager 行号已经过期）。之后任何一片动到这几个文件，这张表要一起改。

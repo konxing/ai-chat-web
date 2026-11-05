@@ -80,7 +80,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     providerId: provider.id,
     modelId: provider.modelId
   });
-  const { messages, citedMemoryIds } = await buildConversation({
+  const { messages, citedMemoryIds, cognitiveFailed } = await buildConversation({
     chatId,
     userId: user.id,
     currentContent: body.content,
@@ -234,7 +234,13 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           targetId: chatId,
           ip: getRequestIp(req),
           userAgent: getUserAgent(req),
-          after: { providerId: provider.id, modelId: provider.modelId, chars: content.length, outcome },
+          after: {
+            providerId: provider.id,
+            modelId: provider.modelId,
+            chars: content.length,
+            outcome,
+            cognitiveFailed
+          },
           status: outcome === 'SUCCESS' ? 'SUCCESS' : 'FAILURE',
           error: failureCode ?? null
         }).catch(() => undefined);
