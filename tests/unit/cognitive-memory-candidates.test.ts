@@ -102,7 +102,11 @@ function propose(overrides: Record<string, unknown> = {}) {
   );
 }
 
+// 旧形状（没有 fieldName 那一段）。`seedCandidate` 故意继续用它：
+// 库里 11-06 之前那两类行就是这么封的，整个文件的读用例因此同时在钉「旧行还要能读回来」这条红线。
 const candidateAad = (userId: string, id: string) => `memory-candidate:v1:${userId}:${id}`;
+// 新形状（片S 之后的写侧口径）：同一行换一个列名就打不开。
+const candidateAadV2 = (userId: string, id: string) => `${candidateAad(userId, id)}:contentCiphertext`;
 
 function seedCandidate(overrides: Row): Row {
   const id = String(overrides.id);
@@ -149,9 +153,11 @@ describe('待确认候选（任务书 1.2 的 ASK_CONFIRM）', () => {
     const row = candidates().rows.get(result.id) as Row;
     expect(row.status).toBe('PENDING');
     expect(String(row.contentCiphertext)).not.toContain('换个工作方向');
-    expect(decryptString(String(row.contentCiphertext), candidateAad(USER, result.id))).toBe(
+    expect(decryptString(String(row.contentCiphertext), candidateAadV2(USER, result.id))).toBe(
       '我最近在想要不要换个工作方向'
     );
+    // 新写的这行不再认旧形状——回退只为库里已有的行留着，不是把封口放宽成两种都行。
+    expect(() => decryptString(String(row.contentCiphertext), candidateAad(USER, result.id))).toThrow();
     // 确认之前，这条话一条都不许出现在记忆表里。
     expect(memoryItems().rows.size).toBe(0);
   });

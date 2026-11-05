@@ -1,7 +1,8 @@
 import type { AiProvider } from '@prisma/client';
 import { ApiError } from '@/lib/http';
 import { prisma } from '@/lib/prisma';
-import { decryptBuffer, encryptBuffer } from '@/lib/crypto';
+import type { CognitiveAadCoord } from './aad';
+import { decryptCognitiveBuffer, encryptCognitiveBuffer } from './aad';
 import { readBodyCapped } from '@/lib/ai';
 import { decryptProviderKey, embeddingModelOf, pickCapableProvider } from '@/lib/providers';
 import { joinApiPath, resolveProviderTarget, safeFetch } from '@/lib/ssrf';
@@ -28,8 +29,16 @@ const MAX_ERROR_BYTES = 8_192;
 export const MAX_EMBEDDING_DIM = 8_192;
 const TIMEOUT_MS = 15_000;
 
-/** AAD 绑到字段名：正文那份密文和向量那份不是同一把凭据，不能互换着解。 */
-const aadForVector = (userId: string, memoryId: string) => `memory-vector:v1:${userId}:${memoryId}`;
+/**
+ * 向量和正文是同一行的两列，封口必须不同——不然把 `contentCiphertext` 搬进 `embeddingCiphertext`
+ * 会解出一段被当成向量的乱码。这里靠的是 purpose 和 fieldName 两段都不同（`memory` / `memory-vector`）。
+ */
+const vectorAad = (userId: string, memoryId: string): CognitiveAadCoord => ({
+  purpose: 'memory-vector',
+  userId,
+  recordId: memoryId,
+  fieldName: 'embeddingCiphertext'
+});
 
 export interface StoredVector {
   ciphertext: Buffer;
@@ -50,7 +59,7 @@ export function unpackVector(payload: Buffer): Float32Array {
 
 /** 解一行里存的向量；AAD 对不上（记忆 id 或用户不对）就抛，绝不返回半个向量。 */
 export function vectorFromRow(ciphertext: Buffer, userId: string, memoryId: string): Float32Array {
-  return unpackVector(decryptBuffer(ciphertext, aadForVector(userId, memoryId)));
+  return unpackVector(decryptCognitiveBuffer(ciphertext, vectorAad(userId, memoryId)));
 }
 
 function validate(vector: unknown, model: string): number[] {
@@ -113,7 +122,7 @@ export async function embedMemoryText(userId: string, memoryId: string, text: st
     const parsed = JSON.parse(raw) as { data?: { embedding?: unknown }[] };
     const vector = validate(parsed.data?.[0]?.embedding, model);
     return {
-      ciphertext: encryptBuffer(packVector(vector), aadForVector(userId, memoryId)),
+      ciphertext: encryptCognitiveBuffer(packVector(vector), vectorAad(userId, memoryId)),
       model
     };
   } catch (err) {

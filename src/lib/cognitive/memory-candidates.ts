@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
 import { ApiError } from '@/lib/http';
-import { decryptString, encryptString } from '@/lib/crypto';
+import type { CognitiveAadCoord } from './aad';
+import { decryptCognitiveString, encryptCognitiveString } from './aad';
 import { exclusionHash, recordExclusions, type ExclusionSource } from './exclusions';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import {
@@ -118,8 +119,13 @@ export interface CandidateListFilters {
   take?: number;
 }
 
-// 和记忆正文同一套加密口径：AAD 绑住这一行自己的 userId 和 id，别人的行解不开。
-const aadFor = (userId: string, id: string) => `memory-candidate:v1:${userId}:${id}`;
+// 和记忆正文同一套加密口径（四坐标，见 aad.ts）：别人的行解不开，同一行的两列也搬不过去。
+const contentAad = (userId: string, id: string): CognitiveAadCoord => ({
+  purpose: 'memory-candidate',
+  userId,
+  recordId: id,
+  fieldName: 'contentCiphertext'
+});
 
 function toStoredStatus(status: MemoryCandidateStatus): DbStatus {
   const match = STATUS_PAIRS.find((pair) => pair[0] === status);
@@ -136,7 +142,7 @@ function fromStoredStatus(value: string): MemoryCandidateStatus {
 function toCandidateDto(row: CandidateRow): MemoryCandidateDto {
   let content: string;
   try {
-    content = decryptString(row.contentCiphertext, aadFor(row.userId, row.id));
+    content = decryptCognitiveString(row.contentCiphertext, contentAad(row.userId, row.id));
   } catch {
     content = '（候选内容解密失败）';
   }
@@ -178,7 +184,7 @@ export async function proposeCandidate(input: MemoryCandidateInput): Promise<{ i
         sourceMessageId: input.sourceMessageId ?? null,
         type: toDbMemoryType(input.type),
         context: toDbMemoryContext(input.context),
-        contentCiphertext: encryptString(content, aadFor(input.userId, id)),
+        contentCiphertext: encryptCognitiveString(content, contentAad(input.userId, id)),
         contentHash,
         validPrecision: toDbTimePrecision(input.precision ?? 'unknown'),
         validFrom: input.validFrom ?? null
@@ -254,7 +260,7 @@ async function claim(tx: Prisma.TransactionClient, userId: string, id: string, s
  */
 export async function confirmCandidate(id: string, userId: string): Promise<MemoryDto> {
   const row = await readPending(userId, id);
-  const content = decryptString(row.contentCiphertext, aadFor(row.userId, row.id));
+  const content = decryptCognitiveString(row.contentCiphertext, contentAad(row.userId, row.id));
   const decidedAt = new Date();
   return prisma.$transaction(async (tx) => {
     const stamped = await claim(tx, userId, id, 'confirmed', decidedAt);
@@ -366,7 +372,7 @@ async function excludeDeletedContents(
   for (const row of rows) {
     try {
       sources.push({
-        content: decryptString(row.contentCiphertext, aadFor(userId, row.id)),
+        content: decryptCognitiveString(row.contentCiphertext, contentAad(userId, row.id)),
         chatId: row.chatId,
         sourceMessageId: row.sourceMessageId
       });

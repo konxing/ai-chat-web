@@ -64,9 +64,16 @@ vi.mock('@/lib/ssrf', () => ({
 }));
 
 import { decryptBuffer, encryptBuffer } from '@/lib/crypto';
+import { cognitiveAad, legacyCognitiveAad } from '@/lib/cognitive/aad';
 import { embedMemoryText, packVector, vectorFromRow } from '@/lib/cognitive/embedding';
 
 const USER = 'user-me';
+
+/** 向量的封口只有一个来源：这一族的形状由 aad.ts 说了算，测试不另写一份可能漂移的字面量。 */
+const vectorAad = (memoryId: string, userId = USER) =>
+  cognitiveAad({ purpose: 'memory-vector', userId, recordId: memoryId, fieldName: 'embeddingCiphertext' });
+const legacyVectorAad = (memoryId: string, userId = USER) =>
+  legacyCognitiveAad({ purpose: 'memory-vector', userId, recordId: memoryId, fieldName: 'embeddingCiphertext' });
 
 function embeddingProvider(overrides: Record<string, unknown> = {}) {
   return {
@@ -160,9 +167,28 @@ describe('往 embedding 端点发的那一趟', () => {
     expect([...vectorFromRow(stored!.ciphertext, USER, 'mem-1')]).toEqual(vector);
   });
 
+  it('写侧封的是新口径（带字段名），旧配方打不开它', async () => {
+    const vector = [0.5, -0.25];
+    stub({ data: [{ embedding: vector }] });
+    const stored = await embedMemoryText(USER, 'mem-1', '我在杭州住');
+    const bytes = Buffer.from(stored!.ciphertext);
+
+    // 上面那条「读得回来」拦不住写侧悄悄退回旧封口——回退会替它蒙过去。
+    // 这一条才钉得住：同一串字节，认新口径，不认旧口径。
+    expect(decryptBuffer(bytes, vectorAad('mem-1'))).toEqual(Buffer.from(packVector(vector)));
+    expect(() => decryptBuffer(bytes, legacyVectorAad('mem-1'))).toThrow();
+  });
+
+  it('库里旧口径封的向量行，读侧靠回退仍然解得开', () => {
+    const legacyRow = encryptBuffer(packVector([4, 5]), legacyVectorAad('mem-old'));
+
+    expect([...vectorFromRow(legacyRow, USER, 'mem-old')]).toEqual([4, 5]);
+  });
+
   it('AAD 绑到记忆 id：换个人拿同一串密文解不出同一个向量', () => {
-    const mine = encryptBuffer(packVector([1, 2, 3]), `memory-vector:v1:${USER}:mem-1`);
-    expect(() => decryptBuffer(mine, 'memory-vector:v1:user-other:mem-1')).toThrow();
+    const mine = encryptBuffer(packVector([1, 2, 3]), vectorAad('mem-1'));
+
+    expect(() => decryptBuffer(mine, vectorAad('mem-1', 'user-other'))).toThrow();
     expect([...vectorFromRow(mine, USER, 'mem-1')]).toEqual([1, 2, 3]);
   });
 

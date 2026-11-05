@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
-import { decryptString, encryptString } from '@/lib/crypto';
+import type { CognitiveAadCoord } from './aad';
+import { decryptCognitiveString, encryptCognitiveString } from './aad';
 import { assessConfidence, type Confidence } from './confidence';
 import { fromDbMemoryOrigin, toDbMemoryOrigin, type MemoryOrigin } from './memories';
 import type { Prisma } from '@prisma/client';
@@ -81,7 +82,13 @@ interface EvidenceRow {
   createdAt: Date;
 }
 
-const aadFor = (userId: string, id: string) => `memory-evidence:v1:${userId}:${id}`;
+// 证据的说明常会复述那句话，所以跟正文同等对待。封口走 aad.ts 那一份四坐标口径。
+const noteAad = (userId: string, id: string): CognitiveAadCoord => ({
+  purpose: 'memory-evidence',
+  userId,
+  recordId: id,
+  fieldName: 'noteCiphertext'
+});
 
 function toDbKind(kind: EvidenceKind): DbEvidenceKind {
   const match = KIND_PAIRS.find((pair) => pair[0] === kind);
@@ -124,7 +131,7 @@ export async function recordEvidence(tx: Prisma.TransactionClient, input: Eviden
       origin,
       sourceMessageId,
       sourceChatId: input.sourceChatId ?? null,
-      noteCiphertext: note ? encryptString(note, aadFor(input.userId, id)) : null
+      noteCiphertext: note ? encryptCognitiveString(note, noteAad(input.userId, id)) : null
     }
   });
 }
@@ -184,7 +191,7 @@ function decryptNote(row: EvidenceRow, viewerUserId: string): string | null {
   if (!row.noteCiphertext) return null;
   if (row.userId !== viewerUserId) return null;
   try {
-    return decryptString(row.noteCiphertext, aadFor(row.userId, row.id));
+    return decryptCognitiveString(row.noteCiphertext, noteAad(row.userId, row.id));
   } catch {
     return '（说明解密失败）';
   }

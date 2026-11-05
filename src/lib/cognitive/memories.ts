@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
-import { decryptString, encryptString } from '@/lib/crypto';
+import type { CognitiveAadCoord } from './aad';
+import { decryptCognitiveString, encryptCognitiveString } from './aad';
 import { recordEvidence } from './evidence';
 import {
   fromDbMemoryContext,
@@ -190,18 +191,29 @@ export const toDbTimePrecision = toStoredPrecision;
 /** 反向那一半也走这一份：候选表存的是同一套大写枚举，确认时要读回界面那套小写。 */
 export const fromDbTimePrecision = fromStoredPrecision;
 
-// AAD 里带上 userId 和 schemaVersion：别人的行即使密文到手也解不开，日后换密钥也能按版本迁移。
-const aadFor = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
+// 封口走 aad.ts 那一份四坐标口径。这里的两段各自只有一个密文列，所以 fieldName 今天挡不到
+// 行内搬列——它买到的是「这一族从此只有一个配方」，见 aad.ts 顶部那段。
+const memoryContentAad = (userId: string, id: string): CognitiveAadCoord => ({
+  purpose: 'memory',
+  userId,
+  recordId: id,
+  fieldName: 'contentCiphertext'
+});
 
 // 演化的理由常会复述用户那句话，所以跟正文同等对待——绑住这条边自己的 userId 和 id。
-const revisionAadFor = (userId: string, id: string) => `memory-revision:v1:${userId}:${id}`;
+const revisionReasonAad = (userId: string, id: string): CognitiveAadCoord => ({
+  purpose: 'memory-revision',
+  userId,
+  recordId: id,
+  fieldName: 'reasonCiphertext'
+});
 
 export function decryptMemoryContent(
   memory: Pick<MemoryRow, 'id' | 'userId' | 'contentCiphertext'>,
   viewerUserId: string
 ): string {
   if (memory.userId !== viewerUserId) throw new ApiError(403, 'FORBIDDEN', '这条记忆不属于当前用户');
-  return decryptString(memory.contentCiphertext, aadFor(memory.userId, memory.id));
+  return decryptCognitiveString(memory.contentCiphertext, memoryContentAad(memory.userId, memory.id));
 }
 
 /**
@@ -308,7 +320,7 @@ function prepareMemory(input: MemoryInput, version: number) {
       type: toDbMemoryType(input.type),
       context: toDbMemoryContext(input.context),
       origin: toStoredOrigin(input.origin),
-      contentCiphertext: encryptString(content, aadFor(input.userId, id)),
+      contentCiphertext: encryptCognitiveString(content, memoryContentAad(input.userId, id)),
       confirmedAt: input.confirmedAt ?? null,
       validPrecision: toStoredPrecision(precision),
       validFrom,
@@ -426,7 +438,7 @@ export async function reviseMemory(input: MemoryReviseInput): Promise<MemoryDto>
         action: toStoredAction('superseded'),
         memoryId: next.id,
         previousId: previous.id,
-        reasonCiphertext: encryptString(reason, revisionAadFor(input.userId, edgeId)),
+        reasonCiphertext: encryptCognitiveString(reason, revisionReasonAad(input.userId, edgeId)),
         sourceMessageId: input.sourceMessageId ?? null
       }
     });
@@ -462,7 +474,7 @@ export async function retractMemory(memoryId: string, userId: string, reason: st
         action: toStoredAction('retracted'),
         memoryId,
         previousId: null,
-        reasonCiphertext: encryptString(note, revisionAadFor(userId, edgeId)),
+        reasonCiphertext: encryptCognitiveString(note, revisionReasonAad(userId, edgeId)),
         sourceMessageId: null
       }
     });
@@ -507,7 +519,7 @@ export async function listMemoryRevisions(memoryId: string, userId: string): Pro
   return (rows as unknown as MemoryRevisionRow[]).map((row) => {
     let reason: string;
     try {
-      reason = decryptString(row.reasonCiphertext, revisionAadFor(row.userId, row.id));
+      reason = decryptCognitiveString(row.reasonCiphertext, revisionReasonAad(row.userId, row.id));
     } catch {
       reason = '（理由解密失败）';
     }
