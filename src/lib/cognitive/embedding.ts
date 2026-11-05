@@ -3,7 +3,7 @@ import { ApiError } from '@/lib/http';
 import { prisma } from '@/lib/prisma';
 import { decryptBuffer, encryptBuffer } from '@/lib/crypto';
 import { readBodyCapped } from '@/lib/ai';
-import { decryptProviderKey, pickCapableProvider } from '@/lib/providers';
+import { decryptProviderKey, embeddingModelOf, pickCapableProvider } from '@/lib/providers';
 import { joinApiPath, resolveProviderTarget, safeFetch } from '@/lib/ssrf';
 
 /**
@@ -85,6 +85,9 @@ export async function embedMemoryText(userId: string, memoryId: string, text: st
   });
   const provider = pickCapableProvider(rows, 'embedding');
   if (!provider) throw new ApiError(503, 'NO_EMBEDDING_MODEL', '尚未配置支持语义向量的模型');
+  // 向量模型名和对话模型名常常不是同一个（一个 host 上两个 endpoint）。缺省时退回
+  // modelId；这里绝不填一个默认模型名——猜错会让「端点不支持」和「我们猜的」混成一件事。
+  const model = embeddingModelOf(provider);
 
   const key = decryptProviderKey(provider as AiProvider);
   const target = await resolveProviderTarget(provider.baseUrl);
@@ -96,7 +99,7 @@ export async function embedMemoryText(userId: string, memoryId: string, text: st
       'Content-Type': 'application/json',
       Accept: 'application/json'
     },
-    body: JSON.stringify({ model: provider.modelId, input: text }),
+    body: JSON.stringify({ model, input: text }),
     timeoutMs: TIMEOUT_MS
   });
   try {
@@ -108,10 +111,10 @@ export async function embedMemoryText(userId: string, memoryId: string, text: st
     const { text: raw, truncated } = await readBodyCapped(safe.response, MAX_BODY_BYTES);
     if (truncated) throw new ApiError(502, 'EMBEDDING_FAILED', '语义向量返回体超过上限');
     const parsed = JSON.parse(raw) as { data?: { embedding?: unknown }[] };
-    const vector = validate(parsed.data?.[0]?.embedding, provider.modelId);
+    const vector = validate(parsed.data?.[0]?.embedding, model);
     return {
       ciphertext: encryptBuffer(packVector(vector), aadForVector(userId, memoryId)),
-      model: provider.modelId
+      model
     };
   } catch (err) {
     if (err instanceof SyntaxError) throw new ApiError(502, 'BAD_EMBEDDING', '语义向量返回的不是 JSON');

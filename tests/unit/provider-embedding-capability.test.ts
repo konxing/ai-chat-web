@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPABILITIES, capabilitiesOf, pickCapableProvider, providerInputSchema } from '@/lib/providers';
+import { CAPABILITIES, capabilitiesOf, maskProvider, pickCapableProvider, providerInputSchema } from '@/lib/providers';
 
 /**
  * 认知层要往端点发 embeddings 请求，前提是「哪条 provider 管向量」这件事有个说法。
@@ -37,6 +37,57 @@ describe('embedding 能力的注册', () => {
       baseUrl: 'https://api.example.com',
       modelId: 'm',
       capabilities: ['embedding', 'video']
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
+/**
+ * 向量臂的模型名从哪来（片 f 的第一颗钉子）。`AiProvider` 上没有第二个模型字段，
+ * 一支迁移换一个约定不划算，所以约定写在 `params` 里：`embeddingModel` 缺省时退回
+ * `modelId`，但**绝不给默认模型名**——我们看不见对面 host 上到底有什么，猜一个名字
+ * 等于把「探针失败」和「我们猜错」混成同一件事。
+ */
+describe('embedding 用哪个模型名', () => {
+  const base = {
+    name: '向量端点',
+    baseUrl: 'https://api.example.com',
+    modelId: 'ark-code-latest'
+  };
+
+  it('请求体里带 params.embeddingModel：schema 不许把它当陌生键拒掉', () => {
+    const parsed = providerInputSchema.safeParse({
+      ...base,
+      capabilities: ['text', 'embedding'],
+      params: { embeddingModel: 'doubao-embedding-vision' }
+    });
+    expect(parsed.success, JSON.stringify((parsed as { error?: { issues?: unknown } }).error?.issues ?? null)).toBe(true);
+  });
+
+  it('藏起来的视图里这个键还在：管理员存的模型名，读回来必须看得见', () => {
+    const masked = maskProvider({
+      id: 'p-1',
+      ownerType: 'GLOBAL',
+      userId: null,
+      name: '向量端点',
+      baseUrl: 'https://api.example.com',
+      modelId: 'ark-code-latest',
+      capabilities: ['text', 'embedding'],
+      params: { embeddingModel: 'doubao-embedding-vision' },
+      enabled: true,
+      isDefault: false,
+      apiKeyCiphertext: '',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z')
+    } as never);
+    expect(masked.params).toMatchObject({ embeddingModel: 'doubao-embedding-vision' });
+  });
+
+  it('空串不是模型名：宁缺勿滥，退回 modelId 也比发一个空 model 强', () => {
+    const parsed = providerInputSchema.safeParse({
+      ...base,
+      capabilities: ['embedding'],
+      params: { embeddingModel: '' }
     });
     expect(parsed.success).toBe(false);
   });

@@ -1609,3 +1609,99 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 - **界面不读这个字段**：`.tsx` 里 `cognitiveFailed` 零命中。它是给排障和审计看的，不是给用户看的——所以按「不摆没人消费的东西」那条规矩，它不该出现在任何屏上；这里它也没成为一个控件，只是一个后端数组。
 - **表里那四处「不存在」一片都没动**：Graph Association、Emotion Analysis、Response Policy、事件更新四行仍写「不存在」（事件更新那一行的真相是「读时派生换了个名字」）。这一片只把 User Modeling 从「不存在」改成「存在」——那是片 d 的成果，今天才落进表。**不建它们**：图是只读派生、情绪呈现是档位、回复策略没有需求来源——凭空建站点违反「认知模块一律默认关，且必须带实测增益」。
 - **行号会漂**：这张表和 `manager.ts` / `chats.ts` 的行号是今天逐一 `grep` 复核过的（上一片就发现旧计划里的 manager 行号已经过期）。之后任何一片动到这几个文件，这张表要一起改。
+
+---
+
+## 连接层只试第一个地址：那一次探针顺手量到的真 bug（11-05 片 f-0）
+
+片 f 要用掉你给的那一次探针。第一趟请求**根本没发出去**——报的是「无法连接模型服务，请检查 Base URL 与网络」（`AI_UNREACHABLE`，`ssrf.ts:195`），而对面活得好好的。三条实测把责任从「他那边的端点」挪回到我们自己的地址解析：
+
+| 实测 | 结果 |
+|---|---|
+| `dns.lookup('ark.cn-beijing.volces.com', { all: true, verbatim: true })` | 先回 `2406:d440:…`（AAAA），再回 `118.196.65.58`（A） |
+| 直连那个 IPv6 的 443 | **6 秒超时** |
+| 直连那个 IPv4 的 443 | **通** |
+
+**根因**：旧 `pinnedLookup` 是 `candidates[0] || target.addresses[0]`——**只交回一个地址**，交回去的那个正好是 DNS 排在最前面的 AAAA。这台机器没有 v6 出口，于是每次连接都撞死在它上面，而连接层根本不知道还有第二个地址可试。
+
+**影响面不止探针**：`safeFetch` 有五个调用点——对话流式（`src/lib/ai.ts:131`）、非流式（`ai.ts:283`）、模型自检两处（`src/lib/providers.ts:294` / `:329`）、语义向量（`src/lib/cognitive/embedding.ts:95`）。任何一个 provider 的域名先回 AAAA，它在生产上就是**整条不可用**，而且报的是「请检查 Base URL 与网络」这种把矛头指向配置的错误。这条不是推测：本机那个 provider 今天就是这样，而它的 IPv4 是通的。
+
+**修法**（`ssrf.ts:134-148`）：把**校验过的那批地址整组交回**，并把 IPv4 排在前面；调用方点名要某一族时仍按族过滤，过滤空了就退回全组（不让只有 AAAA 的解析把自己筛成零）。防 DNS rebinding 的语义没动——交回去的仍然只有 `validateProviderTarget` 校验过的那批，只是从「挑一个」变成「全都要」。
+
+### 先红与探针
+
+`tests/unit/ssrf.test.ts` 10 → 13 条。三条行为用例先红（`pinnedLookup` 当时还不是导出的，红因是 `TypeError: (0 , pinnedLookup) is not a function`——不是断言不对，是缝还没开），实现后 13 全绿；第 4 条「dispatcher 用的就是这一个解析器」是静态断言，**RED 时就过了**，它是给下面 S-P1 暴露的那个洞补的钉（不假装它是先红）。
+
+| 变异探针 | 结果 |
+|---|---|
+| S-P1 只交回排序后的第一个地址 | **1 红**：「全都要」那条。等于退回旧行为 |
+| S-P2 不排序，按 DNS 给的原序交回 | **1 红**：同一条，红在顺序 `[v6, v4]`。这条钉的是「v4 在前」，不是「多地址」 |
+| S-P3 去掉「过滤空了就退回全组」 | **1 红**：「只解析出一个 v6、却被要求 v4」那条 |
+
+回归物证是网络本身：修完再探同一个 host，结果从「请求没发出去」变成 **HTTP 400**——请求真的出去了，对面开始评价参数。离线单测只能证明交回的清单对，「连接层真的会换着试」这一句靠那一趟实测。
+
+### 这一片的边界
+
+- **IPv4 优先是本机的经验，不是普适正确**：一个只有 v6 出口的环境里，v4 先试要白等一轮连接超时（`AGENT_OPTIONS.connect.timeout = 10_000`，`ssrf.ts:85`）才轮到下一个。**无法验收**——本机没有 v6-only 网络可测。换部署形态时回看这一条。
+- **没改用例去断言「undici 真的会多地址竞速」**：那是 Node 的 `autoSelectFamily` 行为，我们的用例只钉自己这一层（交回什么）。
+
+---
+
+## 5e / 片 f：向量臂的模型名放哪、那一次探针、四臂收口（11-05）
+
+### 为什么先加一个 `params.embeddingModel`
+
+`AiProvider` 上只有 `modelId` 一个模型字段，而对话模型和向量模型常常不是同一个（同一个 host 两条 endpoint 是常态）。不加列、不建新表，约定就落在已有的 `params` 上。动手前它有三处会拦：`providerInputSchema` 是 `.strict()`（陌生键直接 `unrecognized_keys`，实测红因就是这个）、`normalizeParams` 只认 `temperature` / `maxTokens`（会把它抹掉）、`embedding.ts` 发的是 `provider.modelId`。
+
+规则（`providers.ts:76-82` 的 `embeddingModelOf`）：`params.embeddingModel` 优先，缺省退回 `modelId`；**绝不填一个默认模型名**——猜错会把「端点不支持」和「我们猜的」混成同一件事，这条是计划里的不变量。空串在 schema 层就不收（`.trim().min(1)`），宁缺勿滥。
+
+### 先红（含两条 0 红，如实记）
+
+两个文件 25 条：**4 红 / 21 绿**。红的是 `unrecognized_keys: ["embeddingModel"]`（schema 拦）、`masked.params` 里键没了（归一化抹）、出站 body 仍是 `ark-code-latest` 两处（请求体和行上记的模型名）。**另外两条新用例当时就是绿的，不冒充先红**：
+
+- 「空串不是模型名」——那时 `.strict()` 先一步把整个陌生键拒掉，`success` 自然 `false`。它真正开始生效是在实现之后，由 F-P3 证明。
+- 「没配 embeddingModel 时退回 `modelId`」——它钉的不是新功能，是**别把缺省改掉**：一条特征守卫，故意在 RED 就过。
+
+### 变异探针
+
+| 探针 | 结果 |
+|---|---|
+| F-P1 `embeddingModelOf` 忽略覆盖，永远回 `modelId` | **2 红**：出站 body 的模型名 + 行上记的模型名 |
+| F-P2 `normalizeParams` 不再保留这个键 | **3 红**：上面两条 + 管理台读回来的 `masked.params` |
+| F-P3 schema 去掉 `.min(1)`（收空串） | **1 红**：「空串不是模型名」 |
+| F-P4 `embedding.ts` 绕开解析器直接取 `provider.modelId` | **2 红**：同 F-P1 那两条。**这条证明客户端确实问过那个约定**，不是只写着好看 |
+| F-P5 schema 里这个键改名（等于没有这个键） | **1 红**：「schema 不许把它当陌生键拒掉」，红回 `unrecognized_keys` |
+
+### 那一次探针的结果（只记状态码和维度数）
+
+第一轮（片 f-0 之前）：kimi 报 `AI_UNREACHABLE`（我们的连接层，不是端点）、deepseek 报 404。修完连接层**两趟都重跑**，记录以下——deepseek 那个 404 是应用层回答，说明它本来就连上了，重跑是为了让两条口径一致。
+
+| provider | 解析出来的模型名 | 结果 |
+|---|---|---|
+| `kimi`（ark.cn-beijing.volces.com） | `ark-code-latest`（缺省退回 `modelId`） | **HTTP 400** `InvalidParameter`——请求发出去了，对面说参数不合法：发过去的是对话模型名，它不是向量模型 |
+| `deepseek-flash`（api.deepseek.com） | `deepseek-flash`（同上） | **HTTP 404**、返回体为空——这台 host 上没有 `/embeddings` 这条路 |
+
+**两个都没拿到维度数**，所以按你给的判法：**5e 向量臂标「无法实测」，读侧的关键词 ⊕ 余弦混合排序继续没有入口**。库里今天实测：`MemoryItem` 2 行，`embeddingCiphertext` 非空 **0** 行——`retrieval.ts` 那半条臂有单测、没有真数据走过一次。
+
+**解锁触发条件（一句话）**：`params.embeddingModel` 被填成**该 host 确实提供**的向量模型名，且探针拿到维度数；那一刻混合排序才第一次有真向量可排。**这次探针没有改库**：两个 provider 的 `params` 仍是 `null`，一行都没写。
+
+探针脚本是仓库里的一次性文件（`probe-embedding.once.ts`），跑完即删、未提交；它只打印状态码 / 维度数 / 截断后的错误体，且任何要打印的字符串先 `split(key).join('***')`，key 出不了屏幕。
+
+### 四臂收口：一臂一行，带原因和解锁条件
+
+写进现成的两张表（`scripts/cognitive-eval/report.ts:173` 的四臂表加了「解锁触发条件」这一列，`:255` 那张「今天测不了的指标」补上 B 臂的真实原因），不编数字：
+
+- **A1**（只有近期上下文）不可建：harness 离线不调模型，也没有标准答案之外的判分人。
+- **A2** = 现有旧基线，跑了。
+- **B**（+ 向量）不可建：就是上面那两次探针 + 库里 0 / 2 行向量。
+- **C**（+ 图关联）不可建：2a 那次阈值校准的结论是不建关系表；记忆网络是从三种**已经存在**的关系读时派生的（演化边 / 同场对话 / 洞察引用，`src/lib/cognitive/memory-graph.ts:1-20`），里面没有「相关度」也没有多跳——「图关联命中率」没有可测对象。
+- **D**（+ 反思与决策经验）**按数据**不可建：代码和确认界面都在（`src/components/settings/decision-panel.tsx:236` 那个「确认」按钮），库里 `DecisionRecord` / `ReflectionRecord` **各 0 行**（今天实测）。旧表里那句「Phase 5/6 未开始、确认界面还没做，今天一条决策记忆都落不进库」是过期陈述，这一片改成按数据说。
+- 改完重跑 `npm run eval:cognitive` 重生 `report.md`（`cognitive-eval-snapshot.test.ts` 逐字节比对）。**A2 和现状的数字一个没动**：Recall@8 仍是 0.0374 → 0.7274、MRR 0.0154 → 0.5828、违禁注入 1 → 0，动的只有那两张表的措辞和新加的那一列。
+
+### 这一片的边界（含无法验收项）
+
+- **后端收了，界面没有入口**：管理台的 provider 表单只有 `temperature` / `maxTokens` 两个输入（`src/components/admin/models-tab.tsx:316` 那份本地 `params` 类型也没有这个键）。所以「填上真模型名」这一步今天要么直接改库、要么加一个输入框——**加输入框是新文案，等你点头再加**，不混进这一片。
+- **混合排序仍没被真数据走过**：写侧 `embedding.ts` 和读侧融合都有单测，但库里 0 行向量，端到端那一次「有向量的检索」至今**无法验收**。这不是缺口，是同一个缺口的两侧：都卡在对面那个模型名上。
+- **B 臂的数字仍然是空的**：这一片只把「为什么没有」写清楚，没给任何估算值。
+- **行号会漂**：`ssrf.ts` / `providers.ts` / `embedding.ts` / `report.ts` 的引用都是今天逐一 `grep` 复核过的。
+

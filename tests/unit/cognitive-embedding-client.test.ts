@@ -114,6 +114,32 @@ describe('往 embedding 端点发的那一趟', () => {
     expect(header(ctx.fetches[0]!.init, 'authorization')).toBe('Bearer secret-key');
   });
 
+  it('params.embeddingModel 覆盖出站的模型名：对话模型和向量模型常常不是同一个', async () => {
+    ctx.providers = [
+      embeddingProvider({ modelId: 'ark-code-latest', params: { embeddingModel: 'doubao-embedding-vision' } })
+    ];
+    await embedMemoryText(USER, 'mem-1', '我在杭州住');
+    expect(JSON.parse(String(ctx.fetches[0]!.init.body))).toEqual({
+      model: 'doubao-embedding-vision',
+      input: '我在杭州住'
+    });
+  });
+
+  it('行上记的模型名是真正问过的那一个：维度校验和读侧同模型判定都靠它', async () => {
+    ctx.providers = [
+      embeddingProvider({ modelId: 'ark-code-latest', params: { embeddingModel: 'doubao-embedding-vision' } })
+    ];
+    const stored = await embedMemoryText(USER, 'mem-1', '我在杭州住');
+    expect(stored!.model).toBe('doubao-embedding-vision');
+  });
+
+  it('没配 embeddingModel 时退回 modelId——但不许凭空造一个默认模型名', async () => {
+    ctx.providers = [embeddingProvider({ params: null })];
+    const stored = await embedMemoryText(USER, 'mem-1', '我在杭州住');
+    expect(JSON.parse(String(ctx.fetches[0]!.init.body))).toEqual({ model: 'embed-v1', input: '我在杭州住' });
+    expect(stored!.model).toBe('embed-v1');
+  });
+
   it('候选范围仍是「本人私有加全局」，且只要启用的', async () => {
     await embedMemoryText(USER, 'mem-1', '我在杭州住');
     expect(ctx.wheres[0]).toMatchObject({ enabled: true });

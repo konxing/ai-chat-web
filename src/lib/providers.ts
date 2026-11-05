@@ -19,7 +19,10 @@ export const providerInputSchema = z.object({
   params: z
     .object({
       temperature: z.number().min(0).max(2).optional(),
-      maxTokens: z.number().int().min(1).max(64000).optional()
+      maxTokens: z.number().int().min(1).max(64000).optional(),
+      // 向量臂用的模型名。`AiProvider` 上没有第二个模型字段，所以约定放在这里；
+      // 空串不收，缺省时由 `embedding.ts` 退回 modelId——**不给默认模型名**。
+      embeddingModel: z.string().trim().min(1).max(128).optional()
     })
     .strict()
     .optional(),
@@ -29,6 +32,9 @@ export const providerInputSchema = z.object({
 
 export type ProviderInput = z.infer<typeof providerInputSchema>;
 
+/** provider 上那几个可选参数；`embeddingModel` 是向量臂的模型名，其余走对话。 */
+export type ProviderParams = { temperature?: number; maxTokens?: number; embeddingModel?: string };
+
 export interface PublicProvider {
   id: string;
   ownerType: ProviderOwner;
@@ -36,7 +42,7 @@ export interface PublicProvider {
   baseUrl: string;
   modelId: string;
   capabilities: Capability[];
-  params: { temperature?: number; maxTokens?: number } | null;
+  params: ProviderParams | null;
   enabled: boolean;
   isDefault: boolean;
   hasApiKey: boolean;
@@ -50,17 +56,29 @@ function normalizeCapabilities(value: unknown): Capability[] {
   return out.length ? Array.from(new Set(out)) : ['text'];
 }
 
-function normalizeParams(value: unknown): { temperature?: number; maxTokens?: number } | null {
+function normalizeParams(value: unknown): ProviderParams | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Record<string, unknown>;
-  const out: { temperature?: number; maxTokens?: number } = {};
+  const out: ProviderParams = {};
   if (typeof raw.temperature === 'number' && raw.temperature >= 0 && raw.temperature <= 2) {
     out.temperature = raw.temperature;
   }
   if (typeof raw.maxTokens === 'number' && raw.maxTokens >= 1 && raw.maxTokens <= 64000) {
     out.maxTokens = Math.floor(raw.maxTokens);
   }
+  if (typeof raw.embeddingModel === 'string' && raw.embeddingModel.trim()) {
+    out.embeddingModel = raw.embeddingModel.trim();
+  }
   return Object.keys(out).length ? out : null;
+}
+
+/** 向量臂真正问的那个模型名：`params.embeddingModel` 优先，缺省退回对话模型。 */
+export function embeddingModelOf(provider: {
+  modelId: string;
+  params?: unknown;
+}): string {
+  const params = normalizeParams(provider.params);
+  return params?.embeddingModel ?? provider.modelId;
 }
 
 export function encryptProviderKey(providerId: string, apiKey: string): string {
