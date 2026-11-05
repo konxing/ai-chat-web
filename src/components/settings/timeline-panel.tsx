@@ -11,16 +11,20 @@ import {
   CONTEXT_LABELS,
   ORIGIN_LABELS,
   TYPE_LABELS,
-  TYPE_ORDER,
   describeValidRange
 } from '@/lib/cognitive/memory-display';
-import type { MemoryType } from '@/lib/cognitive/policy';
+import {
+  FILTERABLE_EVENT_KINDS,
+  UNEMITTED_EVENT_KIND_NOTE,
+  describeEventKind
+} from '@/lib/cognitive/event-display';
+import type { CognitiveEvent, EventKind } from '@/lib/cognitive/event-extractor';
 import type { TimelineEvent } from '@/lib/cognitive/timeline';
 
 /**
  * 认知时间线那一屏（任务书 4.4 的界面）。
  *
- * 四条形状不是审美选择，是后端和任务书直接落下来的：
+ * 五条形状不是审美选择，是后端和任务书直接落下来的：
  * 一、开关放在界面上，闸门留在服务端。关着时这一屏连请求都不发（省一趟解密），
  *    而接口自己照样 409——界面上的「关」不是唯一那道闸，绕过去也读不到东西。
  * 二、时间有两种说法，不许混。`validity` 是用户说过的事情发生的时间，
@@ -31,6 +35,9 @@ import type { TimelineEvent } from '@/lib/cognitive/timeline';
  *    走的是与「记忆」屏同一对端点。同一个动作两处有入口是任务书点名的，经用户批准保留；
  *    代价用「用词完全一致」压到最小：按钮、标签、报错句和 `memory-panel.tsx` 一字不差。
  *    「更正」只改得了说法，改不了时间——PATCH 的请求体里没有时间和精度（`validation.ts:163`）。
+ * 五、筛选按事件类别（4.4），类别名由读侧派生层给（4.1），界面只念不判。
+ *    chips 只列这一批里真出现过的类别：12 类里这一屏不生成 3 类，把按钮硬摆出来就等于
+ *    让用户以为系统里有那些事件、只是这一批没筛出来——所以少掉那 3 类的理由另有一句挂在下面。
  */
 
 const TIMELINE_URL = '/api/account/cognitive/timeline';
@@ -41,7 +48,7 @@ const MEMORY_URL = (id: string) => `/api/account/cognitive/memories/${encodeURIC
 const CONTENT_MAX = 1000;
 const REASON_MAX = 500;
 
-type Filter = MemoryType | 'all';
+type Filter = EventKind | 'all';
 type EventAction = 'edit' | 'purge' | null;
 
 export function TimelinePanel() {
@@ -49,7 +56,7 @@ export function TimelinePanel() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
 
-  const [events, setEvents] = useState<TimelineEvent[]>([]);
+  const [events, setEvents] = useState<CognitiveEvent[]>([]);
   const [chats, setChats] = useState<Record<string, string>>({});
   const [capped, setCapped] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -69,7 +76,7 @@ export function TimelinePanel() {
     setLoading(true);
     try {
       const data = await apiFetch<{
-        events: TimelineEvent[];
+        events: CognitiveEvent[];
         chats: Record<string, string>;
         capped: boolean;
       }>(TIMELINE_URL);
@@ -187,7 +194,11 @@ export function TimelinePanel() {
     return '这条事件会从数据库里删掉，不可恢复。原对话记录不动。';
   }
 
-  const shown = filter === 'all' ? events : events.filter((event) => event.category === filter);
+  /** chips 只列这一批里真出现过的类别：点一下只会得到「还没有」的按钮，等于凭空多一类事件。 */
+  const presentKinds = FILTERABLE_EVENT_KINDS.filter((kind) => events.some((event) => event.kind === kind));
+  // 永久删掉某一类的最后一条后，这个筛选项自己会从 chips 里消失——留着它，这一屏就空得没有原因。
+  const activeFilter: Filter = filter !== 'all' && !presentKinds.includes(filter) ? 'all' : filter;
+  const shown = activeFilter === 'all' ? events : events.filter((event) => event.kind === activeFilter);
 
   return (
     <section className="panel p-5 sm:p-6">
@@ -217,23 +228,26 @@ export function TimelinePanel() {
       {enabled === true ? (
         <div className="mt-5 space-y-2.5">
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
-          {/* 一条事件都没有时不放筛选 chips：七个没人点的按钮摆在这儿，只会让人以为系统筛掉了内容。 */}
+          {/* 一条事件都没有时不放筛选 chips：没人能点的按钮摆在这儿，只会让人以为系统筛掉了内容。 */}
           {events.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {(['all', ...TYPE_ORDER] as Filter[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setFilter(item)}
-                  className={
-                    filter === item
-                      ? 'badge badge-green !px-2.5 !py-1 !text-[11.5px]'
-                      : 'chip !px-2.5 !py-1 !text-[11.5px]'
-                  }
-                >
-                  {item === 'all' ? '全部' : TYPE_LABELS[item]}
-                </button>
-              ))}
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-1.5">
+                {(['all', ...presentKinds] as Filter[]).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setFilter(item)}
+                    className={
+                      activeFilter === item
+                        ? 'badge badge-green !px-2.5 !py-1 !text-[11.5px]'
+                        : 'chip !px-2.5 !py-1 !text-[11.5px]'
+                    }
+                  >
+                    {item === 'all' ? '全部' : describeEventKind(item)}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-white/35">{UNEMITTED_EVENT_KIND_NOTE}</p>
             </div>
           ) : null}
           {capped ? (
@@ -248,8 +262,6 @@ export function TimelinePanel() {
               title="时间线还是空的"
               description="系统还没有记住任何内容。你在对话里说过的信息会先进入「记忆」，再出现在这里。"
             />
-          ) : shown.length === 0 ? (
-            <p className="text-[12px] text-white/40">这个类别还没有事件。</p>
           ) : (
             shown.map((event) => {
               const isOpen = openId === event.memoryId;
@@ -269,6 +281,9 @@ export function TimelinePanel() {
                         {event.content}
                       </span>
                       <span className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="badge badge-green !px-2 !py-0.5 !text-[10.5px]">
+                          {describeEventKind(event.kind)}
+                        </span>
                         <span className="chip !px-2 !py-0.5 !text-[10.5px]">{TYPE_LABELS[event.category]}</span>
                         <span className="chip !px-2 !py-0.5 !text-[10.5px]">{CONTEXT_LABELS[event.context]}</span>
                         <span

@@ -3,6 +3,8 @@ import { requireUser } from '@/lib/auth';
 import { getCognitivePreferences } from '@/lib/cognitive/preferences';
 import { MEMORY_LIST_MAX_ROWS, listMemories, listRevisionEdges } from '@/lib/cognitive/memories';
 import { deriveTimelineEvents } from '@/lib/cognitive/timeline';
+import { detectChanges } from '@/lib/cognitive/change-detector';
+import { annotateEventKinds } from '@/lib/cognitive/event-extractor';
 import { listChatTitles } from '@/lib/chats';
 
 export const runtime = 'nodejs';
@@ -18,7 +20,9 @@ export const runtime = 'nodejs';
  * 偏好读不出来时按关闭处理，和 manager.ts 的 `enabledModules` 同一个口径：
  * 认知引擎拿不准的时候宁可什么都不做。
  *
- * 事件本身由 `deriveTimelineEvents` 从记忆行 + 演化边派生，这里不新增任何事实。
+ * 事件本身由 `deriveTimelineEvents` 从记忆行 + 演化边派生，这里不新增任何事实；
+ * 每条事件的类别（任务书 4.1 那 12 类）由 `annotateEventKinds` 在同一批行上算出来，
+ * 它是纯函数——多一列不多发一次查询，也没有第二条事件流水账。
  * chats 和记忆列表一样做成旁表：MemoryDto 是服务层的形状，不该为一个界面编字段。
  * capped 说的是「这次读到的行数顶到了上限」——时间线只覆盖最近这一批记忆，
  * 更老的历史没被读回来，界面得能把这句话说出来，不然空出来的那段会被当成「那阵子没事发生」。
@@ -38,7 +42,11 @@ export async function GET(req: Request) {
       listMemories(user.id, { includeSuperseded: true }),
       listRevisionEdges(user.id)
     ]);
-    const events = deriveTimelineEvents({ memories, edges });
+    const derived = deriveTimelineEvents({ memories, edges });
+    // 任务书 4.1 的类别读的是 4.3 的观察，而那两样已经在这上面解密好了：
+    // 一次数据库查询都不多发。「新提起的事」有自己的 30 天窗口，所以 `now` 同样只来自服务端。
+    const observations = detectChanges({ now: new Date(), memories, edges }).observations;
+    const events = annotateEventKinds({ events: derived, observations });
     const chats = await listChatTitles(
       user.id,
       events.map((event) => event.chatId)

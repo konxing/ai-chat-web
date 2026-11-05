@@ -171,7 +171,7 @@ describe('客户端包边界', () => {
       const allowed =
         name === 'timeline-changes.tsx'
           ? ['@/lib/cognitive/change-display', '@/lib/cognitive/reflection-display']
-          : ['@/lib/cognitive/memory-display'];
+          : ['@/lib/cognitive/event-display', '@/lib/cognitive/memory-display'];
       expect(cognitive).toEqual(allowed);
       expect(withoutTypeImports).not.toContain('@prisma/client');
     }

@@ -41,17 +41,26 @@ vi.mock('@/lib/cognitive/preferences', () => ({
   }
 }));
 
-vi.mock('@/lib/cognitive/memories', () => ({
-  MEMORY_LIST_MAX_ROWS: 5,
-  listMemories: (userId: string, filters?: unknown) => {
-    db.listCalls.push({ userId, filters });
-    return Promise.resolve(db.memories.filter((row) => row.userId === userId));
-  },
-  listRevisionEdges: (userId: string) => {
-    db.edgeCalls.push(userId);
-    return Promise.resolve(db.edges);
-  }
-}));
+/**
+ * 只替掉两个 I/O 函数，枚举转换（`toDbMemoryType` 那一组）用真模块：
+ * 4.1 的类别要经 4.3 的观察，而观察在运行时要那些转换——在测试里手写一份映射
+ * 就是给同一套枚举造第二把尺子，替身和真库哪天不一致，测过的就只是替身。
+ */
+vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/memories')>();
+  return {
+    ...actual,
+    MEMORY_LIST_MAX_ROWS: 5,
+    listMemories: (userId: string, filters?: unknown) => {
+      db.listCalls.push({ userId, filters });
+      return Promise.resolve(db.memories.filter((row) => row.userId === userId));
+    },
+    listRevisionEdges: (userId: string) => {
+      db.edgeCalls.push(userId);
+      return Promise.resolve(db.edges);
+    }
+  };
+});
 
 vi.mock('@/lib/chats', () => ({
   listChatTitles: (userId: string, chatIds: Array<string | null>) => {
@@ -206,6 +215,7 @@ describe('读：事件按时间排好，来源带标题', () => {
       {
         memoryId: 'mem-1',
         category: 'project',
+        kind: 'PROJECT_STARTED',
         content: '我在用 Prisma',
         context: 'technicalProject',
         origin: 'explicit',
@@ -257,5 +267,79 @@ describe('读：事件按时间排好，来源带标题', () => {
 
     expect(payload.data.events).toHaveLength(5);
     expect(payload.data.capped).toBe(true);
+  });
+});
+
+/**
+ * 任务书 4.1 的 EventExtractor 接在这一层。
+ *
+ * 规则本身在 `cognitive-event-extractor.test.ts` 里逐条钉过，这里只钉接线这四件事：
+ * 一、类别是**内存里算出来的**：读的还是那两样（记忆行 + 演化边），一次查询都不多发；
+ * 二、类别跟着折叠走——一条版本链在时间线上是一个事件，也就只有一个类别；
+ * 三、「一段经历」是兜底而不是标签：`decision` 类型的行不冒充「一个决定」；
+ * 四、这一列会随「现在」变：同一条记忆在 30 天窗口内是「新提起的事」，出了窗口就只是「一段经历」，
+ *     所以这一组用例必须冻住时钟，否则它会自己某天变红。
+ */
+describe('事件类别（任务书 4.1）接在读侧派生层上', () => {
+  function kinds(payload: { data: { events: Array<{ kind: string }> } }): string[] {
+    return payload.data.events.map((event) => event.kind);
+  }
+
+  it('多出一列不多发一次查询：记忆、边、标题各读一遍', async () => {
+    db.memories = [memoryRow()];
+
+    const { payload } = await call();
+
+    expect(payload.data.events[0].kind).toBe('PROJECT_STARTED');
+    expect(db.listCalls).toHaveLength(1);
+    expect(db.edgeCalls).toHaveLength(1);
+    expect(db.titleCalls).toHaveLength(1);
+  });
+
+  it('改过口的目标是一个事件、一个类别：GOAL_CHANGED，旧说法不另占一条', async () => {
+    db.memories = [
+      memoryRow({ id: 'mem-1', type: 'goal', context: 'personalGoal', content: '我要考科目二', supersededAt: '2026-11-02T10:00:00.000Z' }),
+      memoryRow({ id: 'mem-2', type: 'goal', context: 'personalGoal', content: '改成考科目三', version: 2, recordedAt: '2026-11-03T10:00:00.000Z' })
+    ];
+    db.edges = [{ memoryId: 'mem-2', previousId: 'mem-1', action: 'superseded', createdAt: '2026-11-03T10:00:00.000Z' }];
+
+    const { payload } = await call();
+
+    expect(payload.data.events).toHaveLength(1);
+    expect(kinds(payload)).toEqual(['GOAL_CHANGED']);
+  });
+
+  it('决策类型的行落进「一段经历」：这一层没有确认状态，就不说「一个决定」', async () => {
+    db.memories = [
+      memoryRow({ id: 'mem-1', type: 'decision', content: '我选了 Prisma', confirmedAt: '2026-11-02T10:00:00.000Z' }),
+      memoryRow({ id: 'mem-2', type: 'emotion', content: '我这阵子很累', recordedAt: '2026-11-03T10:00:00.000Z' })
+    ];
+
+    const { payload } = await call();
+
+    expect(kinds(payload)).toEqual(['EXPERIENCE', 'EXPERIENCE']);
+    const serialized = JSON.stringify(payload.data);
+    for (const kind of ['DECISION_MADE', 'MILESTONE', 'CHALLENGE']) expect(serialized).not.toContain(kind);
+  });
+
+  it('30 天窗口内簇里的偏好是「新提起的事」，而同一簇里的第一版目标仍是「定下目标」', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-05T00:00:00.000Z'));
+    db.memories = [
+      memoryRow({ id: 'mem-1', type: 'preference', content: '我想学唱歌这件事', chatId: 'chat-1', recordedAt: '2026-10-20T00:00:00.000Z' }),
+      memoryRow({ id: 'mem-2', type: 'goal', content: '我在练唱歌这件事', chatId: 'chat-2', recordedAt: '2026-10-26T00:00:00.000Z' }),
+      memoryRow({ id: 'mem-3', type: 'preference', content: '我爱上唱歌这件事', chatId: 'chat-3', recordedAt: '2026-11-01T00:00:00.000Z' })
+    ];
+
+    try {
+      const { payload } = await call();
+      expect(kinds(payload)).toEqual(['INTEREST_EMERGED', 'GOAL_CREATED', 'INTEREST_EMERGED']);
+
+      vi.setSystemTime(new Date('2027-06-01T00:00:00.000Z'));
+      const later = await call();
+      expect(kinds(later.payload)).toEqual(['EXPERIENCE', 'GOAL_CREATED', 'EXPERIENCE']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
