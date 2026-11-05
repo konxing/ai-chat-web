@@ -18,6 +18,7 @@ type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   edges: [] as Row[],
+  citations: [] as Row[],
   evidence: [] as Row[],
   creates: [] as Row[],
   reads: [] as unknown[],
@@ -192,6 +193,20 @@ vi.mock('@/lib/prisma', () => ({
         }
         return Promise.resolve(rows.slice(0, take));
       }
+    },
+    reflectionCitation: {
+      findMany: ({ where, orderBy, take }: { where: unknown; orderBy?: unknown; take?: number }) => {
+        db.reads.push(where);
+        db.takes.push(take);
+        const direction = String((orderBy as Record<string, string> | undefined)?.createdAt ?? '');
+        const rows = db.citations.filter((row) => matches(row, where));
+        if (direction) {
+          rows.sort((a, b) =>
+            direction === 'desc' ? compare(b.createdAt, a.createdAt) : compare(a.createdAt, b.createdAt)
+          );
+        }
+        return Promise.resolve(rows.slice(0, take));
+      }
     }
   }
 }));
@@ -218,6 +233,7 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   db.rows.clear();
   db.edges = [];
+  db.citations = [];
   db.evidence = [];
   db.creates = [];
   db.reads = [];
@@ -781,6 +797,83 @@ describe('时间线的读侧接缝', () => {
     const theirs = await listRevisionEdges('user-b');
 
     expect(theirs).toEqual([]);
+  });
+});
+
+/**
+ * 记忆网络（任务书 8.2）的第二批边：一次反思同时引用了哪几条记忆。
+ *
+ * 这一读原来不存在——`prisma.reflectionCitation` 只有 `reflections.ts` 碰过，而那里
+ * 被 `cognitive-reflection-states.test.ts` 钉死了「只有两条反思接口能 import」。图那一屏
+ * 要的是同一张表的另两列，所以读落在 `memories.ts` 旁边：它是记忆行的出入口，
+ * 「谁和谁被一起引用过」说的还是记忆之间的事。
+ *
+ * 和演化边一样的三条口径：只挑要用的列、不解密任何东西、按调用者自己的 userId。
+ * 第三条在这里尤其要紧——`ReflectionCitation` 上有 `userId`，它是写入时从反思行带过来的，
+ * 拿它当隔离依据拿到的就是「这个人自己的共引用」，别人的反思连不上这个人的记忆。
+ */
+describe('共引用边（任务书 8.2 的第四批关系）', () => {
+  function citationRow(overrides: Row) {
+    return {
+      id: `cit-${(db.tick += 1)}`,
+      userId: USER,
+      reflectionId: 'ref-1',
+      memoryId: 'mem-1',
+      createdAt: new Date(Date.now() + (db.tick += 1)),
+      ...overrides
+    };
+  }
+
+  it('一次取回整批：只带两列，别人的引用一条也不给', async () => {
+    const { listCitationEdges } = await memories();
+    db.citations.push(
+      citationRow({ memoryId: 'mem-a' }),
+      citationRow({ memoryId: 'mem-b' }),
+      citationRow({ userId: 'user-b', memoryId: 'mem-c' })
+    );
+
+    const edges = await listCitationEdges(USER);
+
+    // 这条用例钉的是「哪些行、哪几列」。返回的先后不是契约（读侧为了截最近那批按时间倒序取，
+    // 图上的边先后由派生层自己排），所以这里排一下再比。
+    expect(edges.map((edge) => edge.memoryId).sort()).toEqual(['mem-a', 'mem-b']);
+    for (const edge of edges) {
+      expect(Object.keys(edge).sort()).toEqual(['memoryId', 'reflectionId']);
+    }
+  });
+
+  it('memoryId 空着的引用不是边：一条连着「没有记忆」的线画不出来', async () => {
+    const { listCitationEdges } = await memories();
+    db.citations.push(
+      citationRow({ memoryId: null }),
+      citationRow({ memoryId: 'mem-a' })
+    );
+
+    const edges = await listCitationEdges(USER);
+
+    expect(edges.map((edge) => edge.memoryId)).toEqual(['mem-a']);
+  });
+
+  it('顶到上限时留的是最近这批：图上活着的节点是最近的记忆，太老的引用连不上它们', async () => {
+    const { listCitationEdges, MEMORY_LIST_MAX_ROWS } = await memories();
+    const base = Date.now();
+    for (let index = 0; index <= MEMORY_LIST_MAX_ROWS; index += 1) {
+      db.citations.push(
+        citationRow({
+          id: `cit-${index}`,
+          reflectionId: `ref-${index}`,
+          memoryId: `mem-${index}`,
+          createdAt: new Date(base + index)
+        })
+      );
+    }
+
+    const edges = await listCitationEdges(USER);
+
+    const memoryIds = edges.map((edge) => edge.memoryId);
+    expect(memoryIds).toHaveLength(MEMORY_LIST_MAX_ROWS);
+    expect(memoryIds).not.toContain('mem-0');
+    expect(memoryIds).toContain(`mem-${MEMORY_LIST_MAX_ROWS}`);
   });
 });
 

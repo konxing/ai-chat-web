@@ -1389,5 +1389,76 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
   - 一条都不剩时 `deleteMany({ where: { userId, id: { in: [] } } })` 被 Prisma 折成 `DELETE FROM "MemoryItem" WHERE "userId" = $1 AND 1=0`——**带了 `userId`**。上面 P1 那条探针（丢掉 `userId` 就 0 红）在真库层也没留缝：空列表不会退化成「删全表」；
   - `memoryWritePaused` 落成 `boolean NOT NULL`、默认 `false`；`create → 读回 false → update true → 读回 true` 往返正确，`ALTER TABLE ... ADD COLUMN ... DEFAULT false` 在 PostgreSQL 17 上是元数据改动、当场返回。库里那唯一一行真实偏好读回来是 `false`——暂停这件事今天没人按过。
 
+## 8.2：记忆网络——把已经在库里的关系画第二次（11-05 片 c）
+
+任务书 8.2 要的是「记忆之间的关联可视化」。这一片**零迁移、零新表、零写字节**：库里已经有三种关系在写（`MemoryRevision` 的演化边、`MemoryItem.chatId` 的同场对话、`ReflectionCitation` 的同条洞察引用），已经有三屏在读它们（记忆、时间线、洞察）。这一片做的事是把**同一批行**画第二次，所以它没有自己的数据、没有自己的真相，也就不会出现「图上的关系和库里不一致」这种状态。
+
+### 五个决定，每个都挡掉一件具体的坏事
+
+| 决定 | 理由 | 挡掉的后果 |
+|---|---|---|
+| **不建 `MemoryRelation`** | 2a 那次阈值校准的结论就是不建表：一旦为画图加一张边表，它的维护者只能是猜 | 「第二真相」。这条由两条静态用例钉着（`cognitive-memory-graph.test.ts:371-386`：`schema.prisma` 里不许出现 `model MemoryRelation`，`src/` 里不许出现 `prisma.memoryRelation` 这种属性访问）——哪天有人为了画得好看去加表，这两条先红 |
+| **同 `context` 只做分组，不成边** | 七个主题乘两百行是一把毛线球：画出来好看，读出来信息量为零 | 主题在界面上以**点的颜色**出现（`GRAPH_CONTEXT_COLORS`），不以线的形式出现。图例里没有「同一主题」这一种线，display 用例专门钉这一点 |
+| **星形，不是两两全连** | 同一场对话里 50 条记忆，真实关系是「都发生在那一场对话」，不是「两两各有一层关系」 | 全连给 1225 条边，星形给 49 条，而两种画法的可读性差别是零。锚点取这段对话里**最早**记下的那条（按 `recordedAt`，不是数组第一条） |
+| **闸门是两道：`associationEnabled` 且 `memoryEnabled`** | 前者管这一屏开不开，后者管「能不能读 `MemoryItem` 的正文」 | 只查前者的话，关掉长期记忆后这里照常返回记忆内容——等于给它自己开了个后门。`graphGates`（`route.ts:53`）一次读一遍偏好，两道闸共用，读不出来按**关闭**处理 |
+| **这一屏只读** | 纠正、永久删除、归档在「记忆」和「认知时间线」两屏各有一个入口 | 同一个动作第三个入口 = 第三套文案。`cognitive-memory-graph-panel.test.ts` 用「PATCH 只出现一次」+「没有记忆写端点」两条钉住 |
+
+### 代码事实（四个新文件、一处新读、三处接线）
+
+| 环节 | 位置 | 只干什么 |
+|---|---|---|
+| 派生纯函数 | `src/lib/cognitive/memory-graph.ts:77`（`deriveMemoryGraph`） | 输入三份已经在库里的行，输出节点/边/分组/预算。**不碰 prisma、不解密**。节点先按 `recordedAt→id` 定序再截最近 120 条（`:79`）；三种边按「演化 → 同场 → 共引用」的优先级生成，同一条 `push`（`:85-91`）做双向去重 |
+| 引用行的定序 | `memory-graph.ts:108` | 读回来的那批是「最近 200 条、时间倒序」，**那个次序不是这里的输入契约**。派生层自己按 `(reflectionId, memoryId)` 排一次，否则上限一截、边的先后跟着晃（这条是 P2 探针实测的，见下面） |
+| 第四批关系的读 | `memories.ts:540`（`listCitationEdges`） | `where: { userId, memoryId: { not: null } }`、`take: 200`、只 `select` 两列。放在 `memories.ts` 而不是 `reflections.ts`：`cognitive-reflection-states.test.ts` 那条导入禁令不许别的模块 `import` 洞察服务，而「记忆之间的关系」本来也是记忆这一侧的事 |
+| 浏览器侧的词表 | `memory-graph-display.ts` | 只有 `import type`，零运行时依赖。线的三种说法、点的七种颜色、`isGraphDrawable`、`describeNotAGraph`、`describeGraphBudget`、`truncateNodeLabel` 全在这一个文件，界面不许自己编句子 |
+| 只读 API | `src/app/api/account/cognitive/graph/route.ts:27` | 三个读并发（`Promise.all`），派生，会话标题走旁表、空图时一次都不发（`:45`）。返回体只有图 + `chats`，没有正文之外的列 |
+| 界面 | `src/components/settings/memory-graph-panel.tsx:62` | 手写 SVG 圆周布局（`CANVAS = 360`，`:44`），不引任何图布局库。被取代的旧说法仍画出来（它就是那条边的另一端），但降透明度 + 虚线描边 + 「已被新说法取代」标记 |
+| 设置页接线 | `settings-workspace.tsx:87` / `:351` / `:758` | Tab 联合类型、导航项、渲染分支三处，和「时间线」「洞察」两屏同一形状 |
+
+### 空画布不许装成有意义
+
+这是这一屏最容易骗人的地方：任何三个点连两根线，看起来都「像个网络」。三道闸：
+
+1. **只有一个判据**：`isGraphDrawable`（display `:60`）——有线**且**不少于三个点。判不过就退回记忆列表，界面里不许再写一份「有线就画」（`PANEL_CODE` 里连 `edges.length >` 这个比较都不许出现）。
+2. **句子只有一个来源**：画不出来时念 `describeNotAGraph(节点数, 边数)`（display `:69`），三句按真实条数分叉——零条记忆 / 有点但零根线 / 「这两个点之间确实有关系，可三个点以上的连线才叫网络」。界面里再抄一份，两处就会漂成两个说法，所以面板用例正向查 `describeNotAGraph(` 的调用、反向查那三句话**不许**出现在面板里。
+3. **位置不携带含义，并且明说**：圆周布局的唯一目的是不重叠，界面上那句「点的位置只为了铺开不重叠，不表示任何东西」是硬要求；用例同时检查 `Math.cos` / `Math.sin` 在（证明布局是手写的）且 `package.json` 里没有 d3 / cytoscape / vis-network / react-force-graph / viz.js（证明没有哪个力学模型在偷偷决定谁挨着谁）。
+
+预算截断同理：`capped` 时说的是**真实条数**（`totalNodes` / `totalEdges`），不是画布上那 120 个点——「这里画不全：你一共有 260 条记忆，画布最多放 120 个点，显示的是最近那批」。display 与 derive 两处各存一份上界常量，由一条 drift 用例比对，防它们悄悄分家。
+
+### 先红与变异探针
+
+先红：本片新增 **76 条**用例——四个新文件 26 / 19 / 12 / 16 条，外加 `cognitive-memories.test.ts` +3 条（共引用边那一批）。红法分别是：命名导入 `listCitationEdges` 时报 `does not provide an export`；`Cannot find module '@/app/api/account/cognitive/graph/route'`（12 条一起红）；面板那条红在 `readFileSync` 找不到 `memory-graph-panel.tsx`。
+
+探针逐个当场回滚，全程只用字面替换，不碰 `git checkout` / `git stash`。
+
+| 探针 | 结果 |
+|---|---|
+| P1 撤回的说法也摆进图（去掉 `origin === 'retracted'` 过滤） | **1 红**：「撤回的说法不摆进图——只剩一条边连向它就是把『已撤回』画成『还在用』」 |
+| P2 引用行不再定序（去掉 `.sort(compareCitations)`） | **1 红**，且**这就是这片真正的 bug**：边的先后原本悄悄依赖读回来的次序，而边正是按 240 的上限**按先后截**的——同一份库，读的顺序一变，图上少哪几根线就跟着变。补了「传入次序打乱，边一条不多一条不少、先后也一样」这条用例后，变异当场红 |
+| P3 星形锚点改成这段对话里**最晚**那条 | **2 红**（「50 条给 49 条边」+「锚点是按 `recordedAt` 最早的那条，不是数组第一条」） |
+| P4 去重键不再做双向归一（`from\u0000to` 直接拼） | **1 红**，红因值得记：不是同一对记忆连出两根 `update`，而是 `sameChat` 把已被 `update` 连过的那一对**又补了一根**。跨来源的去重靠的正是那个归一 |
+| P5 `totalNodes` 报画布上的条数而非真实条数 | **1 红**：「节点超过上限时留最近那批，并说 capped」。注意 display 那条「报的是真实条数不是画布上的点数」的用例**挡不住这个**——它是手搓的图对象，只有派生层这条用例在管 |
+| P6 `isGraphDrawable` 三个点放宽成两个 | **1 红**：「点不足三个就不画：两个点加一根线说明不了『网络』这两个字」 |
+| P7 引用读丢掉 `memoryId: { not: null }` | **1 红**：「memoryId 空着的引用不是边：一条连着『没有记忆』的线画不出来」 |
+| P8 `memoryEnabled` 硬编码成 `true` | **1 红**：「关联开着但长期记忆关着时也不许读：图是它的派生视图，不能当后门」 |
+| P9 空图也发 `listChatTitles` | **1 红**：「一行记忆都没有时返回空图，不报错」那条同时断言标题查询**零次** |
+| P10 引用读改成 `createdAt: 'asc'` | **1 红**：「顶到上限时留的是最近这批：图上活着的节点是最近的记忆，太老的引用连不上它们」 |
+| P11 面板绕过判据，自己写 `graph.edges.length > 0` | **1 红**，但**这条挖出了一个断言漏洞**：原来那条反向断言是 `/edges\.length\s*>\s*0\s*&&/`，只挡得住 `… > 0 && …` 这一种写法，`graph.edges.length > 0;` 从它眼皮底下过去。第一轮的 1 红其实是被正向的 `toContain('isGraphDrawable(')` 抓住的。已收紧为 `/edges\.length\s*>/`（这一屏比较边数的地方只许是那次函数调用），收紧后干净源码 16 条全绿、同一条变异重跑仍 1 红 |
+
+### 一条 tsc 抓到的、测试体系抓不到的
+
+120 条相关用例全绿之后 `npx tsc --noEmit` 报了两条：`memory-graph.ts:2` 从 `./memories` 导入 `MemoryType`，而 `memories.ts` 只是从 `./policy` **转 import** 了这个类型、并没有 `export` 它（`policy.ts:40` 才是声明处）；下游 `memory-graph-panel.tsx` 跟着报 `TS7053`（拿 `MemoryType` 去索引 `Record<…, string>`）。
+
+这不是孤例，是这套体系的固定盲区：**vitest 走 esbuild，抹掉类型但不核对类型**。所以「先红—绿—探针—全绿」这条链走完了仍然必须跑一次 `tsc`，两者不互相替代。改法是让 `memory-graph.ts` 直接从 `./policy` 取这个类型（那一行本来就在从 `policy` 取 `MEMORY_CONTEXTS`）。
+
+### 这一片的边界（含无法验收项）
+
+- **界面没有真渲染验收**：面板过了类型检查，16 条静态断言钉住文案、判据、只读、包边界。但本机没有 jsdom，这一屏也没起服务真渲染过——SVG 在浏览器里到底画成什么样、点够多时标签会不会糊在一起，**全部未验收**。真渲染归片 g。
+- **今天他库里这张图画不出来**：`MemoryItem` 2 行、`MemoryRevision` 0 行（11-05 片 a 那次回滚探针实测的数，本片没有重新查库）。2 个点 0 根线走的是 `describeNotAGraph` 那句「现在还不是一张图：你的 2 条记忆之间没有更新边，也没有共来源会话。图只从已经存在的关系里推导，不猜。」——这不是 bug，是这一片诚实的样子。
+- **共引用边今天有没有货，没查**：`ReflectionCitation` 的行数这次没实测。它有没有边，和上面那条一样，要等他真的攒出洞察并且洞察引用落到记忆之后才知道。
+- **星形不是全连，所以图上「A 和 C 有关系」这件事看不见**：同一场对话里的 50 条记忆在图上是一朵梅花，不是网。这是 P3 那个决定的直接后果，也是它换来的东西——1225 根线读不出任何一条线说什么。
+- **上限是两份常量**：`memory-graph.ts:27-28` 和 display 各写了一遍 120 / 240，靠 drift 用例比对。改一处忘另一处会红，但红的是用例不是编译——这是刻意选择（浏览器包里不该 import 服务端的数），不是洁癖。
+- **`associationEnabled` 第一次有了消费者**：在这之前它只是库里的一个布尔值，没有任何一屏读它。这一片是它的第一个消费者，所以「打开这个开关会多出什么」这个问题从今天起才有答案。
+
 
 

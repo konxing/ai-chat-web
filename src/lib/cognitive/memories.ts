@@ -526,6 +526,28 @@ export async function listRevisionEdges(userId: string): Promise<TimelineEdge[]>
 }
 
 /**
+ * 记忆网络要的全量共引用边：同一次反思引用过的记忆，两两之间才有线。
+ *
+ * 读的是 `ReflectionCitation`，但放在这里而不是 `reflections.ts`：那张表只有反思那两条
+ * 路由能 import（`cognitive-reflection-states.test.ts` 钉着），而图那一屏要的是
+ * 「记忆和记忆被一起引用过」这层关系，它说的还是记忆之间的事。
+ *
+ * `memoryId` 在 schema 上可空（引用一条已被永久删除的记忆时留的是空），空值不成边，
+ * 所以过滤交给数据库的 where，返回的每一行都连得上一个真实的节点。
+ * `orderBy` 取的是**最近**那批：节点那侧留下的同样是最近的记忆行，按最早截会正好把
+ * 连得上的边全丢掉。边在图上的先后顺序由派生层自己排，不靠读的次序。
+ */
+export async function listCitationEdges(userId: string): Promise<Array<{ reflectionId: string; memoryId: string }>> {
+  const rows = await prisma.reflectionCitation.findMany({
+    where: { userId, memoryId: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    take: MEMORY_LIST_MAX_ROWS,
+    select: { reflectionId: true, memoryId: true }
+  });
+  return rows.map((row) => ({ reflectionId: row.reflectionId, memoryId: row.memoryId as string }));
+}
+
+/**
  * 把后台算好的向量写进那一行。
  *
  * 单独一步、不进写记忆那个事务：向量是一趟可选的出站调用，端点慢了或挂了

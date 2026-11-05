@@ -15,6 +15,7 @@ import {
   Lock,
   LogOut,
   Mail,
+  Network,
   Plus,
   Scale,
   Shield,
@@ -43,6 +44,7 @@ import { MemoryPanel } from './memory-panel';
 import { MemoryPolicyPanel } from './memory-policy-panel';
 import { DecisionPanel } from './decision-panel';
 import { TimelinePanel } from './timeline-panel';
+import { MemoryGraphPanel } from './memory-graph-panel';
 import { ReflectionPanel } from './reflection-panel';
 
 interface AccountUser {
@@ -82,6 +84,7 @@ type Tab =
   | 'memory'
   | 'policy'
   | 'timeline'
+  | 'memoryGraph'
   | 'decisions'
   | 'reflections'
   | 'about';
@@ -345,6 +348,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['memory', '记忆', Brain],
               ['policy', '记忆策略', SlidersHorizontal],
               ['timeline', '认知时间线', History],
+              ['memoryGraph', '记忆网络', Network],
               ['decisions', '决策', Scale],
               ['reflections', '洞察', Lightbulb],
               ['about', '安全说明', Lock]
@@ -750,6 +754,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'policy' ? <MemoryPolicyPanel /> : null}
 
           {tab === 'timeline' ? <TimelinePanel /> : null}
+
+          {tab === 'memoryGraph' ? <MemoryGraphPanel /> : null}
 
           {tab === 'decisions' ? <DecisionPanel /> : null}
 
