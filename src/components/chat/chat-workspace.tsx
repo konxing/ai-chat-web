@@ -38,7 +38,13 @@ import {
   X
 } from 'lucide-react';
 import { apiFetch, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
-import { CITATION_NOTE, citationHint, citationRows, type CitationRow } from '@/lib/cognitive/citation-display';
+import {
+  CITATION_LOAD_FAILED_NOTE,
+  CITATION_NOTE,
+  citationHint,
+  citationRows,
+  type CitationRow
+} from '@/lib/cognitive/citation-display';
 import type { MemoryDto } from '@/lib/cognitive/memories';
 import type { ConfidenceBand } from '@/lib/cognitive/confidence';
 import { cn } from '@/lib/cn';
@@ -1457,7 +1463,7 @@ function CitationNote({
         <div className="mt-1.5 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3.5 py-2.5">
           <p className="text-[11px] leading-relaxed text-white/35">{CITATION_NOTE}</p>
           {failed ? (
-            <p className="mt-1.5 text-[11.5px] text-white/40">这条清单没读到，稍后再试试</p>
+            <p className="mt-1.5 text-[11.5px] text-white/40">{CITATION_LOAD_FAILED_NOTE}</p>
           ) : rows ? (
             <ul className="mt-1.5 space-y-2">
               {rows.map((row) => (

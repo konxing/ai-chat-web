@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 import {
+  CITATION_LOAD_FAILED_NOTE,
   CITATION_MISSING_LABEL,
   CITATION_NOTE,
   citationHint,
@@ -96,6 +97,19 @@ describe('措辞逐字钉住', () => {
   it('展开区顶部那句说的是「带上了」，不是「模型依据它回答」', () => {
     expect(CITATION_NOTE).toBe('这只是这一轮随问题一起交给模型的资料，不代表模型按它回答了。');
     expect(CITATION_MISSING_LABEL).toBe('这条记忆已不在你的有效记忆里（可能已被更新、删除或归档）');
+  });
+
+  it('点开时那一次读失败的那句也由这一份来源给出', () => {
+    expect(CITATION_LOAD_FAILED_NOTE).toBe('这条清单没读到，稍后再试试');
+  });
+
+  it('组件里不许再留这句话的字面量——一句只有来源一份', () => {
+    const source = readFileSync(
+      path.resolve(process.cwd(), 'src', 'components', 'chat', 'chat-workspace.tsx'),
+      'utf8'
+    );
+    expect(source).not.toContain('这条清单没读到');
+    expect(source).toContain('CITATION_LOAD_FAILED_NOTE');
   });
 });
 

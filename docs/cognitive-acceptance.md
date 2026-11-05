@@ -745,7 +745,7 @@ schema 里**没有**第二个模型字段能给向量用（`AiProvider` 的列�
 | `MemoryItem` | **2 行**（11-05 复核：两行都归 konxing、都是 `GENERAL`） | 都是 `type=GOAL` / `context=GENERAL` / `origin=EXPLICIT` / `version=1`，`recordedAt` 2026-11-03T17:32:58Z（同一轮写的两条） |
 | `MemoryRevision` | **0 行** | 真库里从没形成过一条演化边——门槛 2 那条「版本链整条删掉」在库层仍无对象可验 |
 | `MemoryItem.embeddingCiphertext` | 两行都是 `NULL` | 向量一次都没写成功过，`embeddingModel` 同样 `NULL`——5e 卡的正是这里 |
-| `CognitiveTask` | **3 行，全 `DEAD`、`attempts=3`** | `kind=MEMORY`，`lastErrorCode` 三条都是 `PREFERENCES_UNAVAILABLE`，`createdAt` 2026-11-04T10:54–10:56Z（本地 18:54–18:58） |
+| `CognitiveTask` | **3 行，全 `DEAD`、`attempts=3`**（**片 g 已清，现在 0 行**，判词与安全性见「片 g」第八节） | `kind=MEMORY`，`lastErrorCode` 三条都是 `PREFERENCES_UNAVAILABLE`，`createdAt` 2026-11-04T10:54–10:56Z（本地 18:54–18:58） |
 | `DecisionRecord` / `DecisionOutcome` | 0 行 / 0 行 | 表已存在（迁移已执行） |
 | `ReflectionRecord` / `ReflectionCitation` | 0 行 / 0 行 | 表已存在（迁移已执行） |
 | `CognitivePreference`（他这个账号） | 一行 | `memoryEnabled=true`、`timelineEnabled=true`，其余五个开关关着，`reflectionSweptAt=NULL` |
@@ -777,6 +777,7 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
 **现在的状态**：两支迁移执行完之后，同一个 `findUnique` 我实测能读回那一行（上表最后一条就是证据），
 所以这个故障的成因已经消失。但**三条 `DEAD` 行是历史尸体，不会自己复活**，那两轮记忆抽取的欠账真的没了——
 库里那两行记忆是更早（11-03）落下的，不是这三条任务做出来的。**要不要清掉这三行、以及要不要给已存在的记忆补向量，是他判的事，我没动**。
+（**11-05 片 g 更新**：他后来把权限全交给我，这三行清掉了，`taskCount` 实测 0；补向量今天做不了也没做，两行记忆的 `embeddingCiphertext` 仍都是空。逐条见「片 g」第八节。）
 
 ### 这条根因暴露的一个通用约束（还没落成代码）
 
@@ -938,13 +939,15 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
   不抛错，产出的是「AI 主动洞察」＋说明句＋「开关状态未知」——即 `enabled === null` 那一支，也就是任何请求返回之前用户看到的第一个画面。
   这个探针跑完即删，没进提交（渲染它需要把 esbuild 的 JSX 打到 automatic，仓库里没有 DOM 测试环境这一既成事实照旧）。
   **仍无法验收**：行内排布、三个按钮点下去、依据展开、六个区的空区不渲染、真数据下的换行。
+  （**11-05 片 g 更正**：「切不动 tab」这条天花板找到了原因并被绕过——`initScript` 要用**语句体**给 `requestAnimationFrame` 打 `setTimeout` 补丁，
+  箭头函数那一支会被静默忽略；补上之后 Suspense 边界 hydrate、按钮全挂上 `__reactProps`。**这一屏的交互今天还是没走**，只是从「量不了」变成「量得了」。）
   而且今天就算界面能动也只见空态——`reflectionRecord` / `reflectionCitation` / `decisionRecord` 三张表 11-04 已随迁移落库但实测 0 行（见「真库实况」），
   `reflectionEnabled` 默认关，路由在碰到表之前就 409。
 
 ### Phase 6 仍然无法验收的部分
 
 - **界面只量到「入口在 + 挂得上」**：6-F 那一屏接进了设置页，11-04 起服务登进去第一次看到它——导航里真有「洞察」，
-  `renderToStaticMarkup` 渲 `ReflectionPanel` 不抛错。但**这台浏览器替身（0×0、hidden、rAF 不回调）点不动那个 tab**，
+  `renderToStaticMarkup` 渲 `ReflectionPanel` 不抛错。但**这台浏览器替身（0×0、hidden、rAF 不回调）点不动那个 tab**（**11-05 片 g 已推翻这条限制，办法见「片 g」第五节；这一屏本身仍未走**），
   所以行内排布、三个按钮、依据展开、空区不渲染全部仍未验（过程与物证见上一节 6-G）。
   像素与交互这一层从来不在 vitest 的能力范围内（跑在 node，仓库里没有 jsdom 和渲染器），
   所以这一屏能验的推到「纯函数 + 源码静态断言 + 初次挂载」三层，剩下的只能他自己在真浏览器里看一眼。
@@ -1051,7 +1054,7 @@ P5 和 P7 落的是同一条规律，也不是他自己选的三条判词里的�
 | 收起态 | `这一轮带上了 N 条长期记忆`（N=0 时整句不渲染，界面什么都不摆） |
 | 展开区顶部 | `这只是这一轮随问题一起交给模型的资料，不代表模型按它回答了。` |
 | 每行说明 | `记于 2026年11月3日 · 可信度中 · 来自《关于项目》`（日期走 6-G 那套「年月日」，标题拿不到就不提来源） |
-| 那条已经不在了 | `这条记忆已不在你的有效记忆里（可能已被更新或删除）` |
+| 那条已经不在了 | `这条记忆已不在你的有效记忆里（可能已被更新、删除或归档）`（**片 g 更正**：这一行原来抄的是 11-04 那批的字面「（可能已被更新或删除）」，7.2 那一片给括号里补了「归档」，见下面 :1135 与 :1155；批准表本身没跟着改，所以这张表第一次和实现不一致） |
 
 **偏差一**：批准表里写的是「可信度：中」，实现用的是仓库里已有的 `CONFIDENCE_BAND_LABELS`（「可信度中」，没有冒号）。
 同一件事不该有两套词，所以选了既有那套；要回到批准表的原字面，改的是 `memory-display.ts` 那份标签，全项目一起变。
@@ -1079,6 +1082,8 @@ P5 和 P7 落的是同一条规律，也不是他自己选的三条判词里的�
 
 - **界面没有真渲染验收**：这一片没起服务，也没点过。`chat-workspace.tsx` 里那段只过了类型检查，
   「点开能看到正文、收起不占地方、刷新就没了」这三句今天是**推断**，不是实测。他要哪一条变成实测，需要他起服务（我不启动他的服务）。
+  （**11-05 片 g 更新**：服务起了、点了、跑完就关。量到的是**负例**——一轮没注入记忆的对话里那个控件根本不摆，
+  与 `citationHint(0) === ''` 一致；**正例与读失败那句仍未出现**，原因写在「片 g」边界第一条，不是补种 `MemoryAccessTurn` 能补的。）
 - **刷新即消失**：甲不持久化，所以历史气泡在重新载入后没有引用提示——包括那一轮真的带过记忆。这不是 bug，是甲的定价。
 - **只有成功帧带清单**：`partial`（中断）和 `error` 两帧没有 `memoryIds`。中断那一轮其实可能真注入了记忆，界面不说有也不说没有。
 - **只有记忆模块产出 id**：`emotion` / `reflection` / `decision` 这几块今天不填 `memoryIds`，
@@ -1781,4 +1786,133 @@ B 臂那一行（`scripts/cognitive-eval/report.ts:179`）本片**没有**改变
 - 那 5 条「带情境信号」只说明分类器给出了 winner，**不等于**写入策略允许它们落库——策略那一层（`MemoryPolicyService` + 每用户开关）今天没在真实语料上重放过。
 - 长度分布决定了这批数的天花板：一条 7604 字的消息把词面集合总量撑到 2570，而中位只有 11 个词——这种偏斜下算出来的任何重叠率都更该被当成「分布观察」，不是「指标」。
 - **行号会漂**：`context-classifier.ts:168` / `temporal.ts:45` / `retrieval.ts:83,87` / `memory-module.ts:45` / `metrics.ts:126,151` / `fixture-types.ts:16` / `report.ts:179,227` / `chats.ts:68-70` / `files.ts:5` 都是今天逐一 `grep` 复核过的。
+
+## 片 g：Phase 1–6 的三条残项收口 + 第一次「点得动」的真渲染（11-05 他把权限全给我那一阵）
+
+计划里这一片只有三件事：那句没批过的读失败文案抽出来逐字钉住、三条 `DEAD` 行给个建议并执行、真渲染验收四条路径。
+前两件是纸面活，第三件是这片真正的分量——**11-04 那份文档说过「这台浏览器点不动」，今天点动了**，
+所以有好几行「界面没有真渲染验收」从今天起可以改成实测。
+
+### 一、代码事实（三处，一共 20 行）
+
+| 位置 | 改了什么 |
+|---|---|
+| `src/lib/cognitive/citation-display.ts:25-29` | 新增 `CITATION_LOAD_FAILED_NOTE = '这条清单没读到，稍后再试试'`，和上面两句同一份来源 |
+| `src/components/chat/chat-workspace.tsx:41-47`、`:1466` | 那处原本把句子写成组件里的裸字面量，现在 import 常量、渲染 `{CITATION_LOAD_FAILED_NOTE}` |
+| `tests/unit/cognitive-citation-display.test.ts:102-113` | 8 → **10** 条：一条逐字钉住字面，一条 `readFileSync` 读组件源码，要求它**不含**「这条清单没读到」且**含**那个常量名 |
+
+为什么值得为一句话做抽常量：这一屏三句话里，前两句（`CITATION_NOTE` / `CITATION_MISSING_LABEL`）本来就是常量、有用例逐字守着，
+唯独这句留在 JSX 里——它是这一屏唯一一处「东西没拿到」的坦白，最不该由谁顺手改着玩。第二那条用例守的是**只有一个来源**，
+不是守字面：字面改了就红，两处各留一份也会红。
+
+### 二、先红（把两处实现退回、用例留着，实测跑了一遍）
+
+`Tests 2 failed | 8 passed (10)`。红的正是这两条新用例，理由各不相同：
+一条 `expected undefined to be '这条清单没读到，稍后再试试'`（命名导入不存在时 vitest 不报加载失败，只给 `undefined`——
+这跟 8.2 那一片「整文件加载失败」不一样，因为这次模块本身存在，缺的只是那一个导出）；
+一条 `expected '<组件源码>' not to contain '这条清单没读到'`。
+恢复实现后同一个文件 10 条全绿。
+
+### 三、变异探针（三条，各自杀各自那条，全部当场逐字回滚）
+
+| 探针 | 改法 | 结果 |
+|---|---|---|
+| G-P1 | 常量末尾少一个「试」字 | 1 红（`:103` 逐字用例），红的理由就是那两个字面差一个字 |
+| G-P2 | 组件里 `{CITATION_LOAD_FAILED_NOTE}` 换回内联字面量（import 留着） | 1 红（`:111` 「一句只有来源一份」）。这条证明的不是字面，是**只有一份** |
+| G-P3 | 把 `citation-display.ts` 的导出改名（组件与用例都还在引旧名） | vitest 1 红（`expected undefined to be …`）**且** `npx tsc --noEmit` 两处 TS2724 |
+
+G-P3 值得单独记一句：接线断了的时候，逐字用例只会说「拿不到值」，**是类型门禁在报「谁没接上」**（`chat-workspace.tsx:42` 与用例 `:15` 各一条）。
+这条片子里第一次出现「同一处断裂被两层各说一遍」——不是冗余，用例那层不看引用点、tsc 那层不看字面。
+三条探针回滚后 `git diff --stat` 与本片目标逐字一致，重跑该文件 10 条绿。
+
+### 四、口径核实（计划给的两句，一句改文档、一句本来就没写歪）
+
+- **`memory-display.ts:82-84` 是「可信度高/中/低」，没有冒号**——今天真渲染量到过：那一行界面上摆的就是无冒号那一套。
+  文档里唯一的「可信度：中」在 `:1059`，那一行本来就是**标注偏差**（批准表 vs 实现），不是把带冒号那套当成实现字面，所以不改。
+  要回到批准表原字面，动的是 `memory-display.ts` 那份标签，全项目一起变——**仍等他判，我没动**。
+- **顺手抓到一处真错**：`:1054` 那张 8.2 文案表里「那条已经不在了」那行还抄着 11-04 那批的字面「（可能已被更新或删除）」，
+  而 7.2 那一片已经把实现改成「（可能已被更新、删除或归档）」（`:1130`、`:1150` 都记过），批准表没跟着改。
+  现在把 `:1057` 更正成当前实现字面并注明来源，**表本身的历史没被抹掉**。
+
+### 五、真渲染：那把锁是怎么开的
+
+11-04 的结论（6-G 那节，`:933-941`，以及「Phase 6 仍然无法验收的部分」`:949-950`）是「这台浏览器替身 0×0、`visibilityState=hidden`、`requestAnimationFrame` 一次都不回调，
+所以流式 Suspense 边界永远不 hydrate，切不动 tab、点不动按钮」。**这个结论被推翻了，办法不在应用侧，在注入脚本的写法上**：
+
+- 浏览器替身的 `navigate_page` 支持 `initScript`。**箭头函数那一支会被静默接受但从不执行**（我按箭头函数写了第一次，实测 `rafOk:false`、13 个按钮 0 个挂 fiber，等于没注入）；
+  **写成普通语句**（直接给 `window.requestAnimationFrame` / `cancelAnimationFrame` 赋值，rAF 用 `setTimeout(cb, 16)` 兜）才真的生效。
+- 补上 rAF 之后，React 就把 `#S:0` 那个边界 hydrate 了：13 个按钮 13 个挂上 `__reactProps`，`click()` 切得动 tab，弹窗点得掉。
+  `visibilityState` 仍是 `hidden`、视口仍是 0×0，所以**这一屏验的是「行为」，不是「像素」**——排版、换行、行内间距今天依旧没验，
+  这一条不要因为能点了就当过了。
+- 服务是 `npm run dev` 起的 `127.0.0.1:3000`，走的是计划 `:152` 那条他特批的例外；**跑完已停**，
+  `Stop-Process` 之后 3000 端口没有 LISTENING（npm 那个壳退出后 node 子进程还活着，得单独收）。
+
+### 六、四条路径逐条（界面字面 / HTTP / 库，三层各留一份）
+
+| 路径 | 界面量到的 | HTTP | 库 |
+|---|---|---|---|
+| 归档 → 已归档 → 恢复 | 行上「归档」→ 展开区「确认归档」→ 提示 `已归档，这条不再进入对话`（`memory-panel.tsx:674,759,322`）；该行从有效列表挪进「已归档」区块（`:900`，标题就是这三个字），恢复后区块整块不渲染 | `POST …/archive` 与 `POST …/restore` 各 200 | `archivedAt` 写上又清空；收尾 `archived: 0`；审计两条 `user.memory_archive.after.archived` / `user.memory_restore.after.restored` |
+| 记忆网络 | 关着时那一屏只说开关没开；`associationEnabled` 打开后真的摆出派生句 `2 个点、1 根线连不成一张图：这两个点之间确实有关系，可三个点以上的连线才叫网络。`（`memory-graph-display.ts:74`，数字是真库里的 2 行 / 1 条边） | `GET …/memory-graph` 200 | 零迁移派生，没写任何行 |
+| 画像：候选 → 收进 → 改 → 删 | 关闭态说清没开；开着时**两个候选**（服务端现算，库里 0 行）→ 点「收进画像」出 `已收进画像。`（`profile-panel.tsx:129`）；改正文走行内 textarea + 保存；删的时候弹窗 `删除这条画像？`，确认钮是「删除」（`:171-190`）→ `已删除这条画像。`（`:183`） | `POST` / `PATCH` / `DELETE` 打在 `/api/account/cognitive/profile[/{id}]`（`profile-panel.tsx:33`）各 200 | `PATCH` 后该行 `content` 长度 11、与我键入的那串逐字相等、`editedAt` 写上、`confirmedAt` 保留（`user-profile.ts:128-141` 的语义第一次被真机验到）；删完 `UserProfileEntry` 回到 0 行 |
+| 忘记这个主题 | 弹窗标题 `忘记「学习」这个主题的全部记忆？`，确认钮字面「删除记忆」（`memory-panel.tsx:435,396`） | `DELETE …/memories?scope=context&context=learning` 200 | **为了让这条可验，先造了一行只属于 `LEARNING` 的一次性记忆**（内容我自己写的），删的就是它；他那两行 `GENERAL` 的 `recordedAt` 仍是 `.646` / `.661`，`archivedAt` / `supersededAt` 都没被碰 |
+
+另外两件一起量了：
+- **暂停长期记忆写入**：开 → `已暂停新的记忆写入，已记住的内容照常带入对话`，关 → `已恢复新的记忆写入`（`memory-panel.tsx:210`），库里 `memoryWritePaused` 跟着 true/false 各读回一次。
+- **聊天里那句引用提示（负例）**：`/chat` 发一轮，气泡正文完整、footer 摆出 `100 tokens 输入 · 52 tokens 输出`，**没有引用控件**——
+  这正是 `citationHint(0) === ''` 那一支该有的样子，也对应库里 `MemoryAccessTurn` 仍 0 行。
+
+### 七、我自己犯的两次错（都改成物证了，不是应用缺陷）
+
+- 一次 `document.querySelector('main textarea')` 抓错了框：画像那一屏**有两个 textarea**（「写下这条」的草稿框和行内改正文的框），
+  我第一次量到的是草稿框，于是报了个假 bug——「改正文没生效」。换成行内那一个（`profile-panel.tsx:335`）之后
+  界面、HTTP、库三层全部一致。**报错的代价是我自己写的一条断言，不是生产代码。**
+- 应用级确认弹窗渲染在 **portal** 里，挂在 `main` 外面：所以 `main.innerText`、`main button` 都找不到它，
+  我第一次点「删除」以为没反应。改读 `document.body` 之后弹窗与按钮立刻现身。这条对手动测试的人也成立——不是替身独有的怪事。
+
+### 八、三条 `DEAD` 行：建议是清，已经清了
+
+`CognitiveTask` 现在 `taskCount = 0`（`groupBy status` 返回空数组，实测）。清之前逐条确认过：
+
+- **它不带任何正文**：`prisma/schema.prisma:644-675` 那张表没有 payload 列，只有 id、状态、次数、租约和 `lastErrorCode(64)`——
+  表的设计职责就是「只装还欠着的活」。所以删它不删掉任何用户内容，也不留痕丢失：审计与日志本来就只带 id。
+- **`DEAD` 不会被自己救回来**：worker 失败三次用尽后就判死（`task-worker.ts:142` → `task-queue.ts:136-138` → `killCognitiveTask` `:155`），此后不再被取；留着只是每次数表都要多扫三行。
+- **成因已消失**：`:769-770` 那半边补上了（迁移后同一个 `findUnique` 不带 `select` 实测能读回整行，`reflectionSweptAt` 是 `NULL` 而不是「列不存在」）。
+- **计划里那句「根因已查清」比本文档自己的标注强**：`:755-767` 那节明确写了推断的边界（直接观测到的只有 `lastErrorCode` 这个**我们自己打的标签**和「插入成功」两件事）。
+  以文档为准，不以计划口径为准。
+- **要不要给已有记忆补向量：今天做不了，也没偷偷做**。两行记忆的 `embeddingCiphertext` 实测仍都是空（`hasVector:false` ×2），
+  因为片 f-4 四臂里那条向量臂还卡在端点没有可用的 embedding 模型；现在补一行 `CognitiveTask` 只是攒一条注定失败的欠账。
+  这条等 B 臂解锁（见片 f-4 那张表）之后重估。
+
+### 九、「日志与审计只带 id」这一条今天真的量到了形状
+
+拿 `AuditLog.after` 逐个字段打印**形状**（类型 / 数组长度 / 首元素长度 / 是否像 UUID），不打印任何值：
+
+| action | 字段 | 形状 |
+|---|---|---|
+| `user.memory_archive` / `user.memory_restore` | `archived` / `restored` | boolean |
+| `user.cognitive_update` | 八个开关 + `memoryWritePaused` | boolean；`emotionTransparency` 是 string（三档枚举字面，不是内容） |
+| `user.profile_create` | `memories` / `reflections` | number（候选条数） |
+| `user.profile_revise` | `edited` | number |
+| `user.memory_purge_by_context` | `purged` / `learned` | number / string 数组，实测长度 0 |
+
+`learned` 那一项数组元素是 `MemoryContext` 枚举，不是记忆 id 也不是正文（`policy-learner.ts:122-135` 返回 `MemoryContext[]`，
+route 签名 `learned: readonly string[]`），这一条是读源码定的，因为实测那一次它是空数组——空数组证明不了元素类型。
+**结论**：这一屏今天新写的审计里没有一处带正文或密文。
+
+### 这一片的边界（含无法验收项）
+
+- **引用提示的正例和那句读失败文案，真渲染里都没出现**，而且不是补种数据能补的：
+  `chat-workspace.tsx:164` 那份 `citations` 是**临时客户端态**、按**助手消息 id** 索引，id 只来自那一轮流式响应的 `done` 帧；
+  而 `MemoryAccessTurn.sourceMessageId` 存的是**用户**消息 id（`messages/route.ts:171-175`），只被 `listAccessStats`（`access.ts:91`）读，
+  界面根本不查这张表。所以往 `MemoryAccessTurn` 里种行**点不出那个控件**——这条我是先试过才写下的。
+  要看到正例得起一轮真会注入记忆的对话，那会往他库里写新记忆，我没替他做。
+  `CITATION_LOAD_FAILED_NOTE` 的失败分支同理：要造一次 4xx/5xx 才渲染，今天只有用例和类型在守它。
+- **像素、排版、换行、行内间距一条都没验**：替身视口 0×0、`hidden`，能点不等于能看见。6-F/6-G 那两屏的「行内排布」「依据展开」「六个区的空区不渲染」
+  从今天起**能点了**，但我今天的时间花在四条功能路径上，那几条还挂在「未验」。
+- **偏差一（无冒号）与偏差二（这句没批过）都还等他判**：偏差二现在字面被用例钉住了，**钉住不等于批准**——用例只保证它不再被人顺手改掉。
+- **词面零命中该不该干脆不注入**（片 f-5 留下的那条）仍然待定，不是本片范围。
+- **他的状态已复位并实测**：八个开关回到 `memoryEnabled=true` / `timelineEnabled=true` / 其余六个 false /
+  `memoryWritePaused=false` / `reflectionSweptAt=null`；`UserProfileEntry` 0 行、`MemoryAccessTurn` 0 行、`CognitiveTask` 0 行、
+  两行 `GENERAL` 记忆未归档未覆写。用完的临时脚本（六个 `*.once.ts` + 一个收尾复核）全部删除，`git status` 只剩本片四个文件。
+- **门禁**：`npx tsc --noEmit` 干净；`npm run test:unit` **90 文件 / 1427 用例**全绿——比片 f-5 提交时的 1425 多出的正是本片那 2 条。
 

@@ -22,6 +22,12 @@ export const CITATION_NOTE = '这只是这一轮随问题一起交给模型的�
  */
 export const CITATION_MISSING_LABEL = '这条记忆已不在你的有效记忆里（可能已被更新、删除或归档）';
 
+/**
+ * 点开时那一次读失败的说法。这句不许留在组件里：它是这一屏唯一一处「东西没拿到」的坦白，
+ * 字面要和上面两句一样由用例逐字钉住。
+ */
+export const CITATION_LOAD_FAILED_NOTE = '这条清单没读到，稍后再试试';
+
 /** 收起态那一句。0 条给空串，让界面什么都不渲染，而不是摆一个点开是空的控件。 */
 export function citationHint(count: number): string {
   if (count <= 0) return '';
