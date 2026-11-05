@@ -6,8 +6,8 @@
 其余每一条的证据都止于内存替身——没有一条认知单测走过真实数据库。
 把这些写清楚比凑一个「10/10」有用——下一次争论「这个增强要不要上」时，这里是共同的事实基线。
 
-核对时间：2026-11-05（7.2 的 ARCHIVE 落地、`20261105000000_memory_archive` 已由他执行；之后 7.1 检索再巩固与 7.3 按主题忘记 + 暂停写入两片落地，**它那两支迁移 `20261106000000_memory_access` / `20261106000001_memory_write_pause` 尚未执行**）。
-基线 HEAD `2e968d1`（7.1 的代码与文档同批；7.3 这一刀的代码与本文档同批提交）。
+核对时间：2026-11-05（7.2 的 ARCHIVE 落地；之后 7.1 检索再巩固与 7.3 按主题忘记 + 暂停写入两片落地，**那两片带的迁移 `20261106000000_memory_access` / `20261106000001_memory_write_pause` 已由我在他的批准下执行**——「你直接跑迁移就行了」，`npx prisma migrate status` 报 17 支全部 up to date，库里没有漂移的列。跑完立刻补了一次真库回滚探针，把两片各自「只有替身验过」那两条边界换成了实测数字，见下面两片的边界表）。
+基线 HEAD `de70c83`（7.3 的代码与文档同批；本文档这次只改迁移状态与真库实测两处口径）。
 全量单测 **81 个文件 1225 条用例**通过（`npx vitest run`），`npx tsc --noEmit` 干净。
 Phase 4 之后新增的认知文件把 58 个文件 / 734 条推到 77 / 1066；**Phase 4—6 的界面那几半一条组件测试都没加**——
 这个项目没有组件测试，能测的部分搬进纯函数模块，剩下那句话在各片边界表里单独写着。
@@ -736,19 +736,21 @@ schema 里**没有**第二个模型字段能给向量用（`AiProvider` 的列�
 ## 真库实况（11-04 复核：两支迁移落了地，写侧第一次真落过库）
 
 这一节是 3-c 收尾时实测的。它推翻本文此前十几处「真库 0 行 / 迁移未执行」的说法——那些话在写下的那天是对的，
-之后他授权把两支待执行迁移打下去了（`npx prisma migrate deploy`，现在 `npx prisma migrate status` 报 14 支全部 up to date），
+之后他授权把两支待执行迁移打下去了（`npx prisma migrate deploy`，那一刻 `npx prisma migrate status` 报 14 支全部 up to date；到 11-05 两片新迁移落地后是 17 支），
 而写侧在此之前就已经真的往库里落过东西。下面全部是**只读计数与列名**探针的结果：一行 `SELECT` 都没碰密文正文，
 本文与日志都不带内容，id 只截前 8 位。
 
 | 对象 | 实测 | 说明 |
 |---|---|---|
-| `MemoryItem` | **2 行** | 都是 `type=GOAL` / `context=GENERAL` / `origin=EXPLICIT` / `version=1`，`recordedAt` 2026-11-03T17:32:58Z（同一轮写的两条） |
+| `MemoryItem` | **2 行**（11-05 复核：两行都归 konxing、都是 `GENERAL`） | 都是 `type=GOAL` / `context=GENERAL` / `origin=EXPLICIT` / `version=1`，`recordedAt` 2026-11-03T17:32:58Z（同一轮写的两条） |
 | `MemoryRevision` | **0 行** | 真库里从没形成过一条演化边——门槛 2 那条「版本链整条删掉」在库层仍无对象可验 |
 | `MemoryItem.embeddingCiphertext` | 两行都是 `NULL` | 向量一次都没写成功过，`embeddingModel` 同样 `NULL`——5e 卡的正是这里 |
 | `CognitiveTask` | **3 行，全 `DEAD`、`attempts=3`** | `kind=MEMORY`，`lastErrorCode` 三条都是 `PREFERENCES_UNAVAILABLE`，`createdAt` 2026-11-04T10:54–10:56Z（本地 18:54–18:58） |
 | `DecisionRecord` / `DecisionOutcome` | 0 行 / 0 行 | 表已存在（迁移已执行） |
 | `ReflectionRecord` / `ReflectionCitation` | 0 行 / 0 行 | 表已存在（迁移已执行） |
 | `CognitivePreference`（他这个账号） | 一行 | `memoryEnabled=true`、`timelineEnabled=true`，其余五个开关关着，`reflectionSweptAt=NULL` |
+| `CognitivePreference.memoryWritePaused` | 库里唯一一行读回来是 `false`（11-05 实测） | 新列默认值真的生效，且**今天没人按过暂停**。81 条单测里那条「暂停时写侧一次数据库读都不发生」第一次有了库层的对照 |
+| `MemoryAccessTurn` | **0 行**（11-05 实测） | 迁移刚落地，写入点（`messages/route.ts:171-175`）还没被真实对话跑过一次——「这一轮被再次调用」今天真的能进库了，但库里还没有它的第一个证据。**要看到它，得他发一轮真的会注入记忆的对话** |
 
 ### 那三条 `DEAD` 是实测到的唯一真故障，原因已经查清
 
@@ -1271,7 +1273,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 |---|---|---|
 | 数据表 | `prisma/schema.prisma:848-860` | `MemoryAccessTurn { id, userId, sourceMessageId, memoryIds String[], createdAt }`。**只有 id，没有正文**（抄 `CognitiveTask` 的口径）；`@@unique([sourceMessageId])` 是幂等锚点；**没有 chatId**：「这一轮发生在哪次对话」等于 `sourceMessageId` 那条消息所在的会话，多一列没有读者，而会话真删时那条外键是 CASCADE，消息一走这一行自己就走 |
 | 为什么不放在 `MemoryItem` 上 | 同上，加一条静态用例 | 一轮最多注入 8 条（`memory-module.ts:44`），计数列放进那一行就等于挨着 `assessConfidence` 正在读的 `supersededAt` / `validTo`——红线只能靠自觉。放进另一张表，红线靠形状守着 |
-| 迁移 | `prisma/migrations/20261106000000_memory_access/migration.sql` | 建表 + 唯一索引 + `(userId, createdAt)` + 两条 CASCADE 外键。**这一支未执行**（下面边界第一条） |
+| 迁移 | `prisma/migrations/20261106000000_memory_access/migration.sql` | 建表 + 唯一索引 + `(userId, createdAt)` + 两条 CASCADE 外键。**11-05 已执行**（真库形状见下面边界第一条） |
 | 写入 | `src/lib/cognitive/access.ts:64`（`recordMemoryAccess`） | 空列表返回 false、`P2002` 返回 false、任何其他失败也只返回 false 并记一条只带 id 的日志。契约照抄 `enqueueCognitiveTask` |
 | 写入点 | `src/app/api/chats/[id]/messages/route.ts:171-175` | 在 `controller.close()`（`:154`）**之后**。「并行任务不应该阻塞主回复」靠位置保证，不靠新机制，所以位置本身有一条静态用例守着（P2） |
 | 统计 | `src/lib/cognitive/access.ts:91`（`listAccessStats`） | 取 `MAX_ROWS + 1` 行只为了知道有没有被截断——「恰好读了 200 轮」和「还有更多轮没读」在数字上一样，在诚实程度上不一样 |
@@ -1310,8 +1312,12 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 ### 这一片的边界
 
-- **迁移未执行**：`20261106000000_memory_access` 只写了文件。这一支不落库，`recordMemoryAccess` 每次都在 `prisma.memoryAccessTurn` 上抛，被自己的 catch 吞成 `false`——**于是「被再次调用」今天仍然只是一句不写进库的话，`reviews` 与 `access` 会一直是空**。命令在末段，由他跑。
-- **真库上这张表的形状没实测过**：`memoryIds String[]` 的 `hasSome` 谓词、`@@unique([sourceMessageId])` 的重发行为、`sourceMessageId` 的 CASCADE 在 PostgreSQL 17 上具体编成什么 SQL，全部只有内存求值器验过。归档那一片做过真库回滚探针（上面 7.2 那节），这片没有——没有他的批准不动库。
+- **迁移已执行，真库形状实测过**：`20261106000000_memory_access` 于 11-05 由我在他的批准下跑下（「两支迁移都还没落库，你直接跑迁移就行了」），`npx prisma migrate status` 报 17 支 up to date。跑完当场做了一次**真库回滚探针**（临时事务，每支都以 `throw` 收尾，事后核对 `probeUsers=0 / accessRows=0`，真实用户那行一点没动），量到的是：
+  - 表 5 列：`id/userId/sourceMessageId` text、`memoryIds` **ARRAY**、`createdAt` timestamp 默认 `CURRENT_TIMESTAMP`；
+  - `hasSome` 在真 Postgres 上编成 `"memoryIds" && $n`（数组重叠，参数是数组）——命中 1、不命中 0，替身求值器这一处**和真库一致**；
+  - 两条外键的 `ON DELETE CASCADE` 都实测生效：裸 SQL 删那条消息，access 跟着变 0；`prisma.message.delete` 删另一条，同样变 0。上一片担心的「消息一走这一行自己就走」今天不再只是 schema 声明；
+  - 同一 `sourceMessageId` 重发 ⇒ **P2002**，`recordMemoryAccess`（`access.ts:76`）捕获后返回 `false`——它走的是独立 `create`，不在事务里，所以这个 catch 干净。
+- **顺手量到一条约束，记在这里以免将来踩**：在 `prisma.$transaction` 里 catch 住 P2002 之后，同一个事务的后续查询会**全部失败**（Postgres `25P02`「当前事务被终止」）——捕获不等于豁免，事务已经废了。今天三个 P2002 捕获点（`access.ts:76`、`task-queue.ts:48`、`reflection-sweep.ts:355`）**都摆在事务外面**，`writeReflection` 那个 `$transaction`（`reflection-sweep.ts:548`）是整体抛出、由调用方捕获，所以形状是对的；这条探针给出的正是「为什么不能图省事把 catch 挪进事务里」。
 - **界面没有真渲染验收**：`memory-panel.tsx` 过了类型检查，并有静态断言（文案只从 `RECONSOLIDATION_LABELS` 与两个纯函数出来、界面里不许出现「需要更新摘要」「需要修改关联关系」这两个词、不许硬编码「最近 200 轮」、已归档那份不渲染标记）。但静态断言只证明源码写了这一行，不证明 React 画出来了。
 - **不碰排序**：这一片只让访问成为事实 + 把标记摆出来。`retrieval.ts` 一行没改，所以「访问频率只能影响检索排序」那半句今天仍然是**未实现**——排序入口在片 f（向量臂通了才有 A/B 可比）。红线此刻守住的是「不许拿访问顶替证据」，不是「访问已经参与排序」。
 - **窗口是 200 轮，且会说话**：超过 200 轮以后的访问不计入 `count`，`capped` 为真，界面摆一句「访问记录比这一屏多：这里只统计最近 N 轮对话」。所以那个数字是**下限**，不是全生命周期条数。
@@ -1338,7 +1344,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 | 环节 | 位置 | 只干什么 |
 |---|---|---|
-| 迁移 | `prisma/migrations/20261106000001_memory_write_pause/migration.sql` | 只加一列 `memoryWritePaused Boolean @default(false)`。**未执行**（和上一片那支一起跑）。默认 false 让「库里没有这一行」等于没暂停，和这张表其余开关同构 |
+| 迁移 | `prisma/migrations/20261106000001_memory_write_pause/migration.sql` | 只加一列 `memoryWritePaused Boolean @default(false)`。**11-05 已执行**（真库列形状与读写往返见下面边界第二条）。默认 false 让「库里没有这一行」等于没暂停，和这张表其余开关同构 |
 | 它不是第九个模块开关 | `preferences.ts:27`（`FlagKey` 把它和 `emotionTransparency` 一起 `Exclude` 掉）、`:90`（单独一条 PATCH 分支） | 模块开关管「这个模块要不要工作」，关掉后读侧也不注入；这一列只管「还记不记新东西」。**混进 `COGNITIVE_FLAGS` 会让它变成一个能被批量清空的开关**，P5 探针专门咬这个 |
 | 写侧闸门 | `memory-module.ts:169-174` | 开在能开的最早处：`memoryEnabled`（`:170`）之后、`excludedHashes` / `getMemoryPolicies` / `listMemories`（`:178-183`）**之前**。所以门槛 9 那句「关闭后不再执行对应的数据读取」在这一臂上字面成立——零读零写，不是「读了但没写」 |
 | 读侧不动 | `memory-module.ts:76-89` | `readMemory` 一次都不看这张偏好。「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停，两件事必须分得开 |
@@ -1373,12 +1379,15 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 ### 这一片的边界
 
-- **两支迁移都未执行**：`20261106000000_memory_access`（上一片）和 `20261106000001_memory_write_pause`（这一片）。一次 `npx prisma migrate deploy` 同时补齐。**先拉代码后跑迁移会有 P2022**：认知读侧的 `SELECT` 引用了库里还不存在的列——那三条历史 `DEAD` 行就是这个根因（上面「那三条 `DEAD`」那节）。它 fail safe：模块错误隔离让回复照常，worker 的 `gateOpen` 读不出来当「未知」走重试。
+- **两支迁移都已执行**：11-05 由我跑下（「两支迁移都还没落库，你直接跑迁移就行了」），`npx prisma migrate status` 报 17 支全部 up to date。这条把「先拉代码后跑迁移会 P2022」这个坑在他本机**关掉**了；但它对**任何一份还没跑迁移的库**仍然成立——认知读侧的 `SELECT` 引用了新列（下面那条列了读列），所以「部署 = 先 `migrate deploy` 再起服务」这条顺序是硬要求，不是建议。那三条历史 `DEAD` 行就是这个根因（上面「那三条 `DEAD`」那节），它 fail safe：模块错误隔离让回复照常，worker 的 `gateOpen` 读不出来当「未知」走重试。
 - **按主题忘记不扫决策记录**：`DecisionRecord` 既没有 `context` 也没有 `chatId`，一次主题删除拿不到「哪些决策属于这个主题」这个问题的答案。文案里「决策记录都不动」是**明说的边界**，不是遗漏。
 - **不撤别的主题的欠账**：一条 `CognitiveTask` 欠账对应的是「这一轮」，不是「这个主题」。删一个主题时把整轮的欠账一起撤掉，会连带作废另一个主题的提取机会。要停掉整个后台，用总开关。
 - **暂停不追溯**：这一列只管之后的写入。已经记住的照常带入对话，欠账照常排空（只是不再落库）。要清已有的，用「忘记」那四臂。
 - **界面没有真渲染验收**：`memory-panel.tsx` 过了类型检查，并有静态断言（DELETE 的 query 串、确认文案逐字、暂停控件在 `enabled === true` 之内、`toggleEnabled` 里也要 `setPaused`），但静态断言只证明源码写了这一行，不证明 React 画出来了。真渲染在片 g。
-- **真库上这一臂没跑过**：`where: { userId, context }` 编成的 SQL、`BOOLEAN NOT NULL DEFAULT false` 在 PostgreSQL 17 上的加列成本，全部只有内存求值器验过。归档那一片做过真库回滚探针，这片没有——没有他的批准不动库。
+- **真库上这一臂跑过了**：同一次回滚探针（事务以 `throw` 收尾，跑完核对 `probeUsers=0`、`MemoryItem` 仍是 2 行、两行都归 konxing 且都是 `GENERAL`——库里那两条真实记忆一根手指都没碰）量到三件事：
+  - `where: { userId, context }` 在真 Postgres 上编成 `"userId" = $1 AND "context" = CAST($2::text AS "public"."MemoryContext")`——枚举是**带 schema 限定的 CAST**，参数传字符串。替身求值器把 `context` 当普通字符串比，这一处**恰好等价**，所以它的判定没有骗人，但「等价」这次是量出来的，不是推的；
+  - 一条都不剩时 `deleteMany({ where: { userId, id: { in: [] } } })` 被 Prisma 折成 `DELETE FROM "MemoryItem" WHERE "userId" = $1 AND 1=0`——**带了 `userId`**。上面 P1 那条探针（丢掉 `userId` 就 0 红）在真库层也没留缝：空列表不会退化成「删全表」；
+  - `memoryWritePaused` 落成 `boolean NOT NULL`、默认 `false`；`create → 读回 false → update true → 读回 true` 往返正确，`ALTER TABLE ... ADD COLUMN ... DEFAULT false` 在 PostgreSQL 17 上是元数据改动、当场返回。库里那唯一一行真实偏好读回来是 `false`——暂停这件事今天没人按过。
 
 
 
