@@ -1,4 +1,5 @@
 import type { ConfidenceBand } from './confidence';
+import { CLAUSE_SPLIT_RE } from './decision-extractor';
 import type { PatternHypothesis, ReflectionFinding, ReflectableMemory } from './reflection-planner';
 import { NEGATION_MARKERS } from './reflection-planner';
 import { scoreByKeyword } from './retrieval';
@@ -11,13 +12,15 @@ import { scoreByKeyword } from './retrieval';
  * 数字只从 finding 里取，因果一律不写——规则算得出「你说过四次」，算不出「因为你在意」。
  *
  * 三条红线在这里是结构性的，不是靠约定：
- * 一、正文里的引号内容只能是用户自己说过的话（`memoryTexts` / `decisionTopics` 递进来的原文），
- *    拿不到原文就一个引号都不出现——系统绝不替用户造一句「他说过」。
+ * 一、标题和正文里的引号内容只能是用户自己说过的话（`memoryTexts` / `decisionTopics` 递进来的原文），
+ *    拿不到原文就没有标题——critic 会把整条挡下。这一条对标题比对正文更要紧：它是这一屏字号最大的
+ *    一行，用户最容易把它读成「系统对我的总结」，所以它更不该是系统写的话。
  * 二、正文里出现的数字只能是 finding 的那两个，`criticizeReflection` 落库前再核一遍。
  *    引号里的数字不算：那是用户的原话，不是系统的断言，把它一起管会让带阿拉伯数字的记忆永远出不了洞察。
  * 三、critic 的返回值只有原因码，没有中文——它要进日志。
  *
- * 测试：tests/unit/cognitive-reflection-evidence.test.ts
+ * 测试：tests/unit/cognitive-reflection-evidence.test.ts（反证 / 置信度 / critic 六道）、
+ * tests/unit/cognitive-reflection-title.test.ts（标题取自原话，以及「类型名只有一份」那条静态断言）。
  */
 
 /** 档位下界。和记忆侧的 0.75/0.45 不是同一组数：那条讲的是「这一句可不可信」，这条讲的是「这一堆够不够成一个说法」。 */
@@ -32,6 +35,13 @@ export const CONF_COUNTER_PENALTY = 0.2;
 export const CONF_COUNTER_MAX_COUNTED = 3;
 /** 正文最多引这么几句原话：洞察要说的是「合起来看」，不是把用户的话抄一遍。 */
 export const QUOTE_MAX = 3;
+/**
+ * 标题的字数上限。标题是这一屏字号最大的一行，超了它就不是标题而是正文，
+ * 所以截断规则必须是可见的：宁可只留第一个分句，也不在词中间切断。
+ */
+export const REFLECTION_TITLE_MAX_CHARS = 40;
+/** 截断标记。它出现就等于「原文还有」，不让标题装作是一句完整的话。 */
+export const REFLECTION_TITLE_TRUNCATION_MARK = '…';
 
 /** 因果断言词。出现任何一个就是 UNSOURCED_ASSERTION：这一层没有能算出因果的东西。 */
 export const CAUSAL_MARKERS: readonly string[] = ['因为', '所以', '因此', '说明', '意味着', '原因是'];
@@ -55,16 +65,44 @@ export const HYPOTHESIS_PHRASES: Record<PatternHypothesis, string> = {
   TEMPORARY_LEARNING: '可能只是这一阵子在看的东西'
 };
 
-/** 七类洞察的标题。只有这一处，界面不再另立一份，否则同一个类型会有两个名字。 */
-export const REFLECTION_TYPE_LABELS: Record<ReflectionFinding['type'], string> = {
-  PATTERN: '反复出现的主题',
-  GOAL_DRIFT: '目标换了方向',
-  UNRESOLVED: '放了很久没下文',
-  INTEREST_SHIFT: '兴趣换了地方',
-  CONTRADICTION: '两句互相打脸',
-  MILESTONE: '做成的一件事',
-  DECISION_LESSON: '决策和它的结果'
-};
+/**
+ * 七类洞察的类型名只有 `reflection-display.ts` 那一份。
+ *
+ * 这里曾经有第二份，用途是给标题——于是标题就成了类型标签的复读，一屏三条 PATTERN
+ * 摆出三行一模一样的「反复出现的主题」，最大的那号字什么也没说。类型标签的正当去处是
+ * 卡片上那一枚 chip，不是标题；这份表删掉之后，同一个类型在全项目里只有一个名字。
+ */
+
+/**
+ * 这条洞察的支持证据的原文（记忆正文 + 决策 topic，按 finding 里那两个数组的顺序）。
+ *
+ * 标题和正文共用这一份取材：正文引的是它的前几条，标题取它的最后一条——也就是最近那一句。
+ * 取最近的那句是有理由的：这一屏回答的是「这件事现在长什么样」，而最早那一句往往已经被
+ * 后面那句改过口（CONTRADICTION 那两类行摆在一起时尤其明显）。
+ */
+export function supportTextsOf(
+  finding: ReflectionFinding,
+  memoryTexts: ReadonlyMap<string, string>,
+  decisionTopics: ReadonlyMap<string, string>
+): string[] {
+  return [
+    ...finding.supportMemoryIds.map((id) => memoryTexts.get(id)),
+    ...finding.supportDecisionIds.map((id) => decisionTopics.get(id))
+  ].filter((text): text is string => typeof text === 'string' && text.trim() !== '');
+}
+
+/**
+ * 一句原话压成标题。放得下就整句，放不下只留第一个分句——分句边界由 `CLAUSE_SPLIT_RE` 定，
+ * 和决策抽取器用的是同一个，所以「一句完整的话」在这份仓库里只有一把尺子。
+ * 第一个分句本身就超长时才按字数硬切，切完一定要带上截断标记。
+ */
+function asTitle(text: string): string {
+  if (text.length <= REFLECTION_TITLE_MAX_CHARS) return `「${text}」`;
+  const head = (text.split(CLAUSE_SPLIT_RE)[0] ?? text).trim();
+  const inner =
+    head.length <= REFLECTION_TITLE_MAX_CHARS ? head : [...head].slice(0, REFLECTION_TITLE_MAX_CHARS).join('');
+  return `「${inner}${REFLECTION_TITLE_TRUNCATION_MARK}」`;
+}
 
 /**
  * 引用行 id 的可见正文。调用方负责只递这条洞察真正引用的那几行——
@@ -171,18 +209,20 @@ export function reflectionConfidence(input: {
  *
  * 顺序是固定的：口气 → 计数 → 原话 → （PATTERN）三种解释 → （有反证）余地那一句。
  * 固定顺序才能让 critic 的「少了哪一段」变成字符串包含判断，也才能让同一条 finding 每次都得到同一个正文。
+ *
+ * 标题不在这条顺序里，因为它不是正文的一段：它单独走 `supportTextsOf` 的最后一条。
+ * 一句原话都拿不到时标题是空串——那不是「这条洞察没有标题」，而是「这一条不许落库」，
+ * 挡下它的是 critic 的 TITLE_NOT_SOURCED（措辞层自己不判断，判断只有一个去处）。
  */
 export function phraseReflection(input: PhrasingInput): { title: string; body: string } {
   const { finding, band } = input;
+  const sources = supportTextsOf(finding, input.memoryTexts, input.decisionTopics);
+  const newest = sources[sources.length - 1];
   const parts: string[] = [FRAMING[band]];
   parts.push(`前后说过 ${finding.sampleCount} 次，跨度 ${finding.observationSpanDays} 天。`);
 
-  const quotes = [
-    ...finding.supportMemoryIds.map((id) => input.memoryTexts.get(id)),
-    ...finding.supportDecisionIds.map((id) => input.decisionTopics.get(id))
-  ].filter((text): text is string => typeof text === 'string' && text.length > 0);
-  if (quotes.length > 0) {
-    parts.push(`原话：${quotes.slice(0, QUOTE_MAX).map((text) => `「${text}」`).join('、')}。`);
+  if (sources.length > 0) {
+    parts.push(`原话：${sources.slice(0, QUOTE_MAX).map((text) => `「${text}」`).join('、')}。`);
   }
 
   // 规则分不开解释时一条都不选：三种一起给，让用户自己判——这是甲方案存在的全部理由。
@@ -193,11 +233,12 @@ export function phraseReflection(input: PhrasingInput): { title: string; body: s
 
   if (input.counterHits > 0) parts.push(COUNTER_CLAUSE);
 
-  return { title: REFLECTION_TYPE_LABELS[finding.type], body: parts.join('') };
+  return { title: newest === undefined ? '' : asTitle(newest), body: parts.join('') };
 }
 
 export type CriticReason =
   | 'GHOST_CITATION'
+  | 'TITLE_NOT_SOURCED'
   | 'UNSOURCED_ASSERTION'
   | 'COUNTER_UNMENTIONED'
   | 'COUNT_MISMATCH'
@@ -209,16 +250,24 @@ export interface CriticInput {
   counterHits: number;
   /** 这次扫描真正读到的行 id（记忆与决策都算）：引用不在里面就是凭空造的。 */
   poolIds: readonly string[];
+  /**
+   * 这条洞察的支持证据原文（`supportTextsOf` 的那一份）。
+   * 标题要对着它核——措辞层和检查层如果各拿一份证据清单，两者迟早分叉，
+   * 而分叉的方向正好是「标题引了一句不是这条洞察的话」。
+   */
+  supportTexts: readonly string[];
 }
 
 /**
- * 落库前的五道检查。任何一条命中都不写这一行——门槛 4、5 说的是「不许有无来源的断言」，
+ * 落库前的六道检查。任何一条命中都不写这一行——门槛 4、5 说的是「不许有无来源的断言」，
  * 那是一条写入规则，不是一个界面规则，所以它得长在写库之前。
  */
 export function criticizeReflection(input: CriticInput): { accepted: boolean; reasons: CriticReason[] } {
   const { finding, draft, counterHits, poolIds } = input;
   const own = withoutQuotations(draft.body);
   const reasons: Set<CriticReason> = new Set();
+
+  if (!titleIsSourced(draft.title, input.supportTexts)) reasons.add('TITLE_NOT_SOURCED');
 
   const known = new Set(poolIds);
   const cited = [...finding.supportMemoryIds, ...finding.counterMemoryIds, ...finding.supportDecisionIds];
@@ -235,6 +284,21 @@ export function criticizeReflection(input: CriticInput): { accepted: boolean; re
 
   const sorted = [...reasons].sort();
   return { accepted: sorted.length === 0, reasons: sorted };
+}
+
+/**
+ * 这个标题到底取自哪句话。
+ *
+ * 空标题、不带引号的标题、截掉后剩下的部分不是原话子串的标题，一律算「没取材」。
+ * 截断标记可以先抹掉再比——那是措辞层加上的记号，不是用户说过的字，留着它反而永远对不上原文。
+ */
+function titleIsSourced(title: string, supportTexts: readonly string[]): boolean {
+  if (!title.startsWith('「') || !title.endsWith('」')) return false;
+  const inner = title
+    .slice(1, -1)
+    .replace(new RegExp(`${REFLECTION_TITLE_TRUNCATION_MARK}$`), '');
+  if (inner === '') return false;
+  return supportTexts.some((text) => text.includes(inner));
 }
 
 /**

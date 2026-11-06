@@ -502,7 +502,8 @@ describe('落库的形状', () => {
     expect(record.generatedAt).toEqual(NOW);
 
     const aad = (field: string) => `reflection:v1:${USER}:${record.id}:${field}`;
-    expect(decryptString(String(record.titleCiphertext), aad('title'))).toBe('两句互相打脸');
+    // 标题是后说的那句原话：用户改过口，早先那句已经是他不要的说法（见 reflection-evidence.ts 红线一）。
+    expect(decryptString(String(record.titleCiphertext), aad('title'))).toBe('「周末不去爬山」');
     expect(bodyOf(record)).toBe(
       '这几句看着有关，但还说不定是不是一件事。前后说过 2 次，跨度 19 天。原话：「周末去爬山」、「周末不去爬山」。'
     );

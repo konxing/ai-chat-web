@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ReflectionType } from '@prisma/client';
 import type { ReflectionFinding, ReflectableMemory } from '@/lib/cognitive/reflection-planner';
 import { NEGATION_MARKERS, PATTERN_HYPOTHESES } from '@/lib/cognitive/reflection-planner';
 import {
@@ -13,7 +14,6 @@ import {
   HYPOTHESIS_PHRASES,
   MEDIUM_BAND_MIN,
   QUOTE_MAX,
-  REFLECTION_TYPE_LABELS,
   criticizeReflection,
   findCounterEvidence,
   phraseReflection,
@@ -257,17 +257,8 @@ describe('措辞：正文只引用用户自己的话，数字只来自 finding',
     expect(phraseReflection(base).body).not.toContain(COUNTER_CLAUSE);
   });
 
-  it('标题就是类型标签，七类都有：少一个就是在界面上留一个空白', () => {
-    expect(Object.keys(REFLECTION_TYPE_LABELS).sort()).toEqual([
-      'CONTRADICTION',
-      'DECISION_LESSON',
-      'GOAL_DRIFT',
-      'INTEREST_SHIFT',
-      'MILESTONE',
-      'PATTERN',
-      'UNRESOLVED'
-    ]);
-    expect(phraseReflection(base).title).toBe(REFLECTION_TYPE_LABELS.PATTERN);
+  it('标题取自支持证据的原话，不复述类型标签：类型名只在界面那枚 chip 上出现一次', () => {
+    expect(phraseReflection(base).title).toBe('「我打算把项目迁移到 PostgreSQL」');
   });
 
   it('同一条 finding 措辞两次结果一致：落库的正文不该取决于进程状态', () => {
@@ -275,7 +266,7 @@ describe('措辞：正文只引用用户自己的话，数字只来自 finding',
   });
 });
 
-describe('EvidenceCritic：五条规则在落库前拦', () => {
+describe('EvidenceCritic：六道规则在落库前拦', () => {
   const cleanFinding = finding({ supportMemoryIds: ['s1'], sampleCount: 4, observationSpanDays: 27 });
   const cleanDraft = phraseReflection({
     finding: cleanFinding,
@@ -284,7 +275,14 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
     decisionTopics: new Map<string, string>(),
     counterHits: 0
   });
-  const cleanInput = { finding: cleanFinding, draft: cleanDraft, counterHits: 0, poolIds: ['s1'] };
+  const cleanInput = {
+    finding: cleanFinding,
+    draft: cleanDraft,
+    counterHits: 0,
+    poolIds: ['s1'],
+    // critic 核标题要有对照物：这里给的就是那条支持证据的原文，和措辞层拿到的是同一句。
+    supportTexts: ['我打算把项目迁移到 PostgreSQL']
+  };
 
   it('干净的一条通过，且原因列表为空', () => {
     expect(criticizeReflection(cleanInput)).toEqual({ accepted: true, reasons: [] });
@@ -315,11 +313,11 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
       counterHits: 2
     });
     expect(hedged.body).toContain(COUNTER_CLAUSE);
-    expect(criticizeReflection({ finding: one, draft: hedged, counterHits: 2, poolIds: ['s1'] }).accepted).toBe(true);
+    const s1Text = '我打算把项目迁移到 PostgreSQL';
+    const args = { finding: one, counterHits: 2, poolIds: ['s1'], supportTexts: [s1Text] };
+    expect(criticizeReflection({ ...args, draft: hedged }).accepted).toBe(true);
     const stripped = { title: hedged.title, body: hedged.body.replace(COUNTER_CLAUSE, '') };
-    expect(criticizeReflection({ finding: one, draft: stripped, counterHits: 2, poolIds: ['s1'] }).reasons).toContain(
-      'COUNTER_UNMENTIONED'
-    );
+    expect(criticizeReflection({ ...args, draft: stripped }).reasons).toContain('COUNTER_UNMENTIONED');
   });
 
   it('引号里的数字不算系统的数：用户说过「PostgreSQL 16」不该把洞察自己判死', () => {
@@ -332,7 +330,15 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
       counterHits: 0
     });
     expect(draft.body).toContain('16');
-    expect(criticizeReflection({ finding: one, draft, counterHits: 0, poolIds: ['s1'] }).reasons).toEqual([]);
+    expect(
+      criticizeReflection({
+        finding: one,
+        draft,
+        counterHits: 0,
+        poolIds: ['s1'],
+        supportTexts: ['我把数据库升到了 PostgreSQL 16']
+      }).reasons
+    ).toEqual([]);
   });
 
   it('正文里的数字不在 finding 里 ⇒ COUNT_MISMATCH：数字只有一个出处', () => {
@@ -369,15 +375,16 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
     expect(result.reasons.every((reason) => /^[A-Z_]+$/.test(reason))).toBe(true);
   });
 
-  it('五条全中时按字典序返回，不依赖命中顺序', () => {
+  it('六道全中时按字典序返回，不依赖命中顺序', () => {
     const bad = { title: 'x', body: '一共 99 次 因为 说明' };
-    const first = criticizeReflection({ finding: cleanFinding, draft: bad, counterHits: 5, poolIds: [] });
-    const second = criticizeReflection({ finding: cleanFinding, draft: bad, counterHits: 5, poolIds: [] });
+    const first = criticizeReflection({ ...cleanInput, draft: bad, counterHits: 5, poolIds: [] });
+    const second = criticizeReflection({ ...cleanInput, draft: bad, counterHits: 5, poolIds: [] });
     expect(first.reasons).toEqual([
       'COUNTER_UNMENTIONED',
       'COUNT_MISMATCH',
       'GHOST_CITATION',
       'HYPOTHESIS_DROPPED',
+      'TITLE_NOT_SOURCED',
       'UNSOURCED_ASSERTION'
     ]);
     expect(second.reasons).toEqual(first.reasons);
@@ -385,7 +392,16 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
 
   it('七类各自的措辞产物都能通过 critic：模板和规则不许互相打脸', () => {
     const row = memory({ id: 's1' });
-    for (const type of Object.keys(REFLECTION_TYPE_LABELS) as (keyof typeof REFLECTION_TYPE_LABELS)[]) {
+    const types: ReflectionType[] = [
+      'PATTERN',
+      'GOAL_DRIFT',
+      'UNRESOLVED',
+      'INTEREST_SHIFT',
+      'CONTRADICTION',
+      'MILESTONE',
+      'DECISION_LESSON'
+    ];
+    for (const type of types) {
       const one = finding({
         type,
         supportMemoryIds: ['s1'],
@@ -399,7 +415,13 @@ describe('EvidenceCritic：五条规则在落库前拦', () => {
         decisionTopics: new Map<string, string>(),
         counterHits: 0
       });
-      const result = criticizeReflection({ finding: one, draft, counterHits: 0, poolIds: ['s1'] });
+      const result = criticizeReflection({
+        finding: one,
+        draft,
+        counterHits: 0,
+        poolIds: ['s1'],
+        supportTexts: [row.text]
+      });
       expect({ type, reasons: result.reasons }).toEqual({ type, reasons: [] });
     }
   });

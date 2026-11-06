@@ -14,7 +14,8 @@ import {
   findCounterEvidence,
   HYPOTHESIS_PHRASES,
   phraseReflection,
-  reflectionConfidence
+  reflectionConfidence,
+  supportTextsOf
 } from './reflection-evidence';
 import {
   planReflections,
@@ -315,7 +316,8 @@ async function sweepBody(
       decisionTopics: pool.topicByDecisionId,
       counterHits: counterIds.length
     });
-    const verdict = criticizeReflection({ finding, draft, counterHits: counterIds.length, poolIds });
+    const supportTexts = supportTextsOf(finding, pool.textByMemoryId, pool.topicByDecisionId);
+    const verdict = criticizeReflection({ finding, draft, counterHits: counterIds.length, poolIds, supportTexts });
     if (!verdict.accepted) {
       outcome.criticRejected += 1;
       log.warn('cognitive.reflection_critic_rejected', {
