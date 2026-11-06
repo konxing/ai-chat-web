@@ -1,4 +1,5 @@
 import { decryptString } from '@/lib/crypto';
+import { cognitiveColumnAad } from './encrypted-columns';
 import { prisma } from '@/lib/prisma';
 import {
   listCitationEdges,
@@ -34,7 +35,8 @@ import { listProfileEntries, PROFILE_LIST_MAX_ROWS, type ProfileEntryDto } from 
  */
 
 /** 洞察标题的密文式子。和 `reflections.ts` 里那一句逐字相同，由用例钉住。 */
-const reflectionTitleAad = (userId: string, id: string) => `reflection:v1:${userId}:${id}:title`;
+const reflectionTitleAad = (userId: string, id: string) =>
+  cognitiveColumnAad('ReflectionRecord', 'titleCiphertext', userId, id);
 
 /** 候选只从采纳过的洞察来，所以读的是那一小批；上限和洞察那一屏同口径，不复用它的常量是因为那份 import 被钉住了。 */
 const PROFILE_CANDIDATE_REFLECTION_MAX_ROWS = 100;

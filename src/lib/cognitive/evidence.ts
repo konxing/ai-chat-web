@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveString, encryptCognitiveString } from './aad';
+import { cognitiveColumnCoord } from './encrypted-columns';
 import { assessConfidence, type Confidence } from './confidence';
 import { fromDbMemoryOrigin, toDbMemoryOrigin, type MemoryOrigin } from './memories';
 import type { Prisma } from '@prisma/client';
@@ -83,12 +84,8 @@ interface EvidenceRow {
 }
 
 // 证据的说明常会复述那句话，所以跟正文同等对待。封口走 aad.ts 那一份四坐标口径。
-const noteAad = (userId: string, id: string): CognitiveAadCoord => ({
-  purpose: 'memory-evidence',
-  userId,
-  recordId: id,
-  fieldName: 'noteCiphertext'
-});
+const noteAad = (userId: string, id: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryEvidence', 'noteCiphertext', userId, id);
 
 function toDbKind(kind: EvidenceKind): DbEvidenceKind {
   const match = KIND_PAIRS.find((pair) => pair[0] === kind);

@@ -19,8 +19,12 @@ import { decryptBuffer, decryptString, encryptBuffer, encryptString } from '@/li
 export const COGNITIVE_AAD_SCHEMA_VERSION = 1;
 
 /**
- * 六个用途就是这六条字符串里的那一段。写在这里而不是散在五个模块里：
+ * 十个用途就是这十条字符串里的那一段。写在这里而不是散在各模块里：
  * 两个模块共用一个用途字符串，等于两处密文可以互换，那正是要挡的事。
+ *
+ * 前六个是记忆家族（每条都带 `fieldName`）；后四个是决策 / 反思 / 画像，
+ * 它们的封口从第一版起就带字段名，只是当时把字面量手抄在各个模块里。
+ * 现在由 `encrypted-columns.ts` 的覆盖表统一查，轮换脚本也读同一张表。
  */
 export type CognitiveAadPurpose =
   | 'memory'
@@ -28,7 +32,11 @@ export type CognitiveAadPurpose =
   | 'memory-evidence'
   | 'memory-exclusion'
   | 'memory-candidate'
-  | 'memory-vector';
+  | 'memory-vector'
+  | 'decision'
+  | 'decision-outcome'
+  | 'reflection'
+  | 'user-profile';
 
 export type CognitiveAadCoord = {
   purpose: CognitiveAadPurpose;

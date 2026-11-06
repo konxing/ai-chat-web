@@ -4,6 +4,7 @@ import { log } from '@/lib/logger';
 import { ApiError } from '@/lib/http';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveString, encryptCognitiveString } from './aad';
+import { cognitiveColumnCoord } from './encrypted-columns';
 import { exclusionHash, recordExclusions, type ExclusionSource } from './exclusions';
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import {
@@ -120,12 +121,8 @@ export interface CandidateListFilters {
 }
 
 // 和记忆正文同一套加密口径（四坐标，见 aad.ts）：别人的行解不开，同一行的两列也搬不过去。
-const contentAad = (userId: string, id: string): CognitiveAadCoord => ({
-  purpose: 'memory-candidate',
-  userId,
-  recordId: id,
-  fieldName: 'contentCiphertext'
-});
+const contentAad = (userId: string, id: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryCandidate', 'contentCiphertext', userId, id);
 
 function toStoredStatus(status: MemoryCandidateStatus): DbStatus {
   const match = STATUS_PAIRS.find((pair) => pair[0] === status);

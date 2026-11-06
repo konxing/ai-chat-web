@@ -100,6 +100,16 @@ export function decryptBuffer(payload: Buffer, aad = ''): Buffer {
   return Buffer.concat([decipher.update(payload.subarray(offset)), decipher.final()]);
 }
 
+/** `cipherKeyId` 的 Bytes 版：只读包头的 keyId，不解密。格式不对返回 null。 */
+export function bufferKeyId(payload: Buffer): string | null {
+  if (!Buffer.isBuffer(payload) || payload.length < 5 + 1 + 12 + 16) return null;
+  if (!payload.subarray(0, 4).equals(FILE_MAGIC)) return null;
+  const keyIdLen = payload[4];
+  if (keyIdLen < 1 || keyIdLen > 16) return null;
+  if (payload.length < 5 + keyIdLen + 12 + 16) return null;
+  return payload.subarray(5, 5 + keyIdLen).toString('utf8');
+}
+
 export function sha256Hex(data: Buffer | string): string {
   return createHash('sha256').update(data).digest('hex');
 }

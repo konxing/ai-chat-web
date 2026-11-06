@@ -4546,3 +4546,112 @@ T-1 是「测出来了，是零收益」，T-2 是「这台仪器在这副语料
 
 
 
+
+## 片S2：密钥轮换的覆盖面——二十五个认知密文列第一次真的进轮换（11-06）
+
+### 一、这一片修的是一句假话，不是一个功能
+
+`scripts/rotate-keys.ts` 的头注释写着「re-encrypts every encrypted database field」。
+实际清单只有四族：chat / message / aiProvider / attachment（加附件文件本身）。
+认知侧九个模型、二十五个 `*Ciphertext` 列一行都不重裹。
+
+旧密钥还留在 `MASTER_KEYRING` 里，所以这不是已经发生的数据损坏；
+它是「轮换完成」这句话在认知侧为假——哪天有人按注释把最旧那把从环里删掉，
+那二十五个列当场读不回来。修法只有一种站得住：**把「哪个模型的哪一列用哪把封口」收成一张表**，
+写侧和轮换侧都查它。手抄一份清单修不好：下一个新增的密文列还会以同样的方式被忘掉。
+
+### 二、落地形状
+
+| 位置 | 做了什么 |
+|---|---|
+| `src/lib/crypto.ts:104` | 新增 `bufferKeyId`——`cipherKeyId` 的 Bytes 版，只读 `FAC1` 包头的 keyId，不解密 |
+| `src/lib/cognitive/aad.ts:22-39` | `CognitiveAadPurpose` 从六个记忆用途扩到十个（+ decision / decision-outcome / reflection / user-profile）；式子仍然只有 `cognitiveAad` 一个出处 |
+| `src/lib/cognitive/encrypted-columns.ts`（新，164 行） | 25 行覆盖表（`:55`）；`cognitiveColumnCoord`（`:117`）、`cognitiveColumnAad`（`:127`）、`cognitiveFieldAad`（`:137`）、`rotateColumnPayload`（`:150`） |
+| 11 个写入方 | `memories` / `evidence` / `exclusions` / `memory-candidates` / `embedding` 改用 `cognitiveColumnCoord`；`decisions` / `decision-module` / `reflections` / `reflection-sweep` / `user-profile` / `profile-reads` 改用 `cognitiveColumnAad`。各自那份 `aadFor` 只剩一行委托 |
+| `scripts/rotate-keys.ts:1-20` | 头注释改成两段实话：非认知五族为什么保留内联、认知列为什么必须走表 |
+| `scripts/rotate-keys.ts:116` | 动态 import 覆盖表（放在新密钥装进环境之后，和原来 crypto 的时机一致） |
+| `scripts/rotate-keys.ts:250-269` | 逐表、逐行重裹；`rotateColumnPayload` 返回 null 就跳过；dry-run 不写 |
+| `scripts/rotate-keys.ts:276` | 汇总多打一项 `cognitive columns` |
+
+两个家族的 AAD 口径不同，表里如实保留：记忆家族的 `fieldName` 是列名
+（`contentCiphertext`）；决策 / 反思 / 画像从第一版起用短名（`topic`、`title`、`content`）。
+把短名改成列名会让库里已有密文全部解不开，所以短名必须逐字保留——
+这一条单独用一条用例钉死，不靠「表里写的就是对的」这种自证。
+
+### 三、先红
+
+第一次：`Cannot find module '@/lib/cognitive/encrypted-columns'`，`Tests no tests`。
+表落地后：`3 failed | 11 passed (15)`——红的正好是 C 组三条（写侧未统一、脚本未改）。
+统一 11 个写入方并改完脚本后：`15 passed`。
+
+### 四、用例（`tests/unit/cognitive-rotate-coverage.test.ts`，278 行 / 15 条 / 4 组）
+
+- **覆盖表和 schema 逐列对照（5 条）**：schema 里九个模型的 `*Ciphertext` 列集合与表**双向相等**且为 25；
+  写侧短名与轮换列名查到同一个封口；四坐标形状；只有 `MemoryItem.embeddingCiphertext` 是 Bytes；
+  表里的 `client` 键真的对应 schema 模型。
+- **历史口径逐字保留（1 条）**：记忆 / 决策 / 决策结果 / 反思 / 画像各取一列，
+  断言字符串是 `memory:v1:u:r:contentCiphertext`、`decision:v1:u:r:topic`、
+  `decision-outcome:v1:u:r:actual`、`reflection:v1:u:r:title`、`user-profile:v1:u:r:content`。
+  这一条是**防「表自洽但库里读不回来」**的那道锁。
+- **真转一次（5 条，两把密钥、不碰数据库）**：字符串列重裹后新密钥可解；已在新密钥下返回 null；
+  空载荷返回 null；记忆旧封口转完后只剩新口径（同时证明读侧回退今天仍不能删）；
+  Bytes 列转完内容逐字节相等。
+- **封口串只有一个出处（4 条）**：认知目录除 `aad.ts` / `encrypted-columns.ts` 外没有代码自己拼 `:v1:`；
+  11 个写入方都 import 覆盖表并用它的 helper；脚本 import 表、**真的遍历它**、调 `rotateColumnPayload`；
+  非认知五族的封口字面量一个字符都没动（`chats.ts` 的 `chat-title:` 也在断言里）。
+
+### 五、变异探针（六条，逐条当场字面回滚，不用 `git checkout` / `git stash`）
+
+| 探针 | 变异 | 红 |
+|---|---|---|
+| P1 | 表里向量列的 `column` 改成 `embeddingCiphertextX` | 4 |
+| P2 | `DecisionRecord` 的 `field` 从短名改成整列名 | 1（历史口径那条） |
+| P3 | 删掉字符串分支的「已在新密钥 → null」 | 1 |
+| P4 | 脚本的 `for` 改成遍历空数组 | 1 |
+| P5 | `reflections.ts` 退回自己拼 `:v1:` 串 | 1 |
+| P6 | 删掉 `decryptCognitiveString` 的旧口径回退 | 1 |
+
+写用例时先发现两处**自证式断言**，在探针之前就收紧：
+
+1. 形状那条原来用 `entry.field` 拼期望值，表里把短名写成列名也照样绿。P2 证明补上的「历史口径」那条能抓住它。
+2. 脚本那条原来只查字符串，`import` 了但不遍历也能满足。改成 `for (const entry of COGNITIVE_ENCRYPTED_COLUMNS)` 的形态断言后，P4 证明它能抓住。
+3. 「只有一个出处」那条原来连注释里的 `:v1:` 也判红——注释不是建造者，先把注释剥掉再判代码。
+
+### 六、门禁
+
+- `npx tsc --noEmit`：干净（含 `scripts/`）。
+- `npx vitest run tests/unit`：**117 文件 / 1939 条全绿**（片V 时 116 / 1924；本片 +1 文件、+15 条）。
+- 既有用例只改了一处：`tests/unit/cognitive-profile-reads.test.ts:399` 那条「抄过来的那道锁」。
+  它原本断言 `reflections.ts` 与 `profile-reads.ts` 各写一份同一个 `:v1:` 式子；
+  现在两处都查覆盖表，于是改成断言两边都按 `ReflectionRecord + titleCiphertext` 查表。
+  这是**断言跟着出处搬家**，不是放宽：表与 schema 的逐列对照由本片 A 组接管。
+
+### 七、行号复核
+
+新文件：`encrypted-columns.ts` 164 行、测试 278 行。
+改动的 13 个源码文件：`aad.ts` +12/-3、`crypto.ts` +10、11 个写入方净减约 30 行、`rotate-keys.ts` +55/-3。
+引用而未改的文件：`prisma/schema.prisma`（25 列的来源）、`src/lib/chats.ts`（非认知封口仍在原处）。
+结论：无需改号；本片没有迁移、没有新表、没有改任何 `schema.prisma` 列。
+
+### 八、边界（含无法验收项）
+
+一、**没有在真库上跑过轮换**。本片证明的是「脚本会遍历哪张表、每个载荷怎么重裹」，
+不是「这台机器的 `D:\FamilyAIChat` 轮换成功」。真跑一次属于他的运维动作，本轮没有执行。
+
+二、**向量列只有造出来的样本**。25 列里唯一 Bytes 是 `MemoryItem.embeddingCiphertext`；
+B5 用的是 6 字节假向量，不是真库向量（本地那两行向量的值仍是 NULL）。
+「Bytes 分支在真数据上工作」这一点没有证据，只有替身层证据。
+
+三、**表的模型名单是测试自己写死的九个名字**。将来若新增第十个带密文列的认知模型，
+只要它没被加进 `cognitiveModels` 名单，A1 就发现不了「schema 有、表里没有」。
+真正的防线是「加列时同时加表」这条工序；测试只能守住它已经知道的九个模型。
+
+四、**`rotate-keys.ts` 的 prisma 动态访问没有静态类型**。脚本用
+`(prisma as unknown as Record<string, DynamicModel>)[entry.client]` 取模型，
+靠两条兜底：A1 的 schema 对照证明 `client` 名字对得上；运行时取不到模型会立刻抛错而不是静默跳过。
+这条没有类型安全，别把它当强约束。
+
+五、**#238 到此关闭**，但「记忆检索设置」那屏（#226）和向量臂（门槛 5e）没有因此前进一步——
+它们卡在同一个 host 上，不在这一片。
+
+六、这一片没跑迁移、没建新表、没写他库里任何一行、没替他改过密钥或开关。

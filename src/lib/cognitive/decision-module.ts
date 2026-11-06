@@ -3,6 +3,7 @@ import { encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { extractDecisionCandidates } from './decision-extractor';
 import { readDecisionContext, writeOutcomeCandidates } from './decisions';
+import { cognitiveColumnAad } from './encrypted-columns';
 import { parseReviewAfter } from './review-schedule';
 import type { CognitiveModule, CognitiveTurn } from './manager';
 /**
@@ -27,7 +28,8 @@ import type { CognitiveModule, CognitiveTurn } from './manager';
  * - `reviewAfter` 从**同一句**的原文算，基准就是上面那个 decidedAt；口径见 `review-schedule.ts`。
  *   剩下六列（背景/约束/可选方案/理由/标准/风险）仍然交 null：那些话不在这一句里。
  */
-const aadFor = (userId: string, id: string, field: string) => `decision:v1:${userId}:${id}:${field}`;
+const aadFor = (userId: string, id: string, column: string) =>
+  cognitiveColumnAad('DecisionRecord', column, userId, id);
 
 export async function writeDecisionCandidates(turn: CognitiveTurn): Promise<void> {
   // 门槛 3：每条持久化记录必须能追溯来源。没有消息 id 就没有来源，宁可不记。
@@ -43,12 +45,12 @@ export async function writeDecisionCandidates(turn: CognitiveTurn): Promise<void
       userId: turn.userId,
       category: candidate.category,
       status: 'PENDING_CONFIRM' as const,
-      topicCiphertext: encryptString(candidate.topic, aadFor(turn.userId, id, 'topic')),
-      choiceCiphertext: encryptString(candidate.choice, aadFor(turn.userId, id, 'choice')),
+      topicCiphertext: encryptString(candidate.topic, aadFor(turn.userId, id, 'topicCiphertext')),
+      choiceCiphertext: encryptString(candidate.choice, aadFor(turn.userId, id, 'choiceCiphertext')),
       expectedOutcomeCiphertext:
         candidate.expectedOutcome === null
           ? null
-          : encryptString(candidate.expectedOutcome, aadFor(turn.userId, id, 'expectedOutcome')),
+          : encryptString(candidate.expectedOutcome, aadFor(turn.userId, id, 'expectedOutcomeCiphertext')),
       decidedAt,
       reviewAfter: parseReviewAfter(candidate.sourceSentence, decidedAt),
       sourceMessageId

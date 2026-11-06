@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveString, encryptCognitiveString } from './aad';
+import { cognitiveColumnCoord } from './encrypted-columns';
 import { recordEvidence } from './evidence';
 import {
   fromDbMemoryContext,
@@ -193,20 +194,12 @@ export const fromDbTimePrecision = fromStoredPrecision;
 
 // 封口走 aad.ts 那一份四坐标口径。这里的两段各自只有一个密文列，所以 fieldName 今天挡不到
 // 行内搬列——它买到的是「这一族从此只有一个配方」，见 aad.ts 顶部那段。
-const memoryContentAad = (userId: string, id: string): CognitiveAadCoord => ({
-  purpose: 'memory',
-  userId,
-  recordId: id,
-  fieldName: 'contentCiphertext'
-});
+const memoryContentAad = (userId: string, id: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryItem', 'contentCiphertext', userId, id);
 
 // 演化的理由常会复述用户那句话，所以跟正文同等对待——绑住这条边自己的 userId 和 id。
-const revisionReasonAad = (userId: string, id: string): CognitiveAadCoord => ({
-  purpose: 'memory-revision',
-  userId,
-  recordId: id,
-  fieldName: 'reasonCiphertext'
-});
+const revisionReasonAad = (userId: string, id: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryRevision', 'reasonCiphertext', userId, id);
 
 export function decryptMemoryContent(
   memory: Pick<MemoryRow, 'id' | 'userId' | 'contentCiphertext'>,

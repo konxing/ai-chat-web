@@ -4,6 +4,7 @@ import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { log } from '@/lib/logger';
 import { decryptDecisionTopic } from './decisions';
+import { cognitiveColumnAad } from './encrypted-columns';
 import { decryptMemoryContent } from './memories';
 import { getCognitivePreferences } from './preferences';
 import type { ReflectionCooldown } from './reflection-display';
@@ -85,7 +86,8 @@ export const REFLECTION_SWEEP_DEADLINE_MS = 15_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 
-const aadFor = (userId: string, id: string, field: string) => `reflection:v1:${userId}:${id}:${field}`;
+const aadFor = (userId: string, id: string, column: string) =>
+  cognitiveColumnAad('ReflectionRecord', column, userId, id);
 
 /**
  * 决策证据的情境。DecisionRecord 上没有 context 列，而一行决策只能由 decisionMaking 那一档
@@ -536,7 +538,7 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
   // id 先在应用层出来：字段 AAD 绑的就是它，等库生成就来不及了。
   // 复活的场合直接沿用被拒那一行的 id——换了 id，那三段老密文就再也解不开。
   const id = item.reviveRowId ?? randomUUID();
-  const aad = (field: string) => aadFor(userId, id, field);
+  const aad = (column: string) => aadFor(userId, id, column);
 
   const supports = [
     ...finding.supportMemoryIds.map((memoryId) => ({ memoryId, decisionId: null as string | null })),
@@ -547,11 +549,11 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
   const columns = {
     type: finding.type,
     dedupKey: finding.dedupKey,
-    titleCiphertext: encryptString(item.title, aad('title')),
-    bodyCiphertext: encryptString(item.body, aad('body')),
+    titleCiphertext: encryptString(item.title, aad('titleCiphertext')),
+    bodyCiphertext: encryptString(item.body, aad('bodyCiphertext')),
     alternativesCiphertext:
-      item.alternatives === '' ? null : encryptString(item.alternatives, aad('alternatives')),
-    counterTokensCiphertext: encryptString(finding.topicTokens.join(' '), aad('counterTokens')),
+      item.alternatives === '' ? null : encryptString(item.alternatives, aad('alternativesCiphertext')),
+    counterTokensCiphertext: encryptString(finding.topicTokens.join(' '), aad('counterTokensCiphertext')),
     counterHitCount: item.counterIds.length,
     timeFrom: finding.timeFrom,
     timeTo: finding.timeTo,

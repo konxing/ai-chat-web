@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { hmacHex } from '@/lib/crypto';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveString, encryptCognitiveString } from './aad';
+import { cognitiveColumnCoord } from './encrypted-columns';
 import { loadEnv } from '@/lib/env';
 import { normalizeForMatch } from './normalize';
 import type { Prisma } from '@prisma/client';
@@ -54,12 +55,8 @@ export interface ExclusionSource {
 }
 
 // 排除规则存的是那句被否掉的话本身，所以它跟记忆正文同等加密。封口走 aad.ts 那一份四坐标口径。
-const contentAad = (userId: string, id: string): CognitiveAadCoord => ({
-  purpose: 'memory-exclusion',
-  userId,
-  recordId: id,
-  fieldName: 'contentCiphertext'
-});
+const contentAad = (userId: string, id: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryExclusion', 'contentCiphertext', userId, id);
 
 function secret(): Buffer {
   return Buffer.from(loadEnv().APP_SECRET, 'utf8');

@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/http';
 import { prisma } from '@/lib/prisma';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveBuffer, encryptCognitiveBuffer } from './aad';
+import { cognitiveColumnCoord } from './encrypted-columns';
 import { readBodyCapped } from '@/lib/ai';
 import { decryptProviderKey, embeddingModelOf, pickCapableProvider } from '@/lib/providers';
 import { joinApiPath, resolveProviderTarget, safeFetch } from '@/lib/ssrf';
@@ -33,12 +34,8 @@ const TIMEOUT_MS = 15_000;
  * 向量和正文是同一行的两列，封口必须不同——不然把 `contentCiphertext` 搬进 `embeddingCiphertext`
  * 会解出一段被当成向量的乱码。这里靠的是 purpose 和 fieldName 两段都不同（`memory` / `memory-vector`）。
  */
-const vectorAad = (userId: string, memoryId: string): CognitiveAadCoord => ({
-  purpose: 'memory-vector',
-  userId,
-  recordId: memoryId,
-  fieldName: 'embeddingCiphertext'
-});
+const vectorAad = (userId: string, memoryId: string): CognitiveAadCoord =>
+  cognitiveColumnCoord('MemoryItem', 'embeddingCiphertext', userId, memoryId);
 
 export interface StoredVector {
   ciphertext: Buffer;

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
+import { cognitiveColumnAad } from './encrypted-columns';
 import { getCognitivePreferences } from './preferences';
 import { CONFIRMED_DECISION_STATUSES } from './decision-status';
 import { scoreByKeyword } from './retrieval';
@@ -28,9 +29,29 @@ import { matchOutcomes } from './outcome-extractor';
  */
 export const DECISION_LIST_MAX_ROWS = 100;
 
-const aadFor = (userId: string, id: string, field: string) => `decision:v1:${userId}:${id}:${field}`;
-const outcomeAadFor = (userId: string, id: string, field: string) =>
-  `decision-outcome:v1:${userId}:${id}:${field}`;
+type DecisionColumn =
+  | 'topicCiphertext'
+  | 'choiceCiphertext'
+  | 'backgroundCiphertext'
+  | 'constraintsCiphertext'
+  | 'optionsCiphertext'
+  | 'reasonCiphertext'
+  | 'criteriaCiphertext'
+  | 'expectedOutcomeCiphertext'
+  | 'risksCiphertext';
+
+type OutcomeColumn =
+  | 'actualCiphertext'
+  | 'gapCiphertext'
+  | 'ratingCiphertext'
+  | 'missedFactorsCiphertext'
+  | 'lessonCiphertext';
+
+// 列名而不是短名：调用方写错一列会撞上类型检查，不会悄悄换一把锁。
+const aadFor = (userId: string, id: string, column: DecisionColumn) =>
+  cognitiveColumnAad('DecisionRecord', column, userId, id);
+const outcomeAadFor = (userId: string, id: string, column: OutcomeColumn) =>
+  cognitiveColumnAad('DecisionOutcome', column, userId, id);
 
 /**
  * 反思扫描只要 topic 那一列，不该为它把九个字段都解一遍。
@@ -41,7 +62,7 @@ export function decryptDecisionTopic(
   viewerUserId: string
 ): string {
   if (row.userId !== viewerUserId) throw new ApiError(403, 'FORBIDDEN', '这条决策不属于当前用户');
-  return decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topic'));
+  return decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topicCiphertext'));
 }
 
 export interface DecisionDto {
@@ -65,21 +86,21 @@ export interface DecisionDto {
 }
 
 function toDto(row: DecisionRecord, now: Date): DecisionDto {
-  const plain = (field: string, ciphertext: string | null) =>
-    ciphertext === null ? null : decryptString(ciphertext, aadFor(row.userId, row.id, field));
+  const plain = (column: DecisionColumn, ciphertext: string | null) =>
+    ciphertext === null ? null : decryptString(ciphertext, aadFor(row.userId, row.id, column));
   return {
     id: row.id,
     category: row.category,
     status: deriveStatus(row, now),
-    topic: decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topic')),
-    choice: decryptString(row.choiceCiphertext, aadFor(row.userId, row.id, 'choice')),
-    background: plain('background', row.backgroundCiphertext),
-    constraints: plain('constraints', row.constraintsCiphertext),
-    options: plain('options', row.optionsCiphertext),
-    reason: plain('reason', row.reasonCiphertext),
-    criteria: plain('criteria', row.criteriaCiphertext),
-    expectedOutcome: plain('expectedOutcome', row.expectedOutcomeCiphertext),
-    risks: plain('risks', row.risksCiphertext),
+    topic: decryptString(row.topicCiphertext, aadFor(row.userId, row.id, 'topicCiphertext')),
+    choice: decryptString(row.choiceCiphertext, aadFor(row.userId, row.id, 'choiceCiphertext')),
+    background: plain('backgroundCiphertext', row.backgroundCiphertext),
+    constraints: plain('constraintsCiphertext', row.constraintsCiphertext),
+    options: plain('optionsCiphertext', row.optionsCiphertext),
+    reason: plain('reasonCiphertext', row.reasonCiphertext),
+    criteria: plain('criteriaCiphertext', row.criteriaCiphertext),
+    expectedOutcome: plain('expectedOutcomeCiphertext', row.expectedOutcomeCiphertext),
+    risks: plain('risksCiphertext', row.risksCiphertext),
     decidedAt: row.decidedAt?.toISOString() ?? null,
     reviewAfter: row.reviewAfter?.toISOString() ?? null,
     confirmedAt: row.confirmedAt?.toISOString() ?? null,
@@ -173,7 +194,7 @@ export async function writeOutcomeCandidates(input: {
     input.content,
     rows.map((row) => ({
       id: row.id,
-      topic: decryptString(row.topicCiphertext, aadFor(input.userId, row.id, 'topic'))
+      topic: decryptString(row.topicCiphertext, aadFor(input.userId, row.id, 'topicCiphertext'))
     }))
   );
   if (matches.length === 0) return;
@@ -182,18 +203,20 @@ export async function writeOutcomeCandidates(input: {
     const id = randomUUID();
     // 派生不出来的分面写 null，不写空串：空串在界面上是一行「有内容但没字」，
     // null 才是「这句没说过」。每列一把封口，把 rating 的密文搬到 actual 列上解不开。
-    const facet = (field: 'gap' | 'rating' | 'missedFactors' | 'lesson', value: string | null) =>
-      value === null ? null : encryptString(value, outcomeAadFor(input.userId, id, field));
+    const facet = (
+      column: 'gapCiphertext' | 'ratingCiphertext' | 'missedFactorsCiphertext' | 'lessonCiphertext',
+      value: string | null
+    ) => (value === null ? null : encryptString(value, outcomeAadFor(input.userId, id, column)));
     return {
       id,
       userId: input.userId,
       decisionId: match.decisionId,
       linkStatus: 'CANDIDATE' as const,
-      actualCiphertext: encryptString(match.actual, outcomeAadFor(input.userId, id, 'actual')),
-      gapCiphertext: facet('gap', match.gap),
-      ratingCiphertext: facet('rating', match.rating),
-      missedFactorsCiphertext: facet('missedFactors', match.missedFactors),
-      lessonCiphertext: facet('lesson', match.lesson),
+      actualCiphertext: encryptString(match.actual, outcomeAadFor(input.userId, id, 'actualCiphertext')),
+      gapCiphertext: facet('gapCiphertext', match.gap),
+      ratingCiphertext: facet('ratingCiphertext', match.rating),
+      missedFactorsCiphertext: facet('missedFactorsCiphertext', match.missedFactors),
+      lessonCiphertext: facet('lessonCiphertext', match.lesson),
       sourceMessageId
     };
   });
@@ -214,17 +237,17 @@ export interface OutcomeDto {
 }
 
 function toOutcomeDto(row: DecisionOutcome): OutcomeDto {
-  const plain = (field: string, ciphertext: string | null) =>
-    ciphertext === null ? null : decryptString(ciphertext, outcomeAadFor(row.userId, row.id, field));
+  const plain = (column: OutcomeColumn, ciphertext: string | null) =>
+    ciphertext === null ? null : decryptString(ciphertext, outcomeAadFor(row.userId, row.id, column));
   return {
     id: row.id,
     decisionId: row.decisionId,
     linkStatus: row.linkStatus,
-    actual: decryptString(row.actualCiphertext, outcomeAadFor(row.userId, row.id, 'actual')),
-    gap: plain('gap', row.gapCiphertext),
-    rating: plain('rating', row.ratingCiphertext),
-    missedFactors: plain('missedFactors', row.missedFactorsCiphertext),
-    lesson: plain('lesson', row.lessonCiphertext),
+    actual: decryptString(row.actualCiphertext, outcomeAadFor(row.userId, row.id, 'actualCiphertext')),
+    gap: plain('gapCiphertext', row.gapCiphertext),
+    rating: plain('ratingCiphertext', row.ratingCiphertext),
+    missedFactors: plain('missedFactorsCiphertext', row.missedFactorsCiphertext),
+    lesson: plain('lessonCiphertext', row.lessonCiphertext),
     sourceMessageId: row.sourceMessageId,
     recordedAt: row.recordedAt.toISOString()
   };
@@ -313,8 +336,8 @@ export async function readDecisionContext(turn: {
   if (rows.length === 0) return [];
   const candidates = rows.map((row) => ({
     id: row.id,
-    content: decryptString(row.topicCiphertext, aadFor(turn.userId, row.id, 'topic')),
-    choice: decryptString(row.choiceCiphertext, aadFor(turn.userId, row.id, 'choice')),
+    content: decryptString(row.topicCiphertext, aadFor(turn.userId, row.id, 'topicCiphertext')),
+    choice: decryptString(row.choiceCiphertext, aadFor(turn.userId, row.id, 'choiceCiphertext')),
     recordedAt: (row.decidedAt ?? row.createdAt).toISOString()
   }));
   const scored = scoreByKeyword(turn.query, candidates)

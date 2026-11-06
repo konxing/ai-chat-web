@@ -397,11 +397,14 @@ describe('截断要说出来', () => {
 });
 
 describe('抄过来的那道锁', () => {
-  it('这一片不 import 洞察那两条路由的模块（静态禁令），所以 AAD 式子必须由用例钉住', async () => {
+  it('这一片不 import 洞察那两条路由的模块（静态禁令），两边都按模型 + 列查同一张表', async () => {
     const body = source('src/lib/cognitive/profile-reads.ts');
+    const reflections = source('src/lib/cognitive/reflections.ts');
     expect(body).not.toContain('@/lib/cognitive/reflections');
-    // 洞察那一屏的 AAD 式子；这里断的是两边写着同一个式子，任何一边改了都会红。
-    expect(source('src/lib/cognitive/reflections.ts')).toContain('`reflection:v1:${userId}:${id}:${field}`');
-    expect(body).toContain('`reflection:v1:${userId}:${id}:title`');
+    // AAD 的式子不再各抄一份：两边都必须按「ReflectionRecord + titleCiphertext」去覆盖表里查。
+    // 表本身和 schema 的逐列对照由 `cognitive-rotate-coverage.test.ts` 的 A 组钉住。
+    expect(reflections).toContain("cognitiveColumnAad('ReflectionRecord'");
+    expect(body).toContain("cognitiveColumnAad('ReflectionRecord'");
+    expect(body).toContain("'titleCiphertext'");
   });
 });

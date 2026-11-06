@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { decryptDecisionTopic } from './decisions';
+import { cognitiveColumnAad } from './encrypted-columns';
 import { decryptMemoryContent } from './memories';
 import type { ConfidenceBand } from './confidence';
 import { confidenceBandOf } from './reflection-evidence';
@@ -48,7 +49,8 @@ export type ReflectionSnoozeDays = 3 | 7 | 30;
 
 const DAY_MS = 86_400_000;
 
-const aadFor = (userId: string, id: string, field: string) => `reflection:v1:${userId}:${id}:${field}`;
+const aadFor = (userId: string, id: string, column: string) =>
+  cognitiveColumnAad('ReflectionRecord', column, userId, id);
 
 export interface ReflectionDto {
   id: string;
@@ -87,15 +89,15 @@ export interface ReflectionDto {
 
 /** 反证搜索用的关键词不进 DTO：它是正文的派生物，读侧和界面都不需要它。 */
 function toDto(row: ReflectionRecord, now: Date): ReflectionDto {
-  const plain = (field: string, ciphertext: string | null) =>
-    ciphertext === null ? null : decryptString(ciphertext, aadFor(row.userId, row.id, field));
+  const plain = (column: string, ciphertext: string | null) =>
+    ciphertext === null ? null : decryptString(ciphertext, aadFor(row.userId, row.id, column));
   return {
     id: row.id,
     type: row.type,
     status: deriveStatus(row, now),
-    title: decryptString(row.titleCiphertext, aadFor(row.userId, row.id, 'title')),
-    body: decryptString(row.bodyCiphertext, aadFor(row.userId, row.id, 'body')),
-    alternatives: plain('alternatives', row.alternativesCiphertext),
+    title: decryptString(row.titleCiphertext, aadFor(row.userId, row.id, 'titleCiphertext')),
+    body: decryptString(row.bodyCiphertext, aadFor(row.userId, row.id, 'bodyCiphertext')),
+    alternatives: plain('alternativesCiphertext', row.alternativesCiphertext),
     confidenceBand: confidenceBandOf(row.confidence),
     isPrimary: false,
     sampleCount: row.sampleCount,
@@ -336,8 +338,8 @@ function columnsFor(
       return {
         status: 'EDITED',
         decidedAt: input.now,
-        titleCiphertext: encryptString(validateEdited('title', input.title), aadFor(userId, id, 'title')),
-        bodyCiphertext: encryptString(validateEdited('body', input.body), aadFor(userId, id, 'body'))
+        titleCiphertext: encryptString(validateEdited('title', input.title), aadFor(userId, id, 'titleCiphertext')),
+        bodyCiphertext: encryptString(validateEdited('body', input.body), aadFor(userId, id, 'bodyCiphertext'))
       };
   }
 }

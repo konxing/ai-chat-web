@@ -9,6 +9,14 @@
  * attachment file under the new key. The old key stays readable through
  * MASTER_KEYRING for rollback.
  *
+ * Coverage is two lists, deliberately different in kind:
+ * - The five non-cognitive families (chat title, message, provider key, attachment
+ *   name/text/chunks, attachment file) keep their AAD spellings inline below.
+ *   Changing one character strands every historical row, so they are not table-driven.
+ * - The cognitive columns come from `src/lib/cognitive/encrypted-columns.ts` — one
+ *   row per `*Ciphertext` column in the nine cognitive models. Adding a column there
+ *   is what makes it rotate; a new column missing from that table fails a unit test.
+ *
  * The script never edits .env and never prints key material to stdout.
  */
 import 'dotenv/config';
@@ -105,6 +113,9 @@ async function main() {
   const nextKeyring = JSON.stringify({ ...ring });
 
   const { decryptString, encryptString, cipherKeyId, decryptBuffer, encryptBuffer } = await import('../src/lib/crypto');
+  const { COGNITIVE_ENCRYPTED_COLUMNS, cognitiveColumnCoord, rotateColumnPayload } = await import(
+    '../src/lib/cognitive/encrypted-columns'
+  );
   const prisma = new PrismaClient();
 
   const rotateString = (payload: string, aad: string): string | null => {
@@ -112,7 +123,22 @@ async function main() {
     return encryptString(decryptString(payload, aad), aad);
   };
 
-  const stats = { chats: 0, messages: 0, providers: 0, attachments: 0, files: 0, skippedFiles: 0, missingFiles: 0, badFiles: 0 };
+  interface DynamicModel {
+    findMany(args: { select: Record<string, boolean> }): Promise<Record<string, unknown>[]>;
+    update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  }
+
+  const stats = {
+    chats: 0,
+    messages: 0,
+    providers: 0,
+    attachments: 0,
+    files: 0,
+    cognitive: 0,
+    skippedFiles: 0,
+    missingFiles: 0,
+    badFiles: 0
+  };
   let keyFile: string | null = null;
 
   try {
@@ -219,10 +245,35 @@ async function main() {
       plain.fill(0);
     }
 
+    // 认知侧二十五个密文列：模型、列、AAD 口径全部来自那张表。
+    // 这里不手抄任何一段封口串——抄一份就会漏一列，这次的缺口就是这么来的。
+    for (const entry of COGNITIVE_ENCRYPTED_COLUMNS) {
+      const model = (prisma as unknown as Record<string, DynamicModel>)[entry.client];
+      if (!model) throw new Error(`rotate: 覆盖表里的模型键在 prisma 上不存在：${entry.client}`);
+      const rows = await model.findMany({ select: { id: true, userId: true, [entry.column]: true } });
+      for (const row of rows) {
+        const payload = row[entry.column] as string | Buffer | null;
+        if (payload === null || payload === undefined) continue;
+        const coord = cognitiveColumnCoord(
+          entry.model,
+          entry.column,
+          row.userId as string,
+          row.id as string
+        );
+        const next = rotateColumnPayload(entry, payload, args.newKeyId, coord);
+        if (next === null) continue;
+        if (!args.dryRun) {
+          await model.update({ where: { id: row.id as string }, data: { [entry.column]: next } });
+        }
+        stats.cognitive += 1;
+      }
+    }
+
     console.log(
       `rotate: ${args.dryRun ? 'would rotate' : 'rotated'} ` +
         `${stats.chats} chats, ${stats.messages} messages, ${stats.providers} provider keys, ` +
-        `${stats.attachments} attachment records, ${stats.files} files` +
+        `${stats.attachments} attachment records, ${stats.files} files, ` +
+        `${stats.cognitive} cognitive columns` +
         `${stats.skippedFiles ? `, ${stats.skippedFiles} files already on new key` : ''}` +
         `${stats.missingFiles ? `, ${stats.missingFiles} missing files` : ''}` +
         `${stats.badFiles ? `, ${stats.badFiles} files skipped (bad format)` : ''}`

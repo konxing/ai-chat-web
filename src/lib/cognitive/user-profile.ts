@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { ApiError } from '@/lib/http';
 import { decryptString, encryptString } from '@/lib/crypto';
+import { cognitiveColumnAad } from './encrypted-columns';
 
 /**
  * 用户画像条目（任务书 8.2 的写侧与读侧）。
@@ -25,7 +26,8 @@ export const PROFILE_LIST_MAX_ROWS = 200;
 /** 来源数组是客户端能递进来的列，库层管不了长度，所以在入口封顶。 */
 const PROFILE_SOURCE_MAX_IDS = 20;
 
-const aadFor = (userId: string, id: string) => `user-profile:v1:${userId}:${id}:content`;
+const aadFor = (userId: string, id: string) =>
+  cognitiveColumnAad('UserProfileEntry', 'contentCiphertext', userId, id);
 
 interface ProfileRow {
   id: string;
