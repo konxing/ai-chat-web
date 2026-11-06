@@ -111,11 +111,23 @@ function toDto(row: ReflectionRecord, now: Date): ReflectionDto {
   };
 }
 
+/**
+ * 读出来的状态：过期的判成 EXPIRED，稍后到期的判回 PENDING。
+ *
+ * 稍后这一档必须在这儿判而不是只靠 sweep 的收割，因为 6.6 的冷却现在可调：收割排在闸门之后，
+ * 一天一轮时「稍后 3 天」最多迟到一天，调成每月以后同一句「稍后」会静默变成「稍后一个月」。
+ * 到期用 `<=`，和收割那句 `snoozedUntil: { lte: now }` 同一个口径。
+ * 顺序是有意 TTL 在前：一条 `expiresAt` 已过的稍后洞察过期就是过期，不因「稍后」也到了就续命。
+ */
 function deriveStatus(row: ReflectionRecord, now: Date): ReflectionStatus {
-  if (row.status === 'PENDING' && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
+  const status =
+    row.status === 'SNOOZED' && row.snoozedUntil !== null && row.snoozedUntil.getTime() <= now.getTime()
+      ? 'PENDING'
+      : row.status;
+  if (status === 'PENDING' && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
     return 'EXPIRED';
   }
-  return row.status;
+  return status;
 }
 
 /**
@@ -285,8 +297,14 @@ export async function setReflectionStatus(
   }
 
   const data = columnsFor(userId, id, input);
+  // 条件更新带的是预检同一套口径：库里还是 PENDING，或者 SNOOZED 且到期（预检把那条派生成 PENDING）。
+  // 少第二支，界面上点得动的按钮在这里永远 409；整个去掉状态条件，并发抢输时就会覆盖别人刚写的状态。
   const updated = await prisma.reflectionRecord.updateMany({
-    where: { id, userId, status: 'PENDING' },
+    where: {
+      id,
+      userId,
+      OR: [{ status: 'PENDING' }, { status: 'SNOOZED', snoozedUntil: { lte: now } }]
+    },
     data
   });
   if (updated.count === 0) {

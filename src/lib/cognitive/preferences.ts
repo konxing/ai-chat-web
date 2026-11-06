@@ -1,4 +1,6 @@
 import { prisma } from '@/lib/prisma';
+// 类型住在 reflection-display 那一侧（洞察这一屏有审计过的包边界），这里以 `import type` 引用，编译期抹掉。
+import type { ReflectionCooldown } from './reflection-display';
 
 /**
  * 认知引擎的模块各自能被单个用户打开或关掉，默认全关。
@@ -16,6 +18,7 @@ export interface CognitivePreferences {
   decisionMemoryEnabled: boolean;
   adaptiveMemoryEnabled: boolean;
   emotionTransparency: EmotionTransparency;
+  reflectionCooldown: ReflectionCooldown;
   /**
    * 任务书 7.3 的「暂停长期记忆写入」。它故意不是第九个模块开关：
    * 模块开关管「这个模块要不要工作」，关掉后读侧也不再注入；这一列只管「还记不记新东西」，
@@ -24,7 +27,10 @@ export interface CognitivePreferences {
   memoryWritePaused: boolean;
 }
 
-type FlagKey = Exclude<keyof CognitivePreferences, 'emotionTransparency' | 'memoryWritePaused'>;
+type FlagKey = Exclude<
+  keyof CognitivePreferences,
+  'emotionTransparency' | 'reflectionCooldown' | 'memoryWritePaused'
+>;
 
 /** 任务书 1.1 的八个开关：前七个各对一个模块，第八个管策略学习层。 */
 export const COGNITIVE_FLAGS: readonly FlagKey[] = [
@@ -38,9 +44,10 @@ export const COGNITIVE_FLAGS: readonly FlagKey[] = [
   'adaptiveMemoryEnabled'
 ];
 
-/** 库里存大写枚举（Prisma 的 EmotionTransparency），对外一律小写。 */
-type StoredRow = Omit<CognitivePreferences, 'emotionTransparency'> & {
+/** 库里存大写枚举（Prisma 的 EmotionTransparency / ReflectionCooldown），对外一律小写。 */
+type StoredRow = Omit<CognitivePreferences, 'emotionTransparency' | 'reflectionCooldown'> & {
   emotionTransparency: 'OFF' | 'IMPLICIT' | 'EXPLICIT';
+  reflectionCooldown: 'DAILY' | 'WEEKLY' | 'MONTHLY';
 };
 
 const OFF: CognitivePreferences = {
@@ -53,6 +60,7 @@ const OFF: CognitivePreferences = {
   decisionMemoryEnabled: false,
   adaptiveMemoryEnabled: false,
   emotionTransparency: 'implicit',
+  reflectionCooldown: 'daily',
   memoryWritePaused: false
 };
 
@@ -68,11 +76,28 @@ const FROM_STORED: Record<string, EmotionTransparency> = {
   EXPLICIT: 'explicit'
 };
 
+const COOLDOWN_TO_STORED: Record<ReflectionCooldown, StoredRow['reflectionCooldown']> = {
+  daily: 'DAILY',
+  weekly: 'WEEKLY',
+  monthly: 'MONTHLY'
+};
+
+/**
+ * 库里那一档认不出来就回落到 `daily`，不是随便挑一个默认值：`daily` 是这一列的建表默认，
+ * 也就是「这条记录早于可配置冷却」的形状。回落它等于回落加这一列之前的行为。
+ */
+const COOLDOWN_FROM_STORED: Record<string, ReflectionCooldown> = {
+  DAILY: 'daily',
+  WEEKLY: 'weekly',
+  MONTHLY: 'monthly'
+};
+
 export type CognitivePreferencesPatch = Partial<CognitivePreferences>;
 
 function toPreferences(row: StoredRow): CognitivePreferences {
   const preferences = {
     emotionTransparency: FROM_STORED[row.emotionTransparency] ?? 'implicit',
+    reflectionCooldown: COOLDOWN_FROM_STORED[row.reflectionCooldown] ?? 'daily',
     memoryWritePaused: row.memoryWritePaused
   } as CognitivePreferences;
   for (const flag of COGNITIVE_FLAGS) preferences[flag] = row[flag];
@@ -86,6 +111,9 @@ function toStored(patch: CognitivePreferencesPatch): Partial<StoredRow> {
   }
   if (patch.emotionTransparency !== undefined) {
     stored.emotionTransparency = TO_STORED[patch.emotionTransparency];
+  }
+  if (patch.reflectionCooldown !== undefined) {
+    stored.reflectionCooldown = COOLDOWN_TO_STORED[patch.reflectionCooldown];
   }
   if (patch.memoryWritePaused !== undefined) stored.memoryWritePaused = patch.memoryWritePaused;
   return stored;

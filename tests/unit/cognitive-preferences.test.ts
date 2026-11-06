@@ -172,3 +172,62 @@ describe('认知模块开关', () => {
     expect(db.reads).toEqual([{ userId: USER_A }]);
   });
 });
+
+/**
+ * 任务书 6.6 :722「建议对同一主题建立去重键，并设置可配置的冷却规则」。
+ * 去重键早就在了（`dedupKey` 加库层 `@@unique([userId, dedupKey])`），缺的是后一半：
+ * 扫描节奏今天写死在 `REFLECTION_SWEEP_COOLDOWN_HOURS = 24`，用户改不动。
+ *
+ * 这一组只钉「档位进了偏好，而且进的时候没把别的东西顺手动掉」。最关键的是**默认档必须等于
+ * 今天那一档**：加一个设置项若同时改了所有现存用户的节奏，那就不是设置，是一次偷偷的行为变更
+ * ——和片 7.2 那次「归档不许改动读侧」同一条立场。
+ */
+describe('反思生成节奏（6.6 的可配置冷却）', () => {
+  it('库里没有记录 ⇒ 默认每天，就是今天写死的那一档，不因新增设置项而改行为', async () => {
+    const { getCognitivePreferences } = await prefs();
+
+    const preferences = await getCognitivePreferences(USER_A);
+
+    expect(preferences.reflectionCooldown).toBe('daily');
+  });
+
+  it('三档各自往返：对外小写、库里大写枚举，和 emotionTransparency 同一套口径', async () => {
+    const { updateCognitivePreferences } = await prefs();
+
+    await updateCognitivePreferences(USER_A, { reflectionCooldown: 'weekly' });
+    expect(db.rows.get(USER_A)!.reflectionCooldown).toBe('WEEKLY');
+
+    await updateCognitivePreferences(USER_A, { reflectionCooldown: 'monthly' });
+    expect(db.rows.get(USER_A)!.reflectionCooldown).toBe('MONTHLY');
+
+    const { getCognitivePreferences } = await prefs();
+    expect((await getCognitivePreferences(USER_A)).reflectionCooldown).toBe('monthly');
+  });
+
+  it('只改节奏 ⇒ 八个开关、情感透明度和暂停写入一个都不动', async () => {
+    const { updateCognitivePreferences, getCognitivePreferences } = await prefs();
+    await updateCognitivePreferences(USER_A, {
+      memoryEnabled: true,
+      reflectionEnabled: true,
+      emotionTransparency: 'explicit',
+      memoryWritePaused: true
+    });
+
+    await updateCognitivePreferences(USER_A, { reflectionCooldown: 'weekly' });
+
+    expect(await getCognitivePreferences(USER_A)).toMatchObject({
+      memoryEnabled: true,
+      reflectionEnabled: true,
+      emotionTransparency: 'explicit',
+      memoryWritePaused: true,
+      reflectionCooldown: 'weekly'
+    });
+  });
+
+  it('节奏是一列设置，不是第九个开关：八个开关的名单里不许出现它', async () => {
+    const { COGNITIVE_FLAGS } = await prefs();
+
+    expect(COGNITIVE_FLAGS).toHaveLength(8);
+    expect(COGNITIVE_FLAGS).not.toContain('reflectionCooldown');
+  });
+});

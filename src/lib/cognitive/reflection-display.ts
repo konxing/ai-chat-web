@@ -43,6 +43,35 @@ export const REFLECTION_SECTIONS: ReadonlyArray<{ status: ReflectionStatus; titl
  */
 export const PENDING_SUBSECTION_LABELS = { primary: '主要', rest: '其余' } as const;
 
+/**
+ * 生成节奏三档（6.6 :722 的可配置冷却）。类型住在这一侧而不是 preferences.ts：洞察这一屏有一条
+ * 审计过的包边界——面板只许引用 reflection-display，而这一列的类型、文案和下拉框顺序是同一件事，
+ * 拆两处定义迟早对不上。服务端（preferences.ts / reflection-sweep.ts）反过来以 `import type` 引用这里，
+ * 编译期抹掉，不产生运行时依赖。对外小写、库里大写枚举，和 emotionTransparency 同一套口径。
+ */
+export type ReflectionCooldown = 'daily' | 'weekly' | 'monthly';
+
+/**
+ * 顺序就是下拉框里的顺序，`daily` 排第一不是排版选择：它是默认档，
+ * 也就是这一列存在之前那个写死的 24 小时。
+ *
+ * 词和解释都放在这一侧，面板只渲染——`每天/每周/每月` 这三个词若在界面里再抄一份，
+ * 用户看到的档位和他选中的那一档就有两个来源，而它们会各自过期。
+ */
+export const COOLDOWN_ORDER: readonly ReflectionCooldown[] = ['daily', 'weekly', 'monthly'];
+
+export const COOLDOWN_LABELS: Record<ReflectionCooldown, string> = {
+  daily: '每天',
+  weekly: '每周',
+  monthly: '每月'
+};
+
+export const COOLDOWN_HINTS: Record<ReflectionCooldown, string> = {
+  daily: '距上次生成满 24 小时。这是默认档，也是加上这一项之前写死的节奏。',
+  weekly: '距上次生成满 7 天。',
+  monthly: '距上次生成满 30 天。'
+};
+
 export interface ReflectionGroup<T> {
   key: string;
   /** null 表示这一区不需要小标题。 */

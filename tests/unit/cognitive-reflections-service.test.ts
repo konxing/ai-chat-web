@@ -599,6 +599,159 @@ describe('状态机：入口只有 PENDING，采纳不多写一个字', () => {
   });
 });
 
+/**
+ * 片Q-5c：稍后到期的洞察在**读取那一刻**回到待处理，不等下一轮扫描。
+ *
+ * 这片必须和 6.6 的可配置冷却一起存在：sweep 的收割（`reflection-sweep.ts:230`）排在冷却闸门
+ * 之后。一天一轮时「稍后 3 天」最多迟到一天；节奏调成每周或每月以后，同一句「稍后」会静默变成
+ * 「稍后一个月」——用户点的天数还写在库里，兑现它的却是他的生成节奏。
+ * 所以到期判断挪到读侧：写侧的收割继续把状态真正翻回去（那是持久的），读侧不依赖它什么时候跑。
+ *
+ * 四条边界：
+ * 一、派生是闭开的（`lte`）：`snoozedUntil` 正好等于此刻就算到期，和 sweep 那一句同一个口径，
+ *    两边差一毫秒的话用户会看到一条「过了一天才回来」的洞察。
+ * 二、读只判不回写。列表读一次就把库里那行改成 PENDING，等于让「主展示三条」在没人碰的时候
+ *    自己变，还绕过了 sweep 的节流。
+ * 三、界面能点的按钮，服务端必须做得成：预检用 `deriveStatus`，条件更新用状态列，两边同一套
+ *    口径。少了写侧这条，到期那条永远 409；把状态条件整个删掉换取通过，并发保护就同时没了。
+ * 四、TTL 优先于稍后到期：`expiresAt` 已过的 SNOOZED 派生成 EXPIRED，不因 `snoozedUntil` 也到了
+ *    就回到待处理——30 天这条线不该被「稍后」续命。
+ */
+describe('稍后到期：读取时派生回 PENDING，动作写侧同口径', () => {
+  beforeEach(() => {
+    tables.clear();
+    switchOn();
+  });
+
+  it('snoozedUntil 正好到 ⇒ 读成 PENDING 并进待处理那一屏；没到和空值的照旧留在稍后', async () => {
+    reflectionTable().seed(
+      reflection('due', { status: 'SNOOZED', snoozedUntil: NOW }),
+      reflection('later', { status: 'SNOOZED', snoozedUntil: new Date(NOW.getTime() + 3 * DAY) }),
+      // 这一档是加 snoozedUntil 之前那批行的形状：判到期必须先认得出「没有时刻」，
+      // 不然一次 `getTime()` 就把整屏读请求打崩。
+      reflection('noStamp', { status: 'SNOOZED', snoozedUntil: null })
+    );
+    const module = await service();
+    const all = await module.listReflections(USER, { now: NOW });
+    expect(new Map(all.map((row) => [row.id, row.status]))).toEqual(
+      new Map([
+        ['due', 'PENDING'],
+        ['later', 'SNOOZED'],
+        ['noStamp', 'SNOOZED']
+      ])
+    );
+    expect((await module.listReflections(USER, { now: NOW, state: 'PENDING' })).map((row) => row.id)).toEqual([
+      'due'
+    ]);
+    expect((await module.listReflections(USER, { now: NOW, state: 'SNOOZED' })).map((row) => row.id)).toEqual([
+      'later',
+      'noStamp'
+    ]);
+  });
+
+  it('到期那条按待处理抢主展示额度：重要度最高的先上，没到期的那条不占', async () => {
+    reflectionTable().seed(
+      reflection('due', { status: 'SNOOZED', snoozedUntil: NOW, importance: 0.99 }),
+      reflection('later', { status: 'SNOOZED', snoozedUntil: new Date(NOW.getTime() + 3 * DAY), importance: 0.98 }),
+      reflection('p1', { importance: 0.5 }),
+      reflection('p2', { importance: 0.4 }),
+      reflection('p3', { importance: 0.3 })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.map((row) => row.id)).toEqual(['due', 'p1', 'p2', 'p3', 'later']);
+    expect(got.filter((row) => row.isPrimary).map((row) => row.id)).toEqual(['due', 'p1', 'p2']);
+  });
+
+  it('读一次不回写库：状态列和 snoozedUntil 一个字都不动，翻状态是 sweep 的活', async () => {
+    const until = new Date(NOW.getTime() - DAY);
+    reflectionTable().seed(reflection('r1', { status: 'SNOOZED', snoozedUntil: until }));
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got[0]!.status).toBe('PENDING');
+    const row = reflectionTable().rows.get('r1')!;
+    expect(row.status).toBe('SNOOZED');
+    expect(row.snoozedUntil).toEqual(until);
+  });
+
+  it('到期那条能直接采纳：读侧判成待处理，写侧必须做得成，不能回一句「已经处理过了」', async () => {
+    reflectionTable().seed(reflection('r1', { status: 'SNOOZED', snoozedUntil: NOW }));
+    const module = await service();
+    const got = await module.setReflectionStatus(USER, 'r1', { action: 'accept', now: NOW });
+    expect(got.status).toBe('ACCEPTED');
+    expect(got.decidedAt).toBe(NOW.toISOString());
+    expect(await module.listReflections(USER, { now: NOW, state: 'PENDING' })).toEqual([]);
+  });
+
+  it('没到期那条还是不能动：409 已处理，库里一个字不改', async () => {
+    const until = new Date(NOW.getTime() + 3 * DAY);
+    reflectionTable().seed(reflection('r1', { status: 'SNOOZED', snoozedUntil: until }));
+    const module = await service();
+    await expect(
+      module.setReflectionStatus(USER, 'r1', { action: 'accept', now: NOW })
+    ).rejects.toMatchObject({ status: 409, code: 'REFLECTION_ALREADY_DECIDED' });
+    const row = reflectionTable().rows.get('r1')!;
+    expect(row.status).toBe('SNOOZED');
+    expect(row.snoozedUntil).toEqual(until);
+    expect(row.decidedAt).toBeNull();
+  });
+
+  it('到期那条第二次动作仍然 409：入口状态只有一个，派生不是万能钥匙', async () => {
+    reflectionTable().seed(reflection('r1', { status: 'SNOOZED', snoozedUntil: NOW }));
+    const module = await service();
+    await module.setReflectionStatus(USER, 'r1', { action: 'snooze', days: 3, now: NOW });
+    expect(reflectionTable().rows.get('r1')!.snoozedUntil).toEqual(new Date(NOW.getTime() + 3 * DAY));
+    await expect(module.setReflectionStatus(USER, 'r1', { action: 'reject', now: NOW })).rejects.toMatchObject({
+      status: 409,
+      code: 'REFLECTION_ALREADY_DECIDED'
+    });
+    expect(reflectionTable().rows.get('r1')!.status).toBe('SNOOZED');
+  });
+
+  it('到期那条确实走了带状态条件的更新：交错时被别的连接往后推迟，仍是 409 且不覆盖', async () => {
+    reflectionTable().seed(reflection('r1', { status: 'SNOOZED', snoozedUntil: NOW }));
+    const table = reflectionTable();
+    const realUpdateMany = table.updateMany.bind(table);
+    const issued: number[] = [];
+    table.updateMany = (args) => {
+      issued.push(1);
+      // 模拟交错：条件更新发出去之前，另一条连接把这条往后推迟了 5 天。
+      // 真库由行锁决定先后，这里能证明的只有「UPDATE 自己带状态条件，抢输了不覆盖」。
+      const row = table.rows.get('r1')!;
+      row.status = 'SNOOZED';
+      row.snoozedUntil = new Date(NOW.getTime() + 5 * DAY);
+      return realUpdateMany(args);
+    };
+    const module = await service();
+    await expect(module.setReflectionStatus(USER, 'r1', { action: 'accept', now: NOW })).rejects.toMatchObject({
+      status: 409
+    });
+    // 这条断言管的是「红」和「把状态条件整个删掉」两种情况：预检就抛 ⇒ 一次更新都没发；
+    // 不带条件的裸更新 ⇒ 命中 1 行，200 覆盖掉别的连接刚写的那 5 天。
+    expect(issued).toEqual([1]);
+    expect(table.rows.get('r1')!.status).toBe('SNOOZED');
+    expect(table.rows.get('r1')!.snoozedUntil).toEqual(new Date(NOW.getTime() + 5 * DAY));
+  });
+
+  it('TTL 优先：expiresAt 已过的稍后洞察派生成 EXPIRED，不给「稍后」续命', async () => {
+    reflectionTable().seed(
+      reflection('r1', {
+        status: 'SNOOZED',
+        snoozedUntil: new Date(NOW.getTime() - DAY),
+        expiresAt: new Date(NOW.getTime() - DAY)
+      })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got[0]!.status).toBe('EXPIRED');
+    expect(got[0]!.isPrimary).toBe(false);
+    await expect(module.setReflectionStatus(USER, 'r1', { action: 'accept', now: NOW })).rejects.toMatchObject({
+      status: 409,
+      code: 'REFLECTION_EXPIRED'
+    });
+  });
+});
+
 function reflectionTable() {
   return buildTables().reflectionRecord;
 }

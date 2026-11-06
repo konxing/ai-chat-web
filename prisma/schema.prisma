@@ -57,6 +57,12 @@ enum EmotionTransparency {
   EXPLICIT
 }
 
+enum ReflectionCooldown {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 /// 任务书 1.2 的七种交互情境。每个用户每种情境一行策略。
 enum MemoryContext {
   GENERAL
@@ -472,6 +478,10 @@ model CognitivePreference {
   decisionMemoryEnabled Boolean             @default(false)
   adaptiveMemoryEnabled Boolean             @default(false)
   emotionTransparency   EmotionTransparency @default(IMPLICIT)
+  /// 任务书 6.6 :722 的「可配置的冷却规则」：两次生成洞察之间至少隔多久。白名单三档而不是一个整数，
+  /// 因为后台那趟扫描是 O(n²) 聚类，把下限放开到一天以下等于让人手动把整池记忆重算成每分钟一次。
+  /// 默认 DAILY = 加上这一列之前写死的那 24 小时：新增设置项不该顺带改掉现存用户的节奏。
+  reflectionCooldown    ReflectionCooldown  @default(DAILY)
   /// 任务书 7.3 的「暂停长期记忆写入」。它不是第九个模块开关：模块开关管「这个模块要不要工作」
   /// （关掉后读侧也不注入），这一列只管「还记不记新东西」——后台不再落库，已存的记忆照常带入对话。
   /// 「记住但不带入」和「暂停写入但继续带入」必须是两件事，所以闸门只放在写侧的最早一处。

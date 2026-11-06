@@ -108,13 +108,17 @@ export const adminConfigSchema = z.object({
 });
 
 /**
- * 十个字段全部可选：只提交改动的那一项，其余保持原值。
+ * 十一个字段全部可选：只提交改动的那一项，其余保持原值。
  *
  * memoryWritePaused 和那八个开关走同一个口子，但它不是第九个模块开关：
  * 模块开关管「这个模块要不要工作」，关掉后读侧也不注入；这一列只管「还记不记新东西」，
  * 已存的记忆照常带入对话。之所以不拆成第二个接口，是因为它和开关改的是同一行 CognitivePreference，
  * 拆两个入口只是多一条能改同一行的路——边界靠 preferences.ts 里那条「不进 COGNITIVE_FLAGS」的断言守，
  * 不靠多一个路由。
+ *
+ * reflectionCooldown（6.6 的可配置冷却）同理走这个口子，但它挡的是另一类值：这里用三档白名单而不是
+ * 一个放宽的整数，因为 `0` 或 `'hourly'` 一旦过库，后台那趟 O(n²) 聚类就等于被人手动调成「每分钟重算
+ * 整个记忆池」，而任务书给的节奏下限本来就是一天。一列的取值域要和它的语义一样窄。
  */
 export const cognitivePreferencesPatchSchema = z.object({
   memoryEnabled: z.boolean().optional(),
@@ -126,6 +130,7 @@ export const cognitivePreferencesPatchSchema = z.object({
   decisionMemoryEnabled: z.boolean().optional(),
   adaptiveMemoryEnabled: z.boolean().optional(),
   emotionTransparency: z.enum(['off', 'implicit', 'explicit']).optional(),
+  reflectionCooldown: z.enum(['daily', 'weekly', 'monthly']).optional(),
   memoryWritePaused: z.boolean().optional()
 });
 

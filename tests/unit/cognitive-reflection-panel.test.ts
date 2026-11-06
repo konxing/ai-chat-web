@@ -262,3 +262,41 @@ describe('设置页接线', () => {
     expect(WORKSPACE).toContain("'reflections'");
   });
 });
+
+/**
+ * 片Q-5：6.6 的可配置冷却在洞察这一屏拿到一个控件。
+ *
+ * 这个控件要防的病有三个：一、界面自己抄一份档位文案（抄的那份会先过期，用户选的和看到的不是一回事）；
+ * 二、改节奏时把八个开关一起 PATCH 上去（等于用户动一个下拉框就把自己所有模块重置一遍）；
+ * 三、没读到当前档位时猜一个显示（猜错的那一档看起来像他选的，而它其实会改变后台翻他记忆的频率）。
+ * 第三条和「开关状态未知」是同一个立场，所以这里读失败留 null、控件禁用。
+ */
+describe('洞察生成节奏控件', () => {
+  it('三档的词只从 reflection-display 引，界面里不出现第二份档位文案', () => {
+    expect(PANEL).toMatch(
+      /import \{[^}]*\bCOOLDOWN_LABELS\b[^}]*\} from '@\/lib\/cognitive\/reflection-display'/
+    );
+    expect((PANEL_CODE.match(/COOLDOWN_LABELS\[/g) ?? [])).toHaveLength(2);
+    expect((PANEL_CODE.match(/COOLDOWN_HINTS\[/g) ?? [])).toHaveLength(1);
+    for (const word of ['每天', '每周', '每月']) {
+      expect(PANEL_CODE).not.toContain(word);
+    }
+  });
+
+  it('PATCH 体里只有这一列：改节奏不许把八个开关一起提交', () => {
+    expect(PANEL_CODE).toContain('json: { reflectionCooldown: next }');
+    expect(PANEL_CODE).not.toMatch(/json: \{[^}]*reflectionCooldown[^}]*,/);
+  });
+
+  it('值以服务端回读为准，且读失败时不猜档：两处回读、一处未知、控件在没有值时禁用', () => {
+    expect((PANEL_CODE.match(/setCooldown\(data\.preferences\.reflectionCooldown\)/g) ?? [])).toHaveLength(2);
+    expect(PANEL_CODE).toContain("value={cooldown ?? ''}");
+    expect(PANEL_CODE).toContain('disabled={cooldown === null || cooldownBusy}');
+    expect(PANEL_CODE).toContain('<option value="">节奏未知</option>');
+  });
+
+  it('控件排在洞察打开的那一屏里：节奏只管生成，关着就没有可管理的生成', () => {
+    expect(PANEL_CODE.indexOf('主动洞察没有打开')).toBeLessThan(PANEL_CODE.indexOf('COOLDOWN_ORDER.map'));
+    expect((PANEL_CODE.match(/COOLDOWN_ORDER\.map/g) ?? [])).toHaveLength(2);
+  });
+});

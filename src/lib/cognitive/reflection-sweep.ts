@@ -6,6 +6,7 @@ import { log } from '@/lib/logger';
 import { decryptDecisionTopic } from './decisions';
 import { decryptMemoryContent } from './memories';
 import { getCognitivePreferences } from './preferences';
+import type { ReflectionCooldown } from './reflection-display';
 import { fromDbMemoryContext, getMemoryPolicies, type MemoryContext, type MemoryPolicy } from './policy';
 import {
   CONF_SAMPLES_FULL,
@@ -52,14 +53,25 @@ import {
  *    写回**同一行**（密文 AAD 绑的就是那一行的 id），见 hasNewEvidence。
  *
  * 冷却用条件 UPDATE 抢，和 task-queue.ts 领任务行是同一个协议：`reflectionSweptAt IS NULL
- * OR < cutoff` 那一半不能省——SQL 里 NULL 不参与比较，漏掉它第一次扫描永远排不上。
+ * OR <= cutoff` 那一半不能省——SQL 里 NULL 不参与比较，漏掉它第一次扫描永远排不上。
+ * 比较用 `<=` 而不是 `<`：设置页那句「距上次生成满 24 小时」判的是满，用 `<` 就等于让人多等一毫秒
+ * 才能对上界面已经承诺的那个数。
  * 先抢后跑：跑挂了也要等满冷却才重来，换掉的是「一次数据库抖动让每两秒重算一遍 O(n²) 聚类」。
  *
  * 测试：tests/unit/cognitive-reflection-sweep.test.ts
  */
 
-/** 冷却。一天一次是任务书 6.6 给的节奏，也是成簇那 O(n²) 一天能承受的次数上限。 */
-export const REFLECTION_SWEEP_COOLDOWN_HOURS = 24;
+/**
+ * 冷却三档各隔多久——任务书 6.6 :722 那句「可配置的冷却规则」落到这一张表上。
+ * `daily` 就是这一项变成可配置之前写死的那 24 小时：默认档必须等于旧行为，否则「加一个设置项」
+ * 顺带就把所有现存用户的扫描节奏改了一遍，那不是设置是一次偷偷的行为变更。
+ * 下限停在一天，是因为成簇那 O(n²) 一天能承受的次数就是这么多，再密也不多产出洞察。
+ */
+export const REFLECTION_COOLDOWN_HOURS: Record<ReflectionCooldown, number> = {
+  daily: 24,
+  weekly: 24 * 7,
+  monthly: 24 * 30
+};
 /** 一轮最多落三条：一屏放得下，而且「攒着一次倒五十条」不是提醒，是轰炸。 */
 export const MAX_NEW_PER_SWEEP = 3;
 /** 没人理的洞察活 30 天。这一列配上 sweepBody 的收割才让 EXPIRED 有个生产者（门槛 7）；读侧也按它提前判。 */
@@ -140,13 +152,16 @@ interface Prepared {
 export async function runReflectionSweep(userId: string, input: { now: Date }): Promise<SweepOutcome> {
   const now = input.now;
 
-  // 开关关着的用户不该被盖上时间戳：他 later 打开开关时，不该为一次根本没跑过的扫描再等一天。
+  // 开关关着的用户不该被盖上时间戳：他以后打开开关时，不该为一次根本没跑过的扫描再等一天。
   let reflectionEnabled: boolean;
   let memoryEnabled: boolean;
+  let cooldownHours: number;
   try {
     const preferences = await getCognitivePreferences(userId);
     reflectionEnabled = preferences.reflectionEnabled === true;
     memoryEnabled = preferences.memoryEnabled === true;
+    // 档位在这一刻现读，不在盖戳时读：用户从每月调回每天，下一轮就该按新的判。
+    cooldownHours = REFLECTION_COOLDOWN_HOURS[preferences.reflectionCooldown];
   } catch {
     log.warn('cognitive.reflection_sweep_failed', { userId, reason: 'preferences_unavailable' });
     return { ...NOTHING_DONE, failed: true };
@@ -160,7 +175,7 @@ export async function runReflectionSweep(userId: string, input: { now: Date }): 
         userId,
         OR: [
           { reflectionSweptAt: null },
-          { reflectionSweptAt: { lt: new Date(now.getTime() - REFLECTION_SWEEP_COOLDOWN_HOURS * HOUR_MS) } }
+          { reflectionSweptAt: { lte: new Date(now.getTime() - cooldownHours * HOUR_MS) } }
         ]
       },
       data: { reflectionSweptAt: now }

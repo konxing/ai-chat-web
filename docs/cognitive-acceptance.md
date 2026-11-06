@@ -243,6 +243,8 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 生产者分布是：`PENDING`/`EXPIRED` 由 `reflection-sweep.ts` 写（落库与到期收割），
 `ACCEPTED`/`REJECTED`/`EDITED`/`SNOOZED` 由 `reflections.ts` 写（用户动作）；
 `SNOOZED` 到期同样由 sweep 放回 `PENDING`，不留只进不出的死状态。
+片Q-5 起这最后一句多了一条腿：**读侧也自己判到期**（`reflections.ts:122` `deriveStatus`），
+因为收割排在冷却闸门之后，而冷却现在可调到每月——只有收割的话，「稍后 3 天」会静默变成「稍后一个月」。
 
 **边界**：~~`allowUserProfile` 依然全仓无读取方，`userModel` 模块也没有实现~~——**这一条 11-05 片 d 作废**，
 画像模块现在有实现、有表、有界面，所以门槛那句的正面一半第一次有了可验的东西：
@@ -344,7 +346,8 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    注意它**不走 `manager.ts` 的注册表**——时间线是对话之外的只读接口，不参与上下文注入，所以那道闸门和
    `MODULE_SWITCH` 是两处独立代码，口径相同（读不出来 = 关）但不会互相提醒。
    **11-04 之后又少了两个「平凡成立」的键**：`decisionMemory`（5-A…5-F：`decisions.ts` + 三条路由 + 设置页面板）
-   和 `reflection`（6-A…6-E：`reflection-sweep.ts` 一天一轮的后台扫描 + `reflections.ts` 读写两侧），
+   和 `reflection`（6-A…6-E：`reflection-sweep.ts` 按用户那一档节奏跑的后台扫描，默认一天一轮、
+   片Q-5 起可调 + `reflections.ts` 读写两侧），
    它们和 `timeline` 一样**不走注册表**——都是对话之外的接口或后台任务，所以闸门同样是独立代码，
    上表那四行洞察用例就是它们的证据。剩下两个键（`userModel` / `emotion`）
    到今天仍然没有任何实现读它们，「关了不执行」还是平凡成立，不是被测出来的。
@@ -376,8 +379,8 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 
 界面暴露四个模块开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）、
 `timelineEnabled`（`timeline-panel.tsx:84-115`，控件在 `:199`）、`decisionMemoryEnabled`
-（`decision-panel.tsx:87-110`，控件在 `:177`）、`reflectionEnabled`（`reflection-panel.tsx:102-124`，控件在 `:202`，
-闸门在 `:111`——关着时这一屏连列表请求都不发）——后两个是 5-F / 6-F 才补的，
+（`decision-panel.tsx:87-110`，控件在 `:177`）、`reflectionEnabled`（`reflection-panel.tsx:114-126`，控件在 `:243-252`，
+闸门在 `:129`——关着时这一屏连列表请求都不发）——后两个是 5-F / 6-F 才补的，
 因为开关得先真有消费者，才轮得到它有一个控件。**`adaptiveMemoryEnabled` 在 11-06 片 k 之前只能走
 `/api/account/cognitive` 改，没有界面入口**；片 k 给了它控件，位置不在模块开关那一屏，而在策略那一屏的
 「自动收紧」卡（`memory-policy-panel.tsx:448-490`，复选框在 `:459`）——它的读者是学习层的闸门
@@ -913,9 +916,9 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
 
 ## Phase 6 判词（主动洞察，11-04 六片落齐 6-A…6-F）
 
-- **数据模型（6-A）**：`prisma/schema.prisma:744`（ReflectionRecord）与 `:804`（ReflectionCitation）。
+- **数据模型（6-A）**：`prisma/schema.prisma:817`（ReflectionRecord）与 `:877`（ReflectionCitation）。
   标题、正文、竞争解释、反证关键词四列全密文，AAD 和决策一样带字段名
-  （`reflection:v1:${userId}:${id}:${field}`，`src/lib/cognitive/reflections.ts:42`）。
+  （`reflection:v1:${userId}:${id}:${field}`，`src/lib/cognitive/reflections.ts:51`）。
   `@@unique([userId, dedupKey])` 让同主题的第二条**在库层插不进来**，去重不靠应用层记着。
   迁移 `20261104110000_proactive_reflection` 由 migrate diff 生成，**11-04 经他一次性授权已在这台真库执行**（见「真库实况」），`ReflectionRecord` / `ReflectionCitation` 实测各 0 行。**这支迁移曾经把后台写侧整条链路打死过**，原因写在「真库实况」里。
 - **规则层（6-B，零模型调用）**：七类 `ReflectionType`（`schema.prisma:165`）都有出题函数与写成常量的阈值
@@ -929,16 +932,18 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
   `importance` 是**不扣反证**的那一份证据量——两个数各说各的事。
   EvidenceCritic（`reflection-evidence.ts:218`）五种拒稿码：`GHOST_CITATION` / `UNSOURCED_ASSERTION` /
   `COUNTER_UNMENTIONED` / `COUNT_MISMATCH` / `HYPOTHESIS_DROPPED`，被拒的洞察**不落库**。
-- **落库与冷却（6-D）**：`reflection-sweep.ts:63-72` 四个常量——一天一轮、一轮最多三条、没人理的活 30 天、单轮硬截止 15 秒。
+- **落库与冷却（6-D）**：`reflection-sweep.ts:70-83` 那几个常量——冷却节奏（6-D 时写死一天一轮，
+  片Q-5 起这一项是用户可调的三档，默认档 `daily` 等于旧行为）、一轮最多三条、没人理的活 30 天、单轮硬截止 15 秒。
   冷却用条件 UPDATE 抢（和 task-queue 领任务行同一协议），先抢后跑。逐情境闸门读策略表的 `allowReflection`
   （`reflection-sweep.ts:452`），这是那个字段在服务端的第一个读取方。
 - **状态机与读侧（6-E）**：六个状态的生产者说得出名字（门槛 7 的静态对账，
   `tests/unit/cognitive-reflection-states.test.ts:55` 直接拿 schema 的 enum 和这张表对账，多一个状态就红）：
   `PENDING`/`EXPIRED` 归 sweep，`ACCEPTED`/`REJECTED`/`EDITED`/`SNOOZED` 归用户动作。
-  「过期」有两处判：sweep 每天收割一次，读侧在 `expiresAt` 已过时当场派生成 `EXPIRED`
-  （`reflections.ts:93`），否则 30 天的 TTL 在界面上要拖到下一次扫描才生效；
+  「过期」有两处判：sweep 每轮收割一次，读侧在 `expiresAt` 已过时当场派生成 `EXPIRED`
+  （`reflections.ts:122` `deriveStatus`），否则 30 天的 TTL 在界面上要拖到下一次扫描才生效；
   动作侧同样拒过期行（409），界面和库里不会各说一套。
-  `SNOOZED` 到期由 sweep 放回 `PENDING`，不留只进不出的死状态。
+  `SNOOZED` 到期由 sweep 放回 `PENDING`，不留只进不出的死状态；片Q-5 起读侧也派生这一条（`lte` 同一口径），
+  而且**动作侧的条件 UPDATE 一起放宽**（`reflections.ts:306`）——只改读侧的话，界面上点得动的按钮会在服务端永远 409。
 - **界面（6-F）**：设置页「洞察」tab（`src/components/settings/reflection-panel.tsx`）读那两条已有路由，
   六个区就是六个状态（11-04 判的甲：全列，空区不渲染）；行内按钮只由 `isActionable` 决定，
   状态机入口只有 `PENDING`，所以给已处理的行摆按钮等于摆一个必然 409 的控件。
@@ -978,7 +983,7 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
   并且这边不再出现 `-NN-NN` 那种 ISO 串——界面里也不许自己 `new Date()` 格式化（另一条断言守着，面板只调纯函数）。
 - **补上的两句话**（他让我自拟文案，所以这两句**不在 11-04 那张逐字表里**；**11-05 他一句「你说的文案都通过了」，两句转正**）：
   每条洞察的区头下面多一行 `生成于 2026年11月4日`——之前的行只有「依据的时间」，用户分不清那是事情发生的时间还是系统想出来的时间；
-  列表读满 100 行（`REFLECTION_LIST_MAX_ROWS`，`reflections.ts:35`）时顶部多一条提示
+  列表读满 100 行（`REFLECTION_LIST_MAX_ROWS`，`reflections.ts:37`）时顶部多一条提示
   `洞察比这一屏多：这里只列出最近 100 条，更早的没有读进来。`——服务端本来就只发 100 行并带 `capped`，
   不说出来就等于用「看不见」冒充「没有」。截断句用的是**实际渲染出来的条数**而不是抄常量，
   因为那个常量在带 prisma 的模块里，界面 import 它会撞上一条边界测试（`cognitive-reflection-panel.test.ts` 的包边界那组）。
@@ -1228,7 +1233,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 |---|---|
 | **归档后再说同一句话，会新建一条当前有效记忆，而不是把归档那条改回来** | 写侧去重池走 `listMemories`，默认口径已经把归档行排除（P8 钉住）。归档的意思是他说了「这条不再代表现在的我」，于是重新说一次就是新的一次表达，不该跟一条他自己收起来的旧行去演化。代价：同一件事在库里可以有两行「当前有效」，历史看起来分叉 |
 | **时间线里看不见归档的行** | R4 甲直接定过：`includeSuperseded` 不放宽归档，被取代的老版本都要在时间线露面，归档那条反而不露——只有「已归档」区块能看见它 |
-| **一条洞察的证据里若引用了已归档的记忆，点开数字仍然看得见那条正文** | `reflections.ts:168-172` 的解释是「引用行已写死了这一行 id：那才是这一条洞察当时依据的东西」，读的是 `findMany({ where: { id: { in: ids } } })`，不经 `listMemories`，所以没有归档口径。这是既有形状：引用要能追溯当时依据的那句话，而不是那句话现在的状态 |
+| **一条洞察的证据里若引用了已归档的记忆，点开数字仍然看得见那条正文** | `reflections.ts:229-238` 的解释是「引用行已写死了这一行 id：那才是这一条洞察当时依据的东西」，读的是 `findMany({ where: { userId, id: { in: memoryIds } } })`，不经 `listMemories`，所以没有归档口径。这是既有形状：引用要能追溯当时依据的那句话，而不是那句话现在的状态 |
 
 ### 真库回滚探针（11-05 他批的第 4 次动库）
 
@@ -2994,7 +2999,7 @@ if (row.status === 'CONFIRMED' && row.reviewAfter !== null && row.reviewAfter.ge
 那条「系统替用户改了状态」的痕迹一旦留下就擦不掉——用户撤销、删除、
 或者换个进程读，看到的是一个库里从来没有被任何动作写过的值。
 这和 6-E 那次 `EXPIRED` 的定局是同一个决定，也复用同一个先例结构
-（`reflections.ts:124` 那句「`state` 过滤发生在派生之后」）。
+（`reflections.ts:157` 那句「`state` 过滤发生在派生之后」）。
 
 两个不对称要写清楚：
 
@@ -3267,7 +3272,7 @@ P5 一次红五处，是这片想要的形状：接口上少传一个参数不�
 | `:254-276` | `phraseReflection` 不再把解释拼进正文，只放进 `alternatives`；**正文里一句解释都不出现** |
 | `:351-355` | critic 第六道只核 `draft.alternatives`（原来核 `own = body`），抄进正文第二遍不算写了它 |
 | `reflection-sweep.ts:127` `:336` `:537` | `Prepared` 带上 `alternatives`，落库写措辞层给的那一份；本地推导段删除，`HYPOTHESIS_PHRASES`/`PatternHypothesis` 两个 import 随之删除 |
-| `reflection-display.ts:94-103` | 前缀抽成导出常量 `ALTERNATIVES_LINE_PREFIX`，文案从「另一种解释：X」改成「这几种解释还没分开：X、Y、Z」 |
+| `reflection-display.ts:164-168` | 前缀抽成导出常量 `ALTERNATIVES_LINE_PREFIX`，文案从「另一种解释：X」改成「这几种解释还没分开：X、Y、Z」 |
 
 前缀改字是这片唯一的文案改动，理由是旧的说不符实：它只承诺「另一种」，而这一屏给的是
 三种并排；「还没分开」说的才是事实——分不开的是规则，不是用户没听懂。
@@ -3363,13 +3368,13 @@ P3 那批红里没有面板文件——面板只看源码，措辞层怎么改�
 拆出来只因为有一处**必须**复用它的地方：
 
 - 写侧：`reflectionConfidence` 在措辞之前算出分数，用它定档，正文因此选哪句口气；
-- 读侧：`reflections.ts:84` 从库里那个分数再算一次，决定卡片上那颗 chip。
+- 读侧：`reflections.ts:99` 从库里那个分数再算一次，决定卡片上那颗 chip。
 
 同一行若在生成时落「这几句说的确实是同一件事」，屏幕上却标成「把握小」，那就是系统自相矛盾。
 两个调用方共用一个函数，这条矛盾在形状上就不可能出现——所以它也需要一条探针来证明没被绕开（P6）。
 
 界面那一侧只多了一个数：卡片头行的类型 chip 之后跟一颗 `text-white/35` 的档位文字
-（`reflection-panel.tsx:266-268`），值只从 `REFLECTION_CONFIDENCE_LABELS` 取。顺序有讲究：
+（`reflection-panel.tsx:351-353`），值只从 `REFLECTION_CONFIDENCE_LABELS` 取。顺序有讲究：
 先说「这是什么」（规律／改口／矛盾…），再说「有多确定」；反过来会让人先接到评价、后接到内容。
 
 ### 三、用例与探针（9 条用例，9 支探针全部当场回滚）
@@ -3471,14 +3476,14 @@ P3 那批红里没有面板文件——面板只看源码，措辞层怎么改�
 
 ### 三、界面这一侧只有一个纯函数
 
-`splitPendingSection`（`reflection-display.ts:61-77`）只做切分，**不排序、不判定、不截断**：
+`splitPendingSection`（`reflection-display.ts:90-105`）只做切分，**不排序、不判定、不截断**：
 
 - 超过三条 → 「主要 / 其余」两块，成员就是服务端标出来的那批；
 - 全是主要（不足三条）或全不是主要 → 一整块且 `title: null`。前者那时「主要」就是这一区本身，
   挂标题等于把同一句话讲两遍；后者是读侧今天不会给的形状，但宁可整块摆出来，
   也不挂一个下面空着的标题（这条也是「不许渲染没有消费者的控件」那一类）。
 
-面板 `reflection-panel.tsx:245` 调它一次，小标题只从 `{group.title}` 渲染（`:254-255`），
+面板 `reflection-panel.tsx:320` 调它一次，小标题只从 `{group.title}` 渲染（`:329-331`），
 「主要」「其余」两个词在界面源码里一次都不出现。子区**不带数**：数已经在区级标题「待确认（N）」上，
 再拼一个等于把同一批行数讲两遍，而两个子区的和恰好等于它——界面自己算就多了一个能和上面对不上的地方。
 
@@ -3548,6 +3553,136 @@ tsc 就报），所以这一条是两层守的——不过这一片跑探针时�
 
 四、**没有加「改写」入口**，仍是 2 的判定（服务端实现了、界面上不露）；这一片的额度也不给控件——
 「3」是任务书给的，改它不是一个用户设置能兜住的事。6.6 后半句「可配置的冷却规则」是另一件，
-留给片Q-5。
+由下面的片Q-5 落地。
+
+## 片Q-5：6.6 的「可配置的冷却规则」是一列设置，而它顺手改掉了「稍后」的语义（11-06）
+
+### 一、任务书那半句和它背后的两个决定
+
+6.6（:716-724）关于频率的原话是三句：**「相同主题的重复反思需要合并。」「同一个事实不能每天重复生成洞察。」
+「建议对同一主题建立去重键，并设置可配置的冷却规则。」** 前两句在 6-D / 片Q-4 已经有主（去重键是库层唯一约束、
+每轮最多三条、`expiresAt` 30 天），这片只剩第三句的**「可配置」**没落地：那之前 `reflection-sweep.ts` 里
+写死 `REFLECTION_COOLDOWN_HOURS = 24`。
+
+两个决定要先说清，因为后面每一处形状都是从它们推出来的：
+
+一、**取值域是三档枚举，不是一个整数。** 后台那趟成簇是 O(n²)（`reflection-sweep.ts` 的池子两两比对），
+把下限放开到一天以下等于让人手动把整个记忆池重算成每分钟一次——那不是「更实时」，是把 worker 的
+一条串行轮次点着。所以 schema 里是 `enum ReflectionCooldown { DAILY WEEKLY MONTHLY }`
+（`prisma/schema.prisma:60-64`），接口层是 `z.enum(['daily','weekly','monthly'])`（`validation.ts:133`），
+白名单挡的正是 `0` / `'hourly'` 这类「语法上合法、语义上会打死扫描」的值。
+
+二、**默认档必须等于旧行为。** `@default(DAILY)`（`prisma/schema.prisma:484`）就是加这一列之前写死的那 24 小时：
+新增一个设置项不该顺带改掉现存用户的节奏，否则那次迁移是一次偷偷的行为变更，不是设置。
+读侧回落（`preferences.ts:89` `COOLDOWN_FROM_STORED`）也回落到 `daily`，理由同一句。
+
+### 二、落地形状：一列、一处消费、一个控件
+
+- **迁移**：`prisma/migrations/20261109000000_reflection_cooldown`（`CREATE TYPE` + `ADD COLUMN NOT NULL DEFAULT`）。
+  已由我执行（`npx prisma migrate deploy`，`prisma migrate status` 现在 20 支、`up to date`），
+  这是 11-05 那批授权之内的动作。列可空性上没有新密文，**画像/记忆正文一个字节都没动**。
+- **偏好层**（`preferences.ts`）：对外小写、库里大写枚举，和 `emotionTransparency` 走同一套
+  `TO_STORED` / `FROM_STORED` 口径；`toStored(patch)` 只写改过的那一列。这一列**不进** `COGNITIVE_FLAGS`
+  （`:32` 把它和另外两个非布尔列一起 `Exclude` 掉），所以八个开关的既有 4 处遍历、限流、审计形状一个都没被牵动。
+- **消费点**（`reflection-sweep.ts:164`）：档位**在抢戳这一刻现读**，不在盖戳时读——用户从每月调回每天，
+  下一轮就该按新的判（两条用例专门钉这一条，见下表）。比较用 `lte`（`:178`）而不是 `lt`，
+  因为设置页那句写的是「满 24 小时」；这一处是探针过程中发现的真实口径不一致，先补红用例再改的。
+- **界面**（`reflection-panel.tsx:267-300`）：打开开关之后多一个「洞察生成节奏」下拉，三档逐字
+  「每天 / 每周 / 每月」+ 各自一句提示（文案住在 `reflection-display.ts:63-73`，界面不另抄）。
+  值一律取服务端 PATCH 回来的那一档（`setCooldown(data.preferences.reflectionCooldown)`），前端不自己猜；
+  读不到时不替用户选一档，而是明说「当前节奏没读到」——猜错的那一档看起来像他选的，而它决定后台多久翻一次他的记忆。
+- **包边界**：面板仍然只 import `@/lib/cognitive/reflection-display` 一个认知模块。为此把
+  `ReflectionCooldown` 类型定义**搬到** `reflection-display.ts:52`（服务端 `preferences.ts` 用 `import type` 引用它），
+  而不是把那条审计过的用例放宽——和 `memory-module` / `user-model-module` 已有的方向一致：display 模块是共享词汇与类型的正典位置。
+
+### 三、这一列改动带出的第二处耦合：「稍后 3 天」不能等于「稍后一个月」
+
+冷却一天一轮时，sweep 的收割（`reflection-sweep.ts:232` 把 `SNOOZED` 且 `snoozedUntil <= now` 的行放回
+`PENDING`）最多让一次「稍后」迟到一天。改成可调以后，选了每月的用户会得到一条**静默**的语义变更：
+他点的是 3 天，兑现它的那段代码要等他自己那一轮扫描。这不是显示 bug——那条行既不在待处理也不在稍后，
+而它本来也不该占主展示额度。
+
+处理方式是把到期判断挪到**读侧**，同时把**写侧一起对齐**（`reflections.ts`）：
+
+```ts
+// deriveStatus（:122）
+const status = row.status === 'SNOOZED' && row.snoozedUntil !== null
+  && row.snoozedUntil.getTime() <= now.getTime() ? 'PENDING' : row.status;
+if (status === 'PENDING' && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) return 'EXPIRED';
+```
+
+三个决定各有用例：
+
+- **读只判，不回写。** 列表读一次就把库里那行翻成 `PENDING`，等于让「主展示三条」在没人碰的时候自己变，
+  还绕过了 sweep 的节流。持久的那次翻转仍然是收割的活，两条路径最终收敛到同一个状态。
+- **`lte` 与收割同一口径。** 判到期用 `<=`，和 `:232` 那句 `{ lte: now }` 一个字不差；
+  两边差一毫秒的话，界面上会出现一条「过了一整天才回来」的洞察。
+- **TTL 优先于稍后到期。** `expiresAt` 已过的 `SNOOZED` 派生成 `EXPIRED`，不因为「稍后」也到了就回到待处理。
+  顺序写反过一次（P4 探的就是反过来的形状），红了 1 条。
+- **动作侧必须跟着放宽**（`:306`：`OR: [{ status: 'PENDING' }, { status: 'SNOOZED', snoozedUntil: { lte: now } }]`）。
+  预检用派生状态、条件 UPDATE 用列值，两边不同口径的话，界面点得动的按钮永远吃 409；
+  反过来，为了「让它通过」把状态条件整个删掉，并发保护同时就没了。这一对由 P2 / P3 两支探针分别守住。
+
+### 四、用例与探针（本片净增 31 条，10 支探针全部当场字面回滚）
+
+| 文件 | 新增 | 钉住什么 |
+|---|---|---|
+| `cognitive-preferences.test.ts` | 4 | 没记录时算成 `daily`；三档各自往返（对外小写 / 库里大写）；只改节奏时八个开关 + 情感透明度 + 暂停写入一个都不动；`COGNITIVE_FLAGS` 仍是 8 项且不含这一列 |
+| `cognitive-preferences-route.test.ts` | 4 | GET 默认 `daily`；PATCH `weekly` 落库为 `WEEKLY` 且不碰开关；`0 / 'hourly' / true / 'daily '` 四种都 400 `VALIDATION_ERROR` 且零写入；改节奏留审计（这一列和开关一样是用户亲手定的）；GET 形状那条同步补上这一列 |
+| `cognitive-reflection-sweep.test.ts` | 10 | WEEKLY+3 天不跑、WEEKLY+6 天不跑（同一时刻按 daily 会跑，正向对照）、daily+6 天跑、MONTHLY 29/31、DAILY 23/25、从没扫过三档都抢得到、每月↔每天互调都当场生效、正好满 24 小时跑 |
+| `cognitive-reflection-display.test.ts` | 3 | 三档标签与提示逐字、`COOLDOWN_ORDER` 次序、和 `prisma/schema.prisma` 的 `enum ReflectionCooldown` 成员数与集合对账（两边都排序比） |
+| `cognitive-reflection-panel.test.ts` | 4 | import 只指向 display 且三档词不在界面另抄；PATCH body 只有 `reflectionCooldown` 一个键；值取自服务端回包 + `disabled` 与「节奏未知」两条读不到时不猜；节奏块排在开关块之后 |
+| `cognitive-reflections-service.test.ts` | 8 | 到期那刻（`snoozedUntil === now`）算到期并进待处理、没到期与 `snoozedUntil: null` 的旧行照旧；到期的能抢主展示额度；读一次不回写列；到期那条能直接采纳（不是 409）；没到期的仍 409 `REFLECTION_ALREADY_DECIDED` 且零写入；到期后第二次动作照样 409；交错时被别的连接推迟 ⇒ 更新确实发出且抢输不覆盖；TTL 优先派生 `EXPIRED` |
+
+| 探针 | 改动 | 红了谁（实测条数） |
+|---|---|---|
+| P1 | `deriveStatus` 的到期判断 `<`（差一毫秒） | 5 处 service：到期边界 / 抢额度 / 能采纳 / 第二次动作 / 交错 |
+| P2 | 条件 UPDATE 只留 `{ status: 'PENDING' }`（写侧不跟着放宽） | 2 处 service：到期那条能采纳 / 第二次动作 |
+| P3 | 条件 UPDATE 退化成 `{ id, userId }`（裸更新） | 2 处 service：本片交错 + 6-E 原有的那条交错 |
+| P4 | TTL 判断与稍后派生的先后颠倒 | 1 处 service：TTL 优先 |
+| P5 | 摘掉 `snoozedUntil !== null` 的判空 | 1 处 service：`null` 那条旧行直接 `TypeError` |
+| P6 | sweep 写死 `cooldownHours = 24`（不看那一档） | 5 处 sweep：WEEKLY 3 天 / 6 天 / MONTHLY 29 天 / 两个互调 |
+| P7 | `toStored` 永远写 `DAILY`（改了不落库） | 4 处：preferences 往返 + 「其他列不动」+ 路由落库 + 路由审计 |
+| P8 | zod 白名单放宽成 `z.string().min(1)` | 1 处路由：`'hourly'` 从 400 变 200 |
+| P9 | `monthly: 24 * 28`（那一档的数写错） | 1 处 sweep：MONTHLY 29 天 |
+| P10 | 抢戳比较用 `lt`（原样，探针时发现的） | 先由新用例红（`expected false to be true`），改成 `lte` 后转绿 |
+
+**P10 记的是「探针没有假通过」。** 写 P6 的时候顺手想了一下 `<` 与 `<=` 在这一处有没有用例守着——
+答案是没有，而界面那句文案写的是「满 24 小时」。先补一条正好 24 小时的用例看它红，再把 `lt` 改成 `lte`。
+这一处不影响安全、影响的是一次扫描早跑还是晚跑一毫秒，但文案已经承诺了那个数，代码就不该多要一毫秒。
+
+三处**过程里自己犯的**错，记下来（这类错会让人把「红了」读成「实现缺一块」）：
+
+1. **有一条红用例是我推错的，不是代码错。** 原本写「WEEKLY + 8 天前 ⇒ 冷却没到」——8 天已经越过一周那一档，
+   sweep 跑是对的。改成 3 天并重命名，实现一个字没动。**Why it matters**：如果当时按「红了就改实现」走，
+   会得到一个把每周当每月用的错代码。
+2. **`describe` 里的第二轮要自己清夹具。** `tables.clear()` 之后必须 `buildTables()`——那些表是 `named()`
+   缓存的，光清 Map 下一次拿到 `undefined`（`TypeError: reading 'seed'`）。抽成本地 `reset()` 解决。
+3. **schema 对账那条第一次红了，红在比较的右边。** `Object.keys(...).sort()` 对上未排序的 enum 成员列表
+   （schema 顺序是 DAILY/WEEKLY/MONTHLY，字母序是 daily/monthly/weekly）。两边都排序才是想要的断言，
+   第一次写少了一边。
+
+门禁：`npx tsc --noEmit` 无输出；全量单测 `108 files / 1822 tests` 全绿（片Q-4 时 `108 / 1791`，本片 +31）。
+
+### 五、这一片的边界（含无法验收项）
+
+一、**「可配置」只有三档，且下限是一天。** 这是取值域的设计决定，不是待补的洞：低于一天的节奏在这个
+O(n²) 实现上没有额外产出，只有风险。真要把下限挪动，得先换掉成簇算法，而不是先把枚举多开一格。
+
+二、`reflectionCooldown` 只有 sweep 一个读取方。别的模块（时间线、画像、情感）不读它，因为它们没有
+「隔多久重算」这件事；把它接到别处需要一个真的有节律的消费者。
+
+三、真 JSX 渲染仍未验收：面板那 4 条是 `readFileSync` + 去注释的源码断言。下拉在浏览器里能不能点、
+`disabled` 在 PATCH 途中是否真的锁住、三档提示换行怎么排，仍然只有起服务真看一眼才算数（沿用片 6-G-c 之后
+一直没补上的那一项）。
+
+四、**没有做「推送」**。6.6 原话还有「不主动频繁推送」，而今天整条洞察链路只有用户自己进设置页才看到——
+没有站内信、没有通知。这一片不需要补什么，只是别让「可配置冷却」读起来像「我们已经会控制推送频率」：
+它控制的是生成，不是打扰。
+
+五、**本片把三个文件都加长过，所以全文的行号引用重跑了一遍对账**（`reflections.ts` +12 行、
+`reflection-display.ts` +29 行、`reflection-panel.tsx` +79 行）。改掉的有 6-E/6-F/片Q-2/片Q-3/片Q-4/7.2
+那几节里指进这三个文件的十处，另外 `schema.prisma` 的 ReflectionRecord／ReflectionCitation 两处也顺手按实测
+（`:817` `:877`）更正。这类更正不改变任何结论，但行号错了的验收文档等于没有验收文档。
 
 

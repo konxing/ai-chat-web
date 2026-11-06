@@ -87,7 +87,7 @@ describe('认知开关接口', () => {
     expect(db.authCalls[0].opts).toBeUndefined();
   });
 
-  it('GET 返回全部八个开关加上「暂停写入」，库里没记录时全是默认关闭', async () => {
+  it('GET 返回全部八个开关加上「暂停写入」和「生成节奏」，库里没记录时全是默认关闭', async () => {
     const { payload } = await call('GET');
 
     expect(payload.data.preferences).toEqual({
@@ -100,6 +100,7 @@ describe('认知开关接口', () => {
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
       emotionTransparency: 'implicit',
+      reflectionCooldown: 'daily',
       memoryWritePaused: false
     });
   });
@@ -180,5 +181,48 @@ describe('认知开关接口', () => {
     expect(response.status).toBe(400);
     expect(payload.error.code).toBe('VALIDATION_ERROR');
     expect(db.rows.size).toBe(0);
+  });
+});
+
+/**
+ * 片Q-5：任务书 6.6 :722 的「可配置的冷却规则」从接口进来。
+ *
+ * 校验这一层要挡的不是拼写错误，是**没有上限的那一类值**：`0` 或 `'hourly'` 一旦过库，
+ * 后台那趟 O(n²) 聚类就会被人手动调成「每分钟重算」，而 6.6 给的节奏下限本来就是一天。
+ * 所以这里用白名单三档，不用一个放宽的 int——`memoryWritePaused` 那条「不能被一个字符串过成开或关」
+ * 是同一个立场的镜像：一列的取值域必须和它的语义一样窄。
+ */
+describe('反思生成节奏走接口', () => {
+  it('GET 在库里没记录时把节奏算成 daily：默认档必须等于今天写死的那一档', async () => {
+    const { payload } = await call('GET');
+
+    expect(payload.data.preferences.reflectionCooldown).toBe('daily');
+  });
+
+  it('PATCH 三档各写各的大写枚举，且不碰八个开关', async () => {
+    await call('PATCH', { memoryEnabled: true });
+    await call('PATCH', { reflectionCooldown: 'weekly' });
+
+    expect(db.rows.get('user-a')?.reflectionCooldown).toBe('WEEKLY');
+    expect(db.rows.get('user-a')?.memoryEnabled).toBe(true);
+    expect(db.rows.get('user-a')?.emotionTransparency).toBe('IMPLICIT');
+  });
+
+  it('非法节奏档被拒且一行都不写：0、hourly、布尔都进不了这一列', async () => {
+    for (const bad of [0, 'hourly', true, 'daily ']) {
+      db.rows.clear();
+      const { response, payload } = await call('PATCH', { reflectionCooldown: bad });
+
+      expect(response.status).toBe(400);
+      expect(payload.error.code).toBe('VALIDATION_ERROR');
+      expect(db.rows.size).toBe(0);
+    }
+  });
+
+  it('改节奏要留审计：这一列和八个开关一样是用户亲手定的设置', async () => {
+    await call('PATCH', { reflectionCooldown: 'monthly' });
+
+    expect(db.audits).toHaveLength(1);
+    expect(JSON.stringify(db.audits[0])).toContain('monthly');
   });
 });

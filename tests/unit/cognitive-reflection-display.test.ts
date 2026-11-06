@@ -17,6 +17,9 @@ import { describe, expect, it } from 'vitest';
 import {
   ALTERNATIVES_LINE_PREFIX,
   CITATION_KIND_LABELS,
+  COOLDOWN_HINTS,
+  COOLDOWN_LABELS,
+  COOLDOWN_ORDER,
   PENDING_SUBSECTION_LABELS,
   REFLECTION_CONFIDENCE_LABELS,
   REFLECTION_SECTIONS,
@@ -281,5 +284,34 @@ describe('待处理一区的两个子区', () => {
       ['mid', 'high'],
       ['low']
     ]);
+  });
+});
+
+/**
+ * 片Q-5：任务书 6.6 :722 的「可配置的冷却规则」上屏。
+ *
+ * 三档的词放在这里而不是面板里，和「主要/其余」同一个来由：面板只许渲染，不许自己带文案。
+ * 顺序也钉死——`daily` 排第一不是排版选择，它是默认档，而 select 打开时用户看到的第一个
+ * 选项就是他当前所在的这一档。
+ */
+describe('洞察生成节奏三档', () => {
+  it('档位逐字对上批准的文案，默认档排在第一位', () => {
+    expect(COOLDOWN_ORDER).toEqual(['daily', 'weekly', 'monthly']);
+    expect(COOLDOWN_LABELS).toEqual({ daily: '每天', weekly: '每周', monthly: '每月' });
+    expect(COOLDOWN_HINTS).toEqual({
+      daily: '距上次生成满 24 小时。这是默认档，也是加上这一项之前写死的节奏。',
+      weekly: '距上次生成满 7 天。',
+      monthly: '距上次生成满 30 天。'
+    });
+  });
+
+  it('词表的键与 schema 枚举成员一一对上：多一档少一档，界面上就会出现 undefined 或死选项', () => {
+    expect(Object.keys(COOLDOWN_LABELS).sort()).toEqual(
+      enumMembers('ReflectionCooldown')
+        .map((member) => member.toLowerCase())
+        .sort()
+    );
+    expect(Object.keys(COOLDOWN_HINTS).sort()).toEqual(Object.keys(COOLDOWN_LABELS).sort());
+    expect(COOLDOWN_ORDER).toHaveLength(enumMembers('ReflectionCooldown').length);
   });
 });

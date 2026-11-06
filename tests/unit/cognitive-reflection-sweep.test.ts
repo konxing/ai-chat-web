@@ -1059,3 +1059,116 @@ describe('复活：被忽略的主题只在新证据下再来一次', () => {
     expect(writtenRecords()).toHaveLength(1 + outcome.generated);
   });
 });
+
+/**
+ * 片Q-5：任务书 6.6 :722「设置可配置的冷却规则」在**消费者**这一侧的落点。
+ *
+ * 这一组只钉一件事：抢冷却戳那道条件 UPDATE（`reflection-sweep.ts:163`）用的尺子必须来自
+ * 用户此刻这一档，而不是模块里那个写死的 24 小时。三档都是白名单，没有「0 小时」这种入口——
+ * 聚类那一步是 O(n²)，任务书 6.6 给的节奏下限就是一天，把下限交给用户随便调低不是「可配置」。
+ *
+ * 最后两条是本片的重点：它们钉的是「按**此刻**读到的档位判」。改档位要立刻生效，
+ * 而不是等下一轮——用户把节奏从每月调回每天，不该再为一轮没跑成的扫描等二十九天。
+ */
+describe('可配置冷却：抢戳按用户此刻那一档', () => {
+  /**
+   * 一条用例里跑两轮：文件顶层的 `beforeEach` 只在用例开始前清一次，
+   * 所以第二轮要自己清——而且清完必须 `buildTables()`，那些表是 `named()` 缓存的，
+   * 光清 Map 会让下一次 `tables.get(...)` 拿到 undefined。
+   */
+  function reset() {
+    tables.clear();
+    ctx.events.length = 0;
+    buildTables();
+  }
+
+  /** 库里那一档写在 CognitivePreference 行上；替身不校验列，所以直接盖在种好的行上。 */
+  function cooldown(tier: string, sweptAt: Date | null = null) {
+    contradictionPool();
+    switchOn(USER, sweptAt);
+    tables.get('cognitivePreference')!.rows.get(USER)!.reflectionCooldown = tier;
+  }
+
+  it('WEEKLY + 3 天前扫过 ⇒ 冷却没到，不跑也不重盖戳', async () => {
+    cooldown('WEEKLY', new Date(NOW.getTime() - 3 * DAY));
+
+    const outcome = await sweep();
+
+    expect(outcome.ran).toBe(false);
+    expect(writtenRecords()).toEqual([]);
+    expect(new Date(String(tables.get('cognitivePreference')!.rows.get(USER)!.reflectionSweptAt)).getTime()).toBe(
+      NOW.getTime() - 3 * DAY
+    );
+  });
+
+  it('WEEKLY + 6 天前扫过 ⇒ 已经比 24 小时久但仍没到一周，不跑', async () => {
+    // 这一条是「档位真的被读了」的最小组合：同一个 6 天，daily 会跑、weekly 不跑。
+    cooldown('WEEKLY', new Date(NOW.getTime() - 6 * DAY));
+
+    expect((await sweep()).ran).toBe(false);
+  });
+
+  it('WEEKLY + 6 天前扫过、同一时刻按 daily 判 ⇒ 跑得起来（正向对照，证明上一条不是蒙对的）', async () => {
+    contradictionPool();
+    switchOn(USER, new Date(NOW.getTime() - 6 * DAY));
+
+    const outcome = await sweep();
+
+    expect(outcome.ran).toBe(true);
+    expect(writtenRecords().length).toBeGreaterThan(0);
+  });
+
+  it('MONTHLY + 29 天前 ⇒ 不跑；+ 31 天前 ⇒ 跑', async () => {
+    cooldown('MONTHLY', new Date(NOW.getTime() - 29 * DAY));
+    expect((await sweep()).ran).toBe(false);
+
+    reset();
+    cooldown('MONTHLY', new Date(NOW.getTime() - 31 * DAY));
+    expect((await sweep()).ran).toBe(true);
+  });
+
+  it('DAILY 就是今天那一档：23 小时前不跑、25 小时前跑，写死的常量搬进偏好后行为不变', async () => {
+    cooldown('DAILY', new Date(NOW.getTime() - 25 * 3_600_000));
+    expect((await sweep()).ran).toBe(true);
+
+    reset();
+    cooldown('DAILY', new Date(NOW.getTime() - 23 * 3_600_000));
+    expect((await sweep()).ran).toBe(false);
+  });
+
+  it('正好满 24 小时 ⇒ 跑：判的是「满」，不是还要多等一毫秒', async () => {
+    // 界面那句「距上次生成满 24 小时」是设置页给用户的口径，抢戳那句比较必须和它一个字不差。
+    cooldown('DAILY', new Date(NOW.getTime() - 24 * 3_600_000));
+
+    expect((await sweep()).ran).toBe(true);
+  });
+
+  it('从没扫过 ⇒ 三档都抢得到，冷却不该把第一次扫描挡在门外', async () => {
+    for (const tier of ['DAILY', 'WEEKLY', 'MONTHLY']) {
+      reset();
+      cooldown(tier, null);
+      expect(await sweep().then((got) => got.ran)).toBe(true);
+    }
+  });
+
+  it('从每月调回每天 ⇒ 当场生效：6 天前那一轮在新档位下已经算到期', async () => {
+    cooldown('MONTHLY', new Date(NOW.getTime() - 6 * DAY));
+    expect((await sweep()).ran).toBe(false);
+
+    // 只改偏好那一列，别的什么都不动——这一条守的是「尺子每次抢戳现读，不是盖戳时那次读的」。
+    tables.get('cognitivePreference')!.rows.get(USER)!.reflectionCooldown = 'DAILY';
+
+    expect((await sweep()).ran).toBe(true);
+  });
+
+  it('从每天调到每月 ⇒ 也当场生效：昨天那一轮在新档位下还没到期', async () => {
+    cooldown('DAILY', new Date(NOW.getTime() - 25 * 3_600_000));
+    expect((await sweep()).ran).toBe(true);
+
+    reset();
+    cooldown('DAILY', new Date(NOW.getTime() - 25 * 3_600_000));
+    tables.get('cognitivePreference')!.rows.get(USER)!.reflectionCooldown = 'MONTHLY';
+
+    expect((await sweep()).ran).toBe(false);
+  });
+});

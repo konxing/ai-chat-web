@@ -6,6 +6,9 @@ import { apiFetch, errorMessage } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
 import {
   CITATION_KIND_LABELS,
+  COOLDOWN_HINTS,
+  COOLDOWN_LABELS,
+  COOLDOWN_ORDER,
   REFLECTION_CONFIDENCE_LABELS,
   REFLECTION_SECTIONS,
   REFLECTION_SNOOZE_OPTIONS,
@@ -18,7 +21,8 @@ import {
   describeReflectionTime,
   formatSnoozeDate,
   isActionable,
-  splitPendingSection
+  splitPendingSection,
+  type ReflectionCooldown
 } from '@/lib/cognitive/reflection-display';
 
 /**
@@ -80,6 +84,9 @@ export function ReflectionPanel() {
   const { push } = useToast();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [flagBusy, setFlagBusy] = useState(false);
+  const [cooldown, setCooldown] = useState<ReflectionCooldown | null>(null);
+  const [cooldownBusy, setCooldownBusy] = useState(false);
+  const [cooldownError, setCooldownError] = useState('');
 
   const [reflections, setReflections] = useState<ReflectionDto[]>([]);
   const [capped, setCapped] = useState(false);
@@ -107,8 +114,11 @@ export function ReflectionPanel() {
   useEffect(() => {
     void (async () => {
       try {
-        const data = await apiFetch<{ preferences: { reflectionEnabled: boolean } }>(PREFERENCES_URL);
+        const data = await apiFetch<{
+          preferences: { reflectionEnabled: boolean; reflectionCooldown: ReflectionCooldown };
+        }>(PREFERENCES_URL);
         setEnabled(data.preferences.reflectionEnabled);
+        setCooldown(data.preferences.reflectionCooldown);
       } catch {
         // 开关读不到就保持 null：界面显示「开关状态未知」，而不是假装它是关着的。
       }
@@ -134,6 +144,29 @@ export function ReflectionPanel() {
       push(errorMessage(err), 'error');
     } finally {
       setFlagBusy(false);
+    }
+  }
+
+  /**
+   * 改节奏只发这一列：PATCH 体里带上八个开关就等于用户动一下下拉框把自己所有模块重置一遍，
+   * 服务端那条「update 只带改动字段」的立场要在这里同样成立，得从请求体开始就不带别的。
+   */
+  async function saveCooldown(next: ReflectionCooldown) {
+    if (next === cooldown) return;
+    setCooldownBusy(true);
+    setCooldownError('');
+    try {
+      const data = await apiFetch<{ preferences: { reflectionCooldown: ReflectionCooldown } }>(PREFERENCES_URL, {
+        method: 'PATCH',
+        json: { reflectionCooldown: next }
+      });
+      // 以服务端回读的那一档为准：界面跟着它走才不会和库里分叉。
+      setCooldown(data.preferences.reflectionCooldown);
+      push('洞察生成节奏已更新');
+    } catch (err) {
+      setCooldownError(errorMessage(err));
+    } finally {
+      setCooldownBusy(false);
     }
   }
 
@@ -229,6 +262,48 @@ export function ReflectionPanel() {
         <div className="mt-5 space-y-5">
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
           {capNote ? <Alert tone="info">{capNote}</Alert> : null}
+
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+            <h3 className="text-[13.5px] text-white/85">洞察生成节奏</h3>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
+              两次生成之间至少隔多久。这一档只改频率，不改任何判定标准：隔得越久攒下的记忆越多，
+              一轮里能找出的反复模式也越站得住。
+            </p>
+
+            <div className="mt-3">
+              <label className="label">生成节奏</label>
+              <select
+                className="field"
+                value={cooldown ?? ''}
+                disabled={cooldown === null || cooldownBusy}
+                onChange={(e) => void saveCooldown(e.target.value as ReflectionCooldown)}
+              >
+                {cooldown === null ? <option value="">节奏未知</option> : null}
+                {COOLDOWN_ORDER.map((option) => (
+                  <option key={option} value={option}>
+                    {COOLDOWN_LABELS[option]}
+                  </option>
+                ))}
+              </select>
+              {cooldown === null ? (
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+                  当前节奏没读到。这里不替你猜一档：猜错的那一档看起来像你选的，而它决定后台多久翻一次你的记忆。
+                </p>
+              ) : null}
+              <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-white/30">
+                {COOLDOWN_ORDER.map((option) => (
+                  <li key={option}>
+                    {COOLDOWN_LABELS[option]}：{COOLDOWN_HINTS[option]}
+                  </li>
+                ))}
+              </ul>
+              {cooldownError ? (
+                <Alert tone="error" className="mt-2">
+                  {cooldownError}
+                </Alert>
+              ) : null}
+            </div>
+          </div>
           {loading ? (
             <LoadingBlock label="加载洞察" />
           ) : reflections.length === 0 ? (
