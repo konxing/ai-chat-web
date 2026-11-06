@@ -172,6 +172,28 @@ describe('客户端包边界', () => {
   });
 });
 
+/**
+ * 片Q-2 的第二半：一句解释在这屏只有一个去处。
+ *
+ * 之前它有两处——措辞层把它抄进正文（`分不开这几种解释：…`），落库那份又单独渲染一行。
+ * 于是同一屏里系统把同样的话讲了两遍，而 sweep 还得把措辞层的推导重做一遍。
+ * 界面这一侧要钉的是：它既不自己拼第三份文案，也不把两行合成一行的职责揽过来。
+ */
+describe('一句解释只渲染一次', () => {
+  it('解释行只由 describeAlternatives 拼，前缀不在界面里另抄一份', () => {
+    expect(PANEL).toContain('const alternativesLine = describeAlternatives(reflection.alternatives);');
+    expect((PANEL_CODE.match(/describeAlternatives\(/g) ?? [])).toHaveLength(1);
+    expect(PANEL_CODE).not.toContain('这几种解释');
+    expect(PANEL_CODE).not.toContain('可能');
+  });
+
+  it('正文与解释各渲染一次：同一句话不许在这屏出现两遍', () => {
+    expect((PANEL_CODE.match(/\{reflection\.body\}/g) ?? [])).toHaveLength(1);
+    expect((PANEL_CODE.match(/\{alternativesLine\}/g) ?? [])).toHaveLength(1);
+    expect((PANEL_CODE.match(/\{reflection\.title\}/g) ?? [])).toHaveLength(1);
+  });
+});
+
 describe('设置页接线', () => {
   it('tab 三处都到位：导航项、渲染分支、Tab 联合类型', () => {
     expect(WORKSPACE).toContain("['reflections', '洞察', Lightbulb]");

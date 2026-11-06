@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ReflectionFinding, ReflectableMemory } from '@/lib/cognitive/reflection-planner';
-import { PATTERN_HYPOTHESES } from '@/lib/cognitive/reflection-planner';
+import { HYPOTHESIS_KEYS_BY_TYPE } from '@/lib/cognitive/reflection-planner';
 import {
   REFLECTION_TITLE_MAX_CHARS,
   criticizeReflection,
@@ -65,7 +65,7 @@ function finding(overrides: Partial<ReflectionFinding> = {}): ReflectionFinding 
     timeFrom: day(0),
     timeTo: day(20),
     timePrecision: 'UNKNOWN',
-    hypothesisKeys: [...PATTERN_HYPOTHESES],
+    hypothesisKeys: [...HYPOTHESIS_KEYS_BY_TYPE.PATTERN],
     ...overrides
   };
 }
@@ -174,13 +174,15 @@ describe('critic 把「标题不是原话」当成一条不写库的理由', () 
   });
 
   it('标题里引号包住的不是任何一条支持证据的原话 ⇒ TITLE_NOT_SOURCED', () => {
-    const verdict = criticizeReflection(input({ title: '「你其实一直很在意效率」', body: cleanDraft.body }));
+    const verdict = criticizeReflection(
+      input({ ...cleanDraft, title: '「你其实一直很在意效率」', body: cleanDraft.body })
+    );
     expect(verdict.reasons).toContain('TITLE_NOT_SOURCED');
     expect(verdict.accepted).toBe(false);
   });
 
   it('标题为空 ⇒ 一样挡下：没取材的标题不许占这一屏最大的一号字', () => {
-    expect(criticizeReflection(input({ title: '', body: cleanDraft.body })).reasons).toEqual(['TITLE_NOT_SOURCED']);
+    expect(criticizeReflection(input({ ...cleanDraft, title: '' })).reasons).toEqual(['TITLE_NOT_SOURCED']);
   });
 });
 

@@ -89,10 +89,46 @@ export const COMPLETION_MARKERS: readonly string[] = [
   '做到了'
 ];
 
-/** PATTERN 分不开 6.3 举例的那三种解释，于是一条都不选，把解释和各自缺的证据一起交出去。 */
-export const PATTERN_HYPOTHESES = ['LONG_TERM_INTEREST', 'STAGED_PROJECT', 'TEMPORARY_LEARNING'] as const;
-/** 键的封闭集合：加一种解释而措辞层没给它句子，编译就过不去。 */
-export type PatternHypothesis = (typeof PATTERN_HYPOTHESES)[number];
+/**
+ * 全部解释键。句子在 `reflection-evidence.ts` 的 `HYPOTHESIS_PHRASES` 里，那张表按这个联合类型
+ * 写成 `Record`：加一个键而不给句子，编译就过不去。
+ */
+export const ALL_HYPOTHESIS_KEYS = [
+  'LONG_TERM_INTEREST',
+  'STAGED_PROJECT',
+  'TEMPORARY_LEARNING',
+  'GOAL_REPLACED',
+  'SAME_GOAL_NEW_PATH',
+  'GOAL_NEVER_PINNED',
+  'AWAITING_CONDITION',
+  'DECIDED_UNSPOKEN',
+  'DEFERRING_IS_ANSWER',
+  'NEW_TOOK_THE_PLACE',
+  'BOTH_ORDER_CHANGED',
+  'OLD_PARKED_FOR_NOW',
+  'FROM_THIS_DECISION',
+  'FROM_SOMETHING_ELSE',
+  'ENVIRONMENT_ANYWAY'
+] as const;
+export type HypothesisKey = (typeof ALL_HYPOTHESIS_KEYS)[number];
+
+/**
+ * 哪几类洞察带解释，只有这一张表说了算：`finding()` 按类型从这里取，七条规则里一个字都不提。
+ *
+ * 五类各给三种——它们的共同点是「规则看出了同一主题，但说不出为什么」：反复提到一件事、目标换了、
+ * 提过没下文、兴趣挪了、决定之后出了结果。规则选一条就是替用户断定，所以一条都不选。
+ * CONTRADICTION 和 MILESTONE 不给：前者那两句原话本身就说了「不做了」，猜三种等于把已知结论重新猜一遍；
+ * 后者的「完成」是用户自己宣布的，没有备选解释可给。
+ */
+export const HYPOTHESIS_KEYS_BY_TYPE: Record<ReflectionType, readonly HypothesisKey[]> = {
+  PATTERN: ['LONG_TERM_INTEREST', 'STAGED_PROJECT', 'TEMPORARY_LEARNING'],
+  GOAL_DRIFT: ['GOAL_REPLACED', 'SAME_GOAL_NEW_PATH', 'GOAL_NEVER_PINNED'],
+  UNRESOLVED: ['AWAITING_CONDITION', 'DECIDED_UNSPOKEN', 'DEFERRING_IS_ANSWER'],
+  INTEREST_SHIFT: ['NEW_TOOK_THE_PLACE', 'BOTH_ORDER_CHANGED', 'OLD_PARKED_FOR_NOW'],
+  CONTRADICTION: [],
+  MILESTONE: [],
+  DECISION_LESSON: ['FROM_THIS_DECISION', 'FROM_SOMETHING_ELSE', 'ENVIRONMENT_ANYWAY']
+};
 
 export interface ReflectableMemory {
   id: string;
@@ -155,6 +191,7 @@ export interface ReflectionFinding {
   timeTo: Date;
   /** 从 recordedAt 得来的区间就是 TIMESTAMP；从某条记忆的 validFrom 得来的，精度跟着那条记忆走。 */
   timePrecision: TimePrecision;
+  /** 这一类的解释键：由 `finding()` 从 `HYPOTHESIS_KEYS_BY_TYPE` 取，七条规则一个字都不提。 */
   hypothesisKeys: string[];
 }
 
@@ -322,8 +359,16 @@ function dedupKey(type: ReflectionType, tokens: readonly string[]): string {
   return `${type}:${digest}`;
 }
 
-function finding(base: Omit<ReflectionFinding, 'dedupKey'>): ReflectionFinding {
-  return { ...base, dedupKey: dedupKey(base.type, base.topicTokens) };
+/**
+ * 每条洞察都从这里出生，所以解释也跟着这里取：规则只说「有没有一件值得说的事」，
+ * 「这一类该给用户看几种可能」是类型的事，不是规则的事。两处各写一遍就会分叉。
+ */
+function finding(base: Omit<ReflectionFinding, 'dedupKey' | 'hypothesisKeys'>): ReflectionFinding {
+  return {
+    ...base,
+    hypothesisKeys: [...HYPOTHESIS_KEYS_BY_TYPE[base.type]],
+    dedupKey: dedupKey(base.type, base.topicTokens)
+  };
 }
 
 /** 6.1 PATTERN：跨会话、跨时间地反复提到同一件事。 */
@@ -348,8 +393,7 @@ function patternFindings(clusters: readonly Cluster[]): {
           observationSpanDays: spanDays,
           timeFrom: cluster.active[0]!.recordedAt,
           timeTo: statsOf(cluster.active).lastRecordedAt,
-          timePrecision: 'TIMESTAMP',
-          hypothesisKeys: [...PATTERN_HYPOTHESES]
+          timePrecision: 'TIMESTAMP'
         })
       );
       continue;
@@ -404,8 +448,7 @@ function contradictionFindings(clusters: readonly Cluster[]): ReflectionFinding[
         observationSpanDays: daysBetween(later.recordedAt, earlier.recordedAt),
         timeFrom: earlier.recordedAt,
         timeTo: later.recordedAt,
-        timePrecision: 'TIMESTAMP',
-        hypothesisKeys: []
+        timePrecision: 'TIMESTAMP'
       })
     );
   }
@@ -449,8 +492,7 @@ function unresolvedFindings(clusters: readonly Cluster[], now: Date): {
         observationSpanDays: daysBetween(now, from),
         timeFrom: from,
         timeTo: now,
-        timePrecision: goal.validFrom ? goal.validPrecision : 'TIMESTAMP',
-        hypothesisKeys: []
+        timePrecision: goal.validFrom ? goal.validPrecision : 'TIMESTAMP'
       })
     );
   }
@@ -491,8 +533,7 @@ function goalDriftFindings(
         observationSpanDays: daysBetween(pair.next.recordedAt, pair.previous.recordedAt),
         timeFrom: pair.previous.recordedAt,
         timeTo: pair.next.recordedAt,
-        timePrecision: 'TIMESTAMP',
-        hypothesisKeys: []
+        timePrecision: 'TIMESTAMP'
       })
     );
   }
@@ -523,8 +564,7 @@ function milestoneFindings(
         observationSpanDays: daysBetween(pair.next.recordedAt, pair.previous.recordedAt),
         timeFrom: pair.previous.recordedAt,
         timeTo: pair.next.recordedAt,
-        timePrecision: 'TIMESTAMP',
-        hypothesisKeys: []
+        timePrecision: 'TIMESTAMP'
       })
     );
   }
@@ -546,8 +586,7 @@ function milestoneFindings(
         observationSpanDays: 0,
         timeFrom: at,
         timeTo: at,
-        timePrecision: 'TIMESTAMP',
-        hypothesisKeys: []
+        timePrecision: 'TIMESTAMP'
       })
     );
   }
@@ -584,8 +623,7 @@ function decisionLessonFindings(decisions: readonly ReflectableDecision[]): {
           // 拿它当精确日期就是门槛 6 不许的那种伪造。
           timeFrom: decision.confirmedAt,
           timeTo: decision.outcomeRecordedAt,
-          timePrecision: 'TIMESTAMP',
-          hypothesisKeys: []
+          timePrecision: 'TIMESTAMP'
         })
       );
       continue;
@@ -669,8 +707,7 @@ function interestShiftFindings(clusters: readonly Cluster[]): {
       observationSpanDays: daysBetween(new Date(Math.max(...times.map((t) => t.getTime()))), new Date(Math.min(...times.map((t) => t.getTime())))),
       timeFrom: new Date(Math.min(...times.map((t) => t.getTime()))),
       timeTo: new Date(Math.max(...times.map((t) => t.getTime()))),
-      timePrecision: 'TIMESTAMP',
-      hypothesisKeys: []
+      timePrecision: 'TIMESTAMP'
     })
   );
   return { findings, insufficient };

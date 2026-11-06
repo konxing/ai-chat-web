@@ -1,6 +1,6 @@
 import type { ConfidenceBand } from './confidence';
 import { CLAUSE_SPLIT_RE } from './decision-extractor';
-import type { PatternHypothesis, ReflectionFinding, ReflectableMemory } from './reflection-planner';
+import type { HypothesisKey, ReflectionFinding, ReflectableMemory } from './reflection-planner';
 import { NEGATION_MARKERS } from './reflection-planner';
 import { scoreByKeyword } from './retrieval';
 
@@ -19,8 +19,13 @@ import { scoreByKeyword } from './retrieval';
  *    引号里的数字不算：那是用户的原话，不是系统的断言，把它一起管会让带阿拉伯数字的记忆永远出不了洞察。
  * 三、critic 的返回值只有原因码，没有中文——它要进日志。
  *
+ * 还有一条不属于红线但同样要紧的：**一句解释只有一个去处**，就是 `phraseReflection` 返回的
+ * `alternatives`。正文不抄它（抄第二遍就是同一屏里系统把同一句话说两次，两处迟早分叉），
+ * 界面单独渲染它一行，critic 也只核 `alternatives`。
+ *
  * 测试：tests/unit/cognitive-reflection-evidence.test.ts（反证 / 置信度 / critic 六道）、
- * tests/unit/cognitive-reflection-title.test.ts（标题取自原话，以及「类型名只有一份」那条静态断言）。
+ * tests/unit/cognitive-reflection-title.test.ts（标题取自原话，以及「类型名只有一份」那条静态断言）、
+ * tests/unit/cognitive-reflection-hypotheses.test.ts（哪几类有解释、解释只写在一处）。
  */
 
 /** 档位下界。和记忆侧的 0.75/0.45 不是同一组数：那条讲的是「这一句可不可信」，这条讲的是「这一堆够不够成一个说法」。 */
@@ -58,11 +63,33 @@ const FRAMING: Record<ConfidenceBand, string> = {
   high: '这几句确实说的是同一件事。'
 };
 
-/** 6.3 的三种解释各自的句子。键集合由 PATTERN_HYPOTHESES 钉死： planner 加一种而这里没给句子，编译就过不去。 */
-export const HYPOTHESIS_PHRASES: Record<PatternHypothesis, string> = {
+/**
+ * 每种解释的句子。键集合由 `ALL_HYPOTHESIS_KEYS` 钉死：规则层加一种解释而这里没给句子，编译就过不去。
+ *
+ * 每一句都以「可能」开头，都不带因果词、不带数字——它们是候选，不是结论。一句解释只写在这一处：
+ * 正文不抄第二遍（抄两遍等于系统把同一句话讲两次，而且两次迟早分叉）。
+ */
+export const HYPOTHESIS_PHRASES: Record<HypothesisKey, string> = {
+  // PATTERN：同一件事反复提到，规则说不出它是什么。
   LONG_TERM_INTEREST: '可能是你长期在意的事',
   STAGED_PROJECT: '可能是一个分几步推进的事',
-  TEMPORARY_LEARNING: '可能只是这一阵子在看的东西'
+  TEMPORARY_LEARNING: '可能只是这一阵子在看的东西',
+  // GOAL_DRIFT：同一主题，目标的说法变了。
+  GOAL_REPLACED: '可能目标真的换了',
+  SAME_GOAL_NEW_PATH: '可能还是那个目标，只是换了路径',
+  GOAL_NEVER_PINNED: '可能当初那个目标本来就没定死',
+  // UNRESOLVED：提过，放着，没有下文。
+  AWAITING_CONDITION: '可能还在等条件成熟',
+  DECIDED_UNSPOKEN: '可能已经定了，只是没说出口',
+  DEFERRING_IS_ANSWER: '可能拖着本身就是答案',
+  // INTEREST_SHIFT：一个主题说得少了，另一个说得多了。
+  NEW_TOOK_THE_PLACE: '可能新的占了旧的位子',
+  BOTH_ORDER_CHANGED: '可能两样都在意，只是这阵子说到的顺序变了',
+  OLD_PARKED_FOR_NOW: '可能旧的只是暂时搁下',
+  // DECISION_LESSON：决定之后出现了结果，规则说不出是谁带来的。
+  FROM_THIS_DECISION: '可能是这个决定带来的',
+  FROM_SOMETHING_ELSE: '可能是同期另一件事带来的',
+  ENVIRONMENT_ANYWAY: '可能和这个决定没关系，环境本来就会这样'
 };
 
 /**
@@ -205,16 +232,26 @@ export function reflectionConfidence(input: {
 }
 
 /**
- * 把一条 finding 写成标题和正文。
+ * 一条洞察措辞完的样子：标题、正文、以及那一句只写一次的解释。
+ * `alternatives` 是空串就等于「这一类没有备选解释可给」，界面那一行整个不留。
+ */
+export interface ReflectionDraft {
+  title: string;
+  body: string;
+  alternatives: string;
+}
+
+/**
+ * 把一条 finding 写成标题、正文和解释。
  *
- * 顺序是固定的：口气 → 计数 → 原话 → （PATTERN）三种解释 → （有反证）余地那一句。
+ * 正文的顺序是固定的：口气 → 计数 → 原话 → （有反证）余地那一句。
  * 固定顺序才能让 critic 的「少了哪一段」变成字符串包含判断，也才能让同一条 finding 每次都得到同一个正文。
  *
- * 标题不在这条顺序里，因为它不是正文的一段：它单独走 `supportTextsOf` 的最后一条。
+ * 标题和解释都不在正文里，各有各的去处：标题走 `supportTextsOf` 的最后一条，解释走 `alternatives`。
  * 一句原话都拿不到时标题是空串——那不是「这条洞察没有标题」，而是「这一条不许落库」，
  * 挡下它的是 critic 的 TITLE_NOT_SOURCED（措辞层自己不判断，判断只有一个去处）。
  */
-export function phraseReflection(input: PhrasingInput): { title: string; body: string } {
+export function phraseReflection(input: PhrasingInput): ReflectionDraft {
   const { finding, band } = input;
   const sources = supportTextsOf(finding, input.memoryTexts, input.decisionTopics);
   const newest = sources[sources.length - 1];
@@ -225,15 +262,18 @@ export function phraseReflection(input: PhrasingInput): { title: string; body: s
     parts.push(`原话：${sources.slice(0, QUOTE_MAX).map((text) => `「${text}」`).join('、')}。`);
   }
 
-  // 规则分不开解释时一条都不选：三种一起给，让用户自己判——这是甲方案存在的全部理由。
+  // 规则分不开解释时一条都不选：整类的几种一起给，让用户自己判——这是甲方案存在的全部理由。
   const phrases = finding.hypothesisKeys
-    .map((key) => HYPOTHESIS_PHRASES[key as PatternHypothesis])
+    .map((key) => HYPOTHESIS_PHRASES[key as HypothesisKey])
     .filter((phrase): phrase is string => typeof phrase === 'string');
-  if (phrases.length > 0) parts.push(`分不开这几种解释：${phrases.join('；')}。`);
 
   if (input.counterHits > 0) parts.push(COUNTER_CLAUSE);
 
-  return { title: newest === undefined ? '' : asTitle(newest), body: parts.join('') };
+  return {
+    title: newest === undefined ? '' : asTitle(newest),
+    body: parts.join(''),
+    alternatives: phrases.join('；')
+  };
 }
 
 export type CriticReason =
@@ -246,7 +286,7 @@ export type CriticReason =
 
 export interface CriticInput {
   finding: ReflectionFinding;
-  draft: { title: string; body: string };
+  draft: ReflectionDraft;
   counterHits: number;
   /** 这次扫描真正读到的行 id（记忆与决策都算）：引用不在里面就是凭空造的。 */
   poolIds: readonly string[];
@@ -302,13 +342,14 @@ function titleIsSourced(title: string, supportTexts: readonly string[]): boolean
 }
 
 /**
- * 这个解释到底写没写进正文。
+ * 这个解释到底写没写进 `alternatives`。
  *
  * 认不出来的键（planner 将来加了新解释而措辞表没跟上）一律算「没写」：宁可这条洞察整条不落地，
  * 也不要它带着一个少了解释的正文落库——那正好是 6.3 禁止的那种「替用户断定」。
+ * 只看 alternatives，不看正文：一句解释只有一个去处，抄在正文里第二遍不算写了它。
  */
-function phrasesPresent(draft: { title: string; body: string }, key: string): boolean {
-  const phrase = HYPOTHESIS_PHRASES[key as PatternHypothesis];
+function phrasesPresent(draft: ReflectionDraft, key: string): boolean {
+  const phrase = HYPOTHESIS_PHRASES[key as HypothesisKey];
   if (phrase === undefined) return false;
-  return draft.body.includes(phrase);
+  return draft.alternatives.includes(phrase);
 }

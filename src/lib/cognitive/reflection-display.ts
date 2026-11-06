@@ -91,9 +91,15 @@ export function describeCounterEvidence(counterHitCount: number): string {
   return counterHitCount === 0 ? '' : `找到 ${counterHitCount} 条相反的证据`;
 }
 
+/**
+ * 解释那一行的前缀。主语是「还没分开」而不是「另一种」：这一行给的是并排的几种可能，
+ * 系统一条都没选，所以它不能写得像「我还给你另一个说法」那种附带结论。
+ */
+export const ALTERNATIVES_LINE_PREFIX = '这几种解释还没分开：';
+
 export function describeAlternatives(alternatives: string | null): string {
   if (alternatives === null || alternatives.trim() === '') return '';
-  return `另一种解释：${alternatives}`;
+  return `${ALTERNATIVES_LINE_PREFIX}${alternatives}`;
 }
 
 /** 「已推迟到 {日期}」里的日期：推迟按整天计，所以到日为止，不露时分。 */

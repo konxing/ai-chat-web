@@ -12,7 +12,6 @@ import {
   CONF_SPAN_FULL_DAYS,
   criticizeReflection,
   findCounterEvidence,
-  HYPOTHESIS_PHRASES,
   phraseReflection,
   reflectionConfidence,
   supportTextsOf
@@ -21,7 +20,6 @@ import {
   planReflections,
   REFLECTION_POOL_LIMIT,
   sharesTopicWith,
-  type PatternHypothesis,
   type ReflectableDecision,
   type ReflectableMemory,
   type ReflectableRevision,
@@ -125,6 +123,8 @@ interface Prepared {
   finding: ReflectionFinding;
   title: string;
   body: string;
+  /** 那一句只写一次的解释。措辞层给什么就落什么，这里不再推导第二遍。 */
+  alternatives: string;
   confidence: number;
   importance: number;
   /** 计划层的反证 + 这一轮现搜的反证，去重之后就是落库的 CONTRADICTS 引用行。 */
@@ -333,6 +333,7 @@ async function sweepBody(
       finding,
       title: draft.title,
       body: draft.body,
+      alternatives: draft.alternatives,
       confidence: score,
       importance: importanceOf(finding),
       counterIds,
@@ -521,10 +522,6 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
   // 复活的场合直接沿用被拒那一行的 id——换了 id，那三段老密文就再也解不开。
   const id = item.reviveRowId ?? randomUUID();
   const aad = (field: string) => aadFor(userId, id, field);
-  const alternatives = finding.hypothesisKeys
-    .map((key) => HYPOTHESIS_PHRASES[key as PatternHypothesis])
-    .filter((phrase): phrase is string => typeof phrase === 'string')
-    .join('；');
 
   const supports = [
     ...finding.supportMemoryIds.map((memoryId) => ({ memoryId, decisionId: null as string | null })),
@@ -537,7 +534,8 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
     dedupKey: finding.dedupKey,
     titleCiphertext: encryptString(item.title, aad('title')),
     bodyCiphertext: encryptString(item.body, aad('body')),
-    alternativesCiphertext: alternatives === '' ? null : encryptString(alternatives, aad('alternatives')),
+    alternativesCiphertext:
+      item.alternatives === '' ? null : encryptString(item.alternatives, aad('alternatives')),
     counterTokensCiphertext: encryptString(finding.topicTokens.join(' '), aad('counterTokens')),
     counterHitCount: item.counterIds.length,
     timeFrom: finding.timeFrom,

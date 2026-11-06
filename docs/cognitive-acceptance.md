@@ -3221,3 +3221,120 @@ P5 一次红五处，是这片想要的形状：接口上少传一个参数不�
 
 
 
+## 片Q-2：多假设从一类扩到五类，一句解释只有一个去处（11-06）
+
+任务书 6.3 的判据是「无法确定唯一解释时，提出多个假设并标明各自缺什么证据」。
+6-B 落笔时把这句话实现成了**只有 PATTERN 一类**：`hypothesisKeys` 七条规则里六条写死空数组，
+只有 PATTERN 给了三个键。这一片把它补成五类，并且把同三句话的两个去处收成一个。
+
+### 一、少掉的那四类，少的正是这条判据要防的东西
+
+`PATTERN_HYPOTHESES` 只有三种解释（长期兴趣 / 分几步推进 / 这一阵子在看），
+它们只回答「反复提到的一件事是什么」。剩下五类各有各的分不开：
+
+| 类型 | 规则看出了什么 | 分不开的是哪三种 |
+|---|---|---|
+| `GOAL_DRIFT` | 同一主题的目标换了说法 | 目标真换了 · 还是那个目标换了路径 · 当初就没定死 |
+| `UNRESOLVED` | 提过、放着、没下文 | 还在等条件 · 已经定了没说出口 · 拖着本身就是答案 |
+| `INTEREST_SHIFT` | 一个说得少了，另一个说得多了 | 新的占了位子 · 两样都在意只是顺序变了 · 旧的暂时搁下 |
+| `DECISION_LESSON` | 决定之后出现了结果 | 这个决定带来的 · 同期另一件事 · 环境本来就会这样 |
+| `CONTRADICTION` `MILESTONE` | — | **不给**，各自有理由（下表） |
+
+不给的两类不是漏的：`CONTRADICTION` 那两句原话本身就说了「不做了」，再猜三种等于把已知结论
+重新猜一遍；`MILESTONE` 的「完成了」是用户自己宣布的，没有备选解释可给。
+这两条理由写在表的注释里，不是写在这一片的规定里——因为**界面上那一行整个不留**才是它们的产物。
+
+空着不填是更坏的默认：规则算不出哪一条，而界面什么都不摆，等于系统替用户选定了
+「目标就是换了」「他就是在等条件」那一条。所以这四种情形各给三种，一条都不选。
+
+### 二、一句解释只有一个去处
+
+改之前同一三句话有**两个去处**：措辞层把它抄进正文（`分不开这几种解释：…`），
+`alternatives` 列又存一份由界面单独渲染一行——一屏里系统把同样的话讲两遍。
+更糟的是 `alternatives` 那份由 `writeReflection` 从 `finding.hypothesisKeys` **再推导一遍**
+（`reflection-sweep.ts` 里那段 map/filter/join 和措辞层的一模一样），两处迟早分叉。
+同一个形状在片M 和片P-4 各犯过一次，都用静态断言钉住了，这片钉的是它的第三种形态。
+
+现在四处各管一件事，串起来只有一条路：
+
+| 位置 | 改了什么 |
+|---|---|
+| `reflection-planner.ts:96-113` | `PATTERN_HYPOTHESES` 换成 `ALL_HYPOTHESIS_KEYS`（15 个键）与 `HypothesisKey`；句子表按这个联合类型写成 `Record`，**加键不给句子就编译不过** |
+| `:123-131` | 新增 `HYPOTHESIS_KEYS_BY_TYPE: Record<ReflectionType, readonly HypothesisKey[]>`——七类的行由类型系统要求，少一类编译不过；两类给空数组并写明理由 |
+| `:366-371` | `finding()` 的入参去掉 `hypothesisKeys`，改由 `base.type` 从表里取；八条规则站点不再各写一份（六处的 `hypothesisKeys: []` 删掉） |
+| `reflection-evidence.ts:72-93` | `HYPOTHESIS_PHRASES` 从 3 条扩到 15 条，按类分组；每句都以「可能」开头、不含因果词、不含数字 |
+| `:238-241` | 措辞的返回值从 `{title, body}` 换成导出的 `ReflectionDraft {title, body, alternatives}` |
+| `:254-276` | `phraseReflection` 不再把解释拼进正文，只放进 `alternatives`；**正文里一句解释都不出现** |
+| `:351-355` | critic 第六道只核 `draft.alternatives`（原来核 `own = body`），抄进正文第二遍不算写了它 |
+| `reflection-sweep.ts:127` `:336` `:537` | `Prepared` 带上 `alternatives`，落库写措辞层给的那一份；本地推导段删除，`HYPOTHESIS_PHRASES`/`PatternHypothesis` 两个 import 随之删除 |
+| `reflection-display.ts:94-103` | 前缀抽成导出常量 `ALTERNATIVES_LINE_PREFIX`，文案从「另一种解释：X」改成「这几种解释还没分开：X、Y、Z」 |
+
+前缀改字是这片唯一的文案改动，理由是旧的说不符实：它只承诺「另一种」，而这一屏给的是
+三种并排；「还没分开」说的才是事实——分不开的是规则，不是用户没听懂。
+
+### 三、用例与探针
+
+新文件 `tests/unit/cognitive-reflection-hypotheses.test.ts`（15 条）。单独成文件的理由和片Q-1 一样：
+旧口径在 `cognitive-reflection-evidence.test.ts` 里也有断言，混改会分不清是新行为没实现还是老断言没跟上。
+
+- **表本身**（4 条）：行的集合 == schema 里 `ReflectionType` 的枚举成员（枚举从 `prisma/schema.prisma` 现读，
+  不抄第二份）；七行逐字钉住；表里的键 ⊕ 句子表的键 == `ALL_HYPOTHESIS_KEYS`（两边不许各自留一份遗产）；
+  15 句逐条核「可能」开头 + 无因果词 + 无数字；
+- **接线**（4 条）：`GOAL_DRIFT`/`UNRESOLVED`/`INTEREST_SHIFT`/`DECISION_LESSON` 各起一个能命中规则的池子跑
+  `planReflections`，断言那条 finding 带的是**它自己那一行**的三个键（`toHaveLength(3)` + 等于该行）；
+  四类各一条，一类都不许靠 PATTERN 那三种蒙过去；
+- **一处**（4 条）：正文不含任何一句解释也不含「解释」二字；PATTERN 那三句逐字等于措辞表；
+  `DECISION_LESSON` 拿到的是自己那三句不是 PATTERN 的；`CONTRADICTION` 的 `alternatives` 是空串且
+  `describeAlternatives('')` 什么都不留；
+- **critic**（3 条）：三句都在 ⇒ 通过；从 `alternatives` 删一句 ⇒ `HYPOTHESIS_DROPPED`；
+  **把三句抄回正文而 `alternatives` 交白卷 ⇒ 照样挡下**（这条钉的就是「正文不再是那个去处」）。
+
+跟着改口径的旧断言：`cognitive-reflection-evidence.test.ts` 的 fixture 与七类循环从写死的
+`['LONG_TERM_INTEREST', …]` 换成 `[...HYPOTHESIS_KEYS_BY_TYPE.…]`、四处 `draft:` 字面量换成
+`{...cleanDraft, …}`、`HYPOTHESIS_DROPPED` 那条改从 `alternatives` 删句；
+`cognitive-reflection-title.test.ts` 两处 critic 覆盖同样改成 `CriticInput` 形状；
+`cognitive-reflection-display.test.ts` 的竞争解释那条换成新前缀并逐字钉住 `ALTERNATIVES_LINE_PREFIX`；
+`cognitive-reflection-sweep.test.ts` 新增 `alternativesOf()`（解密 `alternativesCiphertext`，
+列名对不上就抛而不静默返回 null），DECISION_LESSON 落库那条断言库里那一句
+**逐字等于措辞层给的三句**、且正文里没有它。
+
+面板 `cognitive-reflection-panel.test.ts` 新增 2 条静态断言（共 22 条）：
+`describeAlternatives(` 在源码里只出现一次、去注释的源码不含「这几种解释」也不含「可能」
+（界面不许自己拼第三份文案），`{reflection.body}` `{alternativesLine}` `{reflection.title}` 各只渲染一次。
+
+| 探针 | 改动 | 红了谁（实测条数） |
+|---|---|---|
+| P1 | 把表里 `DECISION_LESSON` 一行清空 | 5 处：hypotheses 的表字面量、键与句子两边不许留遗产、DECISION_LESSON 接线、换类就换一套解释 + sweep 的 DECISION_LESSON 落库 |
+| P1b | 把表里 `GOAL_DRIFT` 一行清空 | 3 处：hypotheses 的表字面量、键的全集、GOAL_DRIFT 接线 |
+| P2 | `finding()` 不分类型，一律给 PATTERN 那三种 | 7 处：hypotheses 四类接线 + planner 的「CONTRADICTION 一个解释都不给」+ sweep 的 CONTRADICTION、DECISION_LESSON 两条落库 |
+| P3 | 措辞把解释重新拼回正文（回到旧形状） | 4 处：evidence 的「PATTERN 三档都一起交」+ hypotheses 的「正文里一句解释都不出现」+ sweep 落库 2 处 |
+| P4 | critic 改核 `draft.body` | 5 处：hypotheses 的「三句都在 ⇒ 通过」「只在正文里 ⇒ 挡下」双双反转 + sweep 的 DECISION_LESSON、最早结果行、复活新一句 3 条 |
+| P5 | critic 第六道变成恒真 | 4 处：evidence 的「少一个解释 ⇒ HYPOTHESIS_DROPPED」「六道全中按字典序」+ hypotheses 的「少一句 ⇒ 挡下」「只在正文里 ⇒ 挡下」 |
+| P6 | `writeReflection` 恒写 `alternativesCiphertext: null` | 1 处：sweep 的 DECISION_LESSON 落库 |
+| P7 | 界面自己拼 `这几种解释还没分开：${reflection.alternatives}` | 1 处：panel 的「前缀不在界面里另抄一份」 |
+
+P1 与 P1b 分开跑，是因为清空不同的行红的是**不同的**断言：`DECISION_LESSON` 那行清空时
+sweep 的落库断言一起红（写进库的东西变了），`GOAL_DRIFT` 那行清空时只有表与接线红。
+一片的规则要能被逐行拆掉，才算真的钉住。
+
+P3 那批红里没有面板文件——面板只看源码，措辞层怎么改它都不动。这条要单独说清，
+否则读者会以为「正文只渲染一次」那条断言也在防措辞层，其实它防的是界面自己多渲染一遍。
+
+门禁：`npx tsc --noEmit` 无输出；全量单测 `108 files / 1765 tests` 全绿（片Q-1 时 `107 / 1748`）。
+
+### 四、边界
+
+一、解释是**静态的三种**，不是从证据里算出来的候选。6.3 原文还要求「标明各自缺什么证据」，
+那需要读每条解释与证据的关系——词法层给不出，留给生成层（任务书 6.5 把生成层整片推迟了）。
+这一版只做到「不替用户选」，没做到「说清每条差在哪」。
+
+二、库里的旧行不改写。片Q-2 之前落库的 `GOAL_DRIFT`/`UNRESOLVED`/`INTEREST_SHIFT`/`DECISION_LESSON`
+行，`alternativesCiphertext` 仍是 NULL，界面上那一行不留；旧行的正文里还带着
+「分不开这几种解释：…」那一句（那是措辞层写进 body 的，不是新代码写的）。
+`dedupKey` 与 `hypothesisKeys` 无关，所以这片不会让老主题重复生成一遍。
+
+三、`alternatives` 仍是单个加密字段，三种解释靠 `；` 拼接。真要把它们当三条可点开的候选
+（各自补证据、各自驳回），那是数据形状的改变，一片的活装不下。
+
+四、6.4 说的「置信度 / 重要度」两列在库里、在 DTO 里，界面上仍然一个都不显示（片Q-3）。
+

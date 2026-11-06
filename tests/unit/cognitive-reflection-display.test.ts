@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
  * 日期口径同日统一到时间线那一屏的「年月日」。这里断言的是字面量本身，不是「差不多」。
  */
 import {
+  ALTERNATIVES_LINE_PREFIX,
   CITATION_KIND_LABELS,
   REFLECTION_SECTIONS,
   REFLECTION_SNOOZE_OPTIONS,
@@ -149,7 +150,11 @@ describe('证据量、反证与竞争解释', () => {
 
   it('竞争解释是可选的：没有就不留前缀', () => {
     expect(describeAlternatives(null)).toBe('');
-    expect(describeAlternatives('只是换了一种作息')).toBe('另一种解释：只是换了一种作息');
+    expect(describeAlternatives('可能目标真的换了；可能还是那个目标，只是换了路径')).toBe(
+      '这几种解释还没分开：可能目标真的换了；可能还是那个目标，只是换了路径'
+    );
+    // 前缀只有一个去处：它是文案，界面不许自己拼一份。
+    expect(ALTERNATIVES_LINE_PREFIX).toBe('这几种解释还没分开：');
   });
 
   it('两类依据的前缀逐字对上文案表', () => {

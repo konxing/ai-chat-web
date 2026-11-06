@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReflectionType } from '@prisma/client';
 import type { ReflectionFinding, ReflectableMemory } from '@/lib/cognitive/reflection-planner';
-import { NEGATION_MARKERS, PATTERN_HYPOTHESES } from '@/lib/cognitive/reflection-planner';
+import { HYPOTHESIS_KEYS_BY_TYPE, NEGATION_MARKERS } from '@/lib/cognitive/reflection-planner';
 import {
   CAUSAL_MARKERS,
   CONF_COUNTER_MAX_COUNTED,
@@ -60,7 +60,7 @@ function finding(overrides: Partial<ReflectionFinding> = {}): ReflectionFinding 
     timeFrom: day(0),
     timeTo: day(20),
     timePrecision: 'UNKNOWN',
-    hypothesisKeys: [...PATTERN_HYPOTHESES],
+    hypothesisKeys: [...HYPOTHESIS_KEYS_BY_TYPE.PATTERN],
     ...overrides
   };
 }
@@ -222,10 +222,14 @@ describe('措辞：正文只引用用户自己的话，数字只来自 finding',
     expect(draft.body).toContain('5');
   });
 
-  it('PATTERN 无论哪一档都把三种解释一起写出来：分不开就一条都不选', () => {
+  it('PATTERN 无论哪一档都把三种解释一起交出来：分不开就一条都不选', () => {
     for (const band of ['low', 'medium', 'high'] as const) {
-      const body = phraseReflection({ ...base, band }).body;
-      for (const key of PATTERN_HYPOTHESES) expect(body).toContain(HYPOTHESIS_PHRASES[key]);
+      const draft = phraseReflection({ ...base, band });
+      for (const key of HYPOTHESIS_KEYS_BY_TYPE.PATTERN) {
+        // 解释只在 alternatives 这一处（正文抄第二遍就是同一屏里系统把同一句话说两次）。
+        expect(draft.alternatives).toContain(HYPOTHESIS_PHRASES[key]);
+        expect(draft.body).not.toContain(HYPOTHESIS_PHRASES[key]);
+      }
     }
   });
 
@@ -239,7 +243,12 @@ describe('措辞：正文只引用用户自己的话，数字只来自 finding',
 
   it('决策型洞察用决策行的 topic 短句，不硬拼词元', () => {
     const body = phraseReflection({
-      finding: finding({ type: 'DECISION_LESSON', hypothesisKeys: [], supportDecisionIds: ['d1'], topicTokens: [] }),
+      finding: finding({
+        type: 'DECISION_LESSON',
+        hypothesisKeys: [...HYPOTHESIS_KEYS_BY_TYPE.DECISION_LESSON],
+        supportDecisionIds: ['d1'],
+        topicTokens: []
+      }),
       band: 'medium',
       memoryTexts: new Map<string, string>(),
       decisionTopics: new Map([['d1', '我决定等降价再买这块显卡']]),
@@ -296,7 +305,7 @@ describe('EvidenceCritic：六道规则在落库前拦', () => {
     for (const marker of CAUSAL_MARKERS) {
       const reasons = criticizeReflection({
         ...cleanInput,
-        draft: { title: cleanDraft.title, body: `${cleanDraft.body}${marker}你还在意这件事` }
+        draft: { ...cleanDraft, body: `${cleanDraft.body}${marker}你还在意这件事` }
       }).reasons;
       expect(reasons).toContain('UNSOURCED_ASSERTION');
     }
@@ -316,7 +325,7 @@ describe('EvidenceCritic：六道规则在落库前拦', () => {
     const s1Text = '我打算把项目迁移到 PostgreSQL';
     const args = { finding: one, counterHits: 2, poolIds: ['s1'], supportTexts: [s1Text] };
     expect(criticizeReflection({ ...args, draft: hedged }).accepted).toBe(true);
-    const stripped = { title: hedged.title, body: hedged.body.replace(COUNTER_CLAUSE, '') };
+    const stripped = { ...hedged, body: hedged.body.replace(COUNTER_CLAUSE, '') };
     expect(criticizeReflection({ ...args, draft: stripped }).reasons).toContain('COUNTER_UNMENTIONED');
   });
 
@@ -344,15 +353,15 @@ describe('EvidenceCritic：六道规则在落库前拦', () => {
   it('正文里的数字不在 finding 里 ⇒ COUNT_MISMATCH：数字只有一个出处', () => {
     const reasons = criticizeReflection({
       ...cleanInput,
-      draft: { title: cleanDraft.title, body: `${cleanDraft.body}一共 12 次` }
+      draft: { ...cleanDraft, body: `${cleanDraft.body}一共 12 次` }
     }).reasons;
     expect(reasons).toContain('COUNT_MISMATCH');
   });
 
   it('PATTERN 少了一个解释 ⇒ HYPOTHESIS_DROPPED：三种都得到', () => {
     const dropped = {
-      title: cleanDraft.title,
-      body: cleanDraft.body.replace(HYPOTHESIS_PHRASES.LONG_TERM_INTEREST, '')
+      ...cleanDraft,
+      alternatives: cleanDraft.alternatives.replace(HYPOTHESIS_PHRASES.STAGED_PROJECT, '')
     };
     expect(criticizeReflection({ ...cleanInput, draft: dropped }).reasons).toContain('HYPOTHESIS_DROPPED');
   });
@@ -376,7 +385,7 @@ describe('EvidenceCritic：六道规则在落库前拦', () => {
   });
 
   it('六道全中时按字典序返回，不依赖命中顺序', () => {
-    const bad = { title: 'x', body: '一共 99 次 因为 说明' };
+    const bad = { title: 'x', body: '一共 99 次 因为 说明', alternatives: '' };
     const first = criticizeReflection({ ...cleanInput, draft: bad, counterHits: 5, poolIds: [] });
     const second = criticizeReflection({ ...cleanInput, draft: bad, counterHits: 5, poolIds: [] });
     expect(first.reasons).toEqual([
@@ -405,7 +414,7 @@ describe('EvidenceCritic：六道规则在落库前拦', () => {
       const one = finding({
         type,
         supportMemoryIds: ['s1'],
-        hypothesisKeys: type === 'PATTERN' ? [...PATTERN_HYPOTHESES] : [],
+        hypothesisKeys: [...HYPOTHESIS_KEYS_BY_TYPE[type]],
         topicTokens: type === 'CONTRADICTION' ? ['杭州'] : ['数据', '迁移']
       });
       const draft = phraseReflection({

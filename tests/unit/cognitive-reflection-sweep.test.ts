@@ -242,6 +242,18 @@ function bodyOf(row: Row): string {
   return decryptString(String(row.bodyCiphertext), `reflection:v1:${row.userId}:${row.id}:body`);
 }
 
+/**
+ * 落库的那一句解释。它对外的唯一去处是这个字段——正文里再抄一遍，读侧就分不清哪份为准。
+ * 列名改了不认：`undefined` 会让 decryptString 抛，而不是静悄悄返回 null 让断言白过。
+ */
+function alternativesOf(row: Row): string | null {
+  if (row.alternativesCiphertext === null) return null;
+  return decryptString(
+    String(row.alternativesCiphertext),
+    `reflection:v1:${row.userId}:${row.id}:alternatives`
+  );
+}
+
 beforeEach(() => {
   tables.clear();
   ctx.events.length = 0;
@@ -567,6 +579,12 @@ describe('落库的形状', () => {
     expect(citations[0]!.memoryId).toBeNull();
     expect(citations[0]!.kind).toBe('SUPPORTS');
     expect(bodyOf(record)).toContain('原话：「把订单存储换成 PostgreSQL」。');
+    // 片Q-2：这一类的三种解释由措辞层产出、由这里原样落库，只在这个字段里出现一次。
+    expect(alternativesOf(record)).toBe(
+      '可能是这个决定带来的；可能是同期另一件事带来的；可能和这个决定没关系，环境本来就会这样'
+    );
+    expect(bodyOf(record)).not.toContain('可能是这个决定带来的');
+    expect(bodyOf(record)).not.toContain('这几种解释');
   });
 
   it('结果时间取该决策所有已确认结果行里最早的那一条', async () => {
