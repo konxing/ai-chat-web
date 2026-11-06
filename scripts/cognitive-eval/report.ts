@@ -2,6 +2,7 @@ import { MEMORY_RETRIEVAL_POOL } from '@/lib/cognitive/memory-module';
 import { STORIES, allMemories } from './fixtures/stories';
 import type { ProbeScore, ArmSummary } from './metrics';
 import { METRIC_COVERAGE, coverageCounts } from './metric-coverage';
+import { evaluateThresholds, thresholdCounts } from './metric-thresholds';
 
 /**
  * 报告是**从 summary 数据渲染出来的**，不是手写的：
@@ -30,6 +31,21 @@ function coverageTable(): string {
     lines.push(
       `| ${entry.group} | ${entry.name} | ${entry.status === 'computed' ? '有数' : '没有'} | ` +
         `${entry.detail} | ${entry.unblock ?? '—'} |`
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 任务书 7.4 末段的正式阈值。数值一律现算自 `evaluateThresholds`，
+ * 所以这张表跟着基线走——把 summary.json 里的数改掉，这一栏立刻跟着变，
+ * 不会出现「表写的是 0.72，跑出来 0.61，报告还在说达标」。
+ */
+function thresholdTable(arms: ReportInput['arms']): string {
+  const lines = ['| 指标 | 语义 | 实测（现状臂） | 下限 | 判 | 这个数从哪来 |', '|---|---|---|---|---|---|'];
+  for (const row of evaluateThresholds(arms.current)) {
+    lines.push(
+      `| ${row.label} | ${row.kind} | ${row.value ?? '读不到'} | ${row.floor ?? '不设'} | ${row.verdict} | ${row.basis} |`
     );
   }
   return lines.join('\n');
@@ -167,6 +183,7 @@ export function renderReport(input: ReportInput): string {
   const missed = currentScores.filter((score) => score.recall !== null && score.recall < 1);
   const zeroHit = currentScores.filter((score) => score.recall !== null && score.hits.length === 0);
   const minInjected = Math.min(...currentScores.map((score) => score.injected.length));
+  const counts = thresholdCounts(evaluateThresholds(current));
 
   return `# 认知评测报告（${STORIES.length} 个故事）
 
@@ -281,6 +298,18 @@ ${coverageTable()}
 - **撤回 / 永久删除后的不可见率** 已由 \`tests/unit/cognitive-memories.test.ts\` 在 SQL 层守住，
   harness 里重述一遍只会多一个可能不一致的来源。
 
+## 7.4 阈值（正式阈值：${counts.gated} 项有门槛 / ${counts.failed} 项判退 / ${counts.observed} 项只观察）
+
+${thresholdTable(input.arms)}
+
+**这三类语义不一样，别把它们读成同一种「合格」。** safety-zero 是安全不变量，必须是 0，
+基线变差不变好都不影响它——尤其不许因为「基线就是 1」把下限抬到 1。non-regression 是
+**非回归下限**，意思是「不许比这份基线差」，它**不是达标线**：这份语料和标准答案都是 Agent 编的
+（见文末「这一版的限制」），拿它宣布达标就是自证。observe-only 明说不判——
+提问数不到 20 的那三类（13 / 7 / 6 条）和延迟一次抖动就能翻绿翻红，摆成门槛比不摆更坏。
+
+下限取的是本轮基线本身，没有留「还能多丢一条」的余量：事实更新少通过一条（17/30 → 16/30）就跌破。
+
 ## 延迟
 
 延迟每次跑都不一样，写进报告就成了每次 commit 都动的噪声，所以**不进 summary.json**，
@@ -300,7 +329,8 @@ harness 测不到，也不假装测得到。
 4. 语料已到 ${STORIES.length} 个故事 / ${current.probes} 个提问，规模上满足了 7.1；但此刻可见的 ${input.visibleSize} 行
    已经贴着线上取数上限 ${MEMORY_RETRIEVAL_POOL} 行——再多铺故事就开始截断，
    那时候这份基线测的不再是「全部记忆里的召回」，而是「最近 ${MEMORY_RETRIEVAL_POOL} 行里的召回」，这条差异要在解读时说明。
-   样本量够了，但 7.4 末段要的「根据结果设定正式阈值」还没做，这份报告就是设阈值用的那份基线。
+   样本量够了，7.4 末段要的「根据结果设定正式阈值」也已经上面那节给出了；**但那份阈值是拿这一版
+   fixture 定的，它管的是「不许比现在差」，人工复核（第 2 条）没做完之前，它不能被当成质量合格线。**
 `;
 }
 
@@ -316,6 +346,17 @@ export function renderSummary(input: ReportInput): string {
     },
     arms: { A2: input.arms.A2, current: input.arms.current },
     metricsCoverage: coverageCounts(),
+    // 7.4 的正式阈值也要机器可读：CI 或人都能直接读 failed 而不必解析 markdown 表格。
+    thresholds: {
+      ...thresholdCounts(evaluateThresholds(input.arms.current)),
+      rows: evaluateThresholds(input.arms.current).map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        floor: row.floor,
+        value: row.value,
+        verdict: row.verdict
+      }))
+    },
     dilution: input.dilution,
     scores: input.scores
   };

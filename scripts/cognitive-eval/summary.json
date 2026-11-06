@@ -278,6 +278,91 @@
     "computed": 8,
     "blocked": 21
   },
+  "thresholds": {
+    "gated": 7,
+    "passed": 7,
+    "failed": 0,
+    "observed": 4,
+    "rows": [
+      {
+        "id": "recallAt8",
+        "kind": "non-regression",
+        "floor": 0.7274,
+        "value": 0.7274,
+        "verdict": "PASS"
+      },
+      {
+        "id": "precisionAt8",
+        "kind": "non-regression",
+        "floor": 0.097,
+        "value": 0.097,
+        "verdict": "PASS"
+      },
+      {
+        "id": "mrr",
+        "kind": "non-regression",
+        "floor": 0.5828,
+        "value": 0.5828,
+        "verdict": "PASS"
+      },
+      {
+        "id": "category:update",
+        "kind": "non-regression",
+        "floor": 0.5667,
+        "value": 0.5667,
+        "verdict": "PASS"
+      },
+      {
+        "id": "category:recall",
+        "kind": "non-regression",
+        "floor": 0.6833,
+        "value": 0.6833,
+        "verdict": "PASS"
+      },
+      {
+        "id": "forbiddenInjections",
+        "kind": "safety-zero",
+        "floor": 0,
+        "value": 0,
+        "verdict": "PASS"
+      },
+      {
+        "id": "unmarkedLowConfidence",
+        "kind": "safety-zero",
+        "floor": 0,
+        "value": 0,
+        "verdict": "PASS"
+      },
+      {
+        "id": "category:conflict",
+        "kind": "observe-only",
+        "floor": null,
+        "value": 1,
+        "verdict": "OBSERVE"
+      },
+      {
+        "id": "category:temporal",
+        "kind": "observe-only",
+        "floor": null,
+        "value": 1,
+        "verdict": "OBSERVE"
+      },
+      {
+        "id": "category:forgetting",
+        "kind": "observe-only",
+        "floor": null,
+        "value": 1,
+        "verdict": "OBSERVE"
+      },
+      {
+        "id": "latency",
+        "kind": "observe-only",
+        "floor": null,
+        "value": null,
+        "verdict": "OBSERVE"
+      }
+    ]
+  },
   "dilution": {
     "previousThrough": 19,
     "olderPoolSize": 114,
