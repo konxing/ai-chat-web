@@ -17,7 +17,8 @@ import {
   describeListCap,
   describeReflectionTime,
   formatSnoozeDate,
-  isActionable
+  isActionable,
+  splitPendingSection
 } from '@/lib/cognitive/reflection-display';
 
 /**
@@ -53,6 +54,8 @@ interface ReflectionDto {
   alternatives: string | null;
   /** 只有档位：分数不出服务端（片Q-3），所以这一屏拿不到 `0.62`，也就没法把它显示成精确数字。 */
   confidenceBand: keyof typeof REFLECTION_CONFIDENCE_LABELS;
+  /** 服务端选出的「主要展示」三条之一；那个 0–1 的重要度不在这里，也不许在这里重算。 */
+  isPrimary: boolean;
   sampleCount: number;
   observationSpanDays: number;
   counterHitCount: number;
@@ -238,134 +241,143 @@ export function ReflectionPanel() {
             REFLECTION_SECTIONS.map((section) => {
               const rows = reflections.filter((item) => item.status === section.status);
               if (rows.length === 0) return null;
+              // 只有待处理那一区有子块；其余五区拿到的是整块且不带小标题（纯函数里定的形状）。
+              const groups = splitPendingSection(rows);
               return (
                 <div key={section.status}>
                   <h3 className="mb-2 text-[12px] font-medium text-white/45">
                     {section.title}（{rows.length}）
                   </h3>
                   <div className="space-y-2.5">
-                    {rows.map((reflection) => {
-                      const actionable = isActionable(reflection.status);
-                      const timeLine = describeReflectionTime(
-                        reflection.timeFrom,
-                        reflection.timeTo,
-                        reflection.timePrecision
-                      );
-                      const alternativesLine = describeAlternatives(reflection.alternatives);
-                      const counterLine = describeCounterEvidence(reflection.counterHitCount);
-                      const isOpen = openId === reflection.id;
-                      return (
-                        <div
-                          key={reflection.id}
-                          className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="chip !px-2.5 !py-1 !text-[11.5px]">
-                              {REFLECTION_TYPE_LABELS[reflection.type]}
-                            </span>
-                            <span className="text-[11.5px] text-white/35">
-                              {REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]}
-                            </span>
-                            {timeLine ? (
-                              <span className="text-[11.5px] text-white/35">{timeLine}</span>
-                            ) : null}
-                            <span className="text-[11px] text-white/25">
-                              {describeGeneratedAt(reflection.generatedAt)}
-                            </span>
-                          </div>
-                          <p className="mt-2 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-white/85">
-                            {reflection.title}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/55">
-                            {reflection.body}
-                          </p>
-                          {alternativesLine ? (
-                            <p className="mt-1.5 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-white/45">
-                              {alternativesLine}
-                            </p>
-                          ) : null}
-                          <p className="mt-1.5 text-[11.5px] text-white/35">
-                            {describeEvidenceVolume(reflection.sampleCount, reflection.observationSpanDays)}
-                            {counterLine ? ` · ${counterLine}` : ''}
-                          </p>
-                          {reflection.status === 'EXPIRED' ? (
-                            <p className="mt-1.5 text-[11.5px] text-white/40">这条洞察 30 天没人处理，已过期</p>
-                          ) : null}
-                          {reflection.status === 'SNOOZED' && reflection.snoozedUntil !== null ? (
-                            <p className="mt-1.5 text-[11.5px] text-white/40">
-                              已推迟到 {formatSnoozeDate(reflection.snoozedUntil)}
-                            </p>
-                          ) : null}
-
-                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
-                              onClick={() => void toggleOpen(reflection)}
+                    {groups.map((group) => (
+                      <div key={group.key} className="space-y-2.5">
+                        {group.title ? (
+                          <h4 className="mb-2 text-[11.5px] font-medium text-white/35">{group.title}</h4>
+                        ) : null}
+                        {group.rows.map((reflection) => {
+                          const actionable = isActionable(reflection.status);
+                          const timeLine = describeReflectionTime(
+                            reflection.timeFrom,
+                            reflection.timeTo,
+                            reflection.timePrecision
+                          );
+                          const alternativesLine = describeAlternatives(reflection.alternatives);
+                          const counterLine = describeCounterEvidence(reflection.counterHitCount);
+                          const isOpen = openId === reflection.id;
+                          return (
+                            <div
+                              key={reflection.id}
+                              className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4"
                             >
-                              <ChevronDown
-                                className={`h-3.5 w-3.5 transition ${isOpen ? 'rotate-180' : ''}`}
-                              />
-                              依据
-                            </button>
-                            {actionable ? (
-                              <>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="chip !px-2.5 !py-1 !text-[11.5px]">
+                                  {REFLECTION_TYPE_LABELS[reflection.type]}
+                                </span>
+                                <span className="text-[11.5px] text-white/35">
+                                  {REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]}
+                                </span>
+                                {timeLine ? (
+                                  <span className="text-[11.5px] text-white/35">{timeLine}</span>
+                                ) : null}
+                                <span className="text-[11px] text-white/25">
+                                  {describeGeneratedAt(reflection.generatedAt)}
+                                </span>
+                              </div>
+                              <p className="mt-2 whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-white/85">
+                                {reflection.title}
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/55">
+                                {reflection.body}
+                              </p>
+                              {alternativesLine ? (
+                                <p className="mt-1.5 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-white/45">
+                                  {alternativesLine}
+                                </p>
+                              ) : null}
+                              <p className="mt-1.5 text-[11.5px] text-white/35">
+                                {describeEvidenceVolume(reflection.sampleCount, reflection.observationSpanDays)}
+                                {counterLine ? ` · ${counterLine}` : ''}
+                              </p>
+                              {reflection.status === 'EXPIRED' ? (
+                                <p className="mt-1.5 text-[11.5px] text-white/40">这条洞察 30 天没人处理，已过期</p>
+                              ) : null}
+                              {reflection.status === 'SNOOZED' && reflection.snoozedUntil !== null ? (
+                                <p className="mt-1.5 text-[11.5px] text-white/40">
+                                  已推迟到 {formatSnoozeDate(reflection.snoozedUntil)}
+                                </p>
+                              ) : null}
+
+                              <div className="mt-2.5 flex flex-wrap items-center gap-2">
                                 <button
                                   type="button"
                                   className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
-                                  disabled={busyId === reflection.id}
-                                  onClick={() => void act(reflection, 'accept')}
+                                  onClick={() => void toggleOpen(reflection)}
                                 >
-                                  {busyId === reflection.id ? <Spinner /> : null} 采纳
+                                  <ChevronDown
+                                    className={`h-3.5 w-3.5 transition ${isOpen ? 'rotate-180' : ''}`}
+                                  />
+                                  依据
                                 </button>
-                                <button
-                                  type="button"
-                                  className="btn-ghost !px-2.5 !py-1.5 !text-[12px] hover:text-red-300"
-                                  disabled={busyId === reflection.id}
-                                  onClick={() => void act(reflection, 'reject')}
-                                >
-                                  拒绝
-                                </button>
-                                <span className="text-[11.5px] text-white/35">稍后</span>
-                                {REFLECTION_SNOOZE_OPTIONS.map((option) => (
-                                  <button
-                                    key={option.days}
-                                    type="button"
-                                    className="chip !px-2.5 !py-1 !text-[11.5px]"
-                                    disabled={busyId === reflection.id}
-                                    onClick={() => void snooze(reflection, option.days)}
-                                  >
-                                    {option.label}
-                                  </button>
-                                ))}
-                              </>
-                            ) : null}
-                          </div>
-
-                          {isOpen ? (
-                            <div className="mt-2.5 border-t border-white/[0.06] pt-2.5">
-                              {citationsLoading ? (
-                                <LoadingBlock label="加载依据" />
-                              ) : shownCitations.length === 0 ? (
-                                <p className="text-[12px] text-white/40">这条洞察没有可展示的原始依据。</p>
-                              ) : (
-                                <ul className="space-y-1.5">
-                                  {shownCitations.map((citation) => (
-                                    <li
-                                      key={citation.id}
-                                      className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/60"
+                                {actionable ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
+                                      disabled={busyId === reflection.id}
+                                      onClick={() => void act(reflection, 'accept')}
                                     >
-                                      {CITATION_KIND_LABELS[citation.kind]}
-                                      {citation.text}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
+                                      {busyId === reflection.id ? <Spinner /> : null} 采纳
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-ghost !px-2.5 !py-1.5 !text-[12px] hover:text-red-300"
+                                      disabled={busyId === reflection.id}
+                                      onClick={() => void act(reflection, 'reject')}
+                                    >
+                                      拒绝
+                                    </button>
+                                    <span className="text-[11.5px] text-white/35">稍后</span>
+                                    {REFLECTION_SNOOZE_OPTIONS.map((option) => (
+                                      <button
+                                        key={option.days}
+                                        type="button"
+                                        className="chip !px-2.5 !py-1 !text-[11.5px]"
+                                        disabled={busyId === reflection.id}
+                                        onClick={() => void snooze(reflection, option.days)}
+                                      >
+                                        {option.label}
+                                      </button>
+                                    ))}
+                                  </>
+                                ) : null}
+                              </div>
+
+                              {isOpen ? (
+                                <div className="mt-2.5 border-t border-white/[0.06] pt-2.5">
+                                  {citationsLoading ? (
+                                    <LoadingBlock label="加载依据" />
+                                  ) : shownCitations.length === 0 ? (
+                                    <p className="text-[12px] text-white/40">这条洞察没有可展示的原始依据。</p>
+                                  ) : (
+                                    <ul className="space-y-1.5">
+                                      {shownCitations.map((citation) => (
+                                        <li
+                                          key={citation.id}
+                                          className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-white/60"
+                                        >
+                                          {CITATION_KIND_LABELS[citation.kind]}
+                                          {citation.text}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                          );
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </div>
               );

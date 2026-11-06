@@ -35,6 +35,46 @@ export const REFLECTION_SECTIONS: ReadonlyArray<{ status: ReflectionStatus; titl
   { status: 'EXPIRED', title: '已过期' }
 ];
 
+/**
+ * 待处理那一区的两个子区标题（6.6「第一版最多保留 3 条待确认的高价值洞察作为主要展示」）。
+ * 只给词、不给数：数已经在区级标题上（「待确认（N）」），子区再拼一个数等于把同一批行数字讲两遍，
+ * 而两个子区的和恰好等于它——界面一旦自己算，就多了一个能和上面对不上的地方。
+ * 两个词都要短，因为它们挤在区级标题下面。
+ */
+export const PENDING_SUBSECTION_LABELS = { primary: '主要', rest: '其余' } as const;
+
+export interface ReflectionGroup<T> {
+  key: string;
+  /** null 表示这一区不需要小标题。 */
+  title: string | null;
+  rows: T[];
+}
+
+/**
+ * 按服务端给的 `isPrimary` 把待处理的行切成两块。这里**不排序也不重新判定**：
+ * 额度是 3、尺子是 importance，两样都只有读侧看得见——理由与片Q-3「分数不出服务端」是同一条，
+ * 界面一旦自己排一次，「库里选出的前三」和「屏幕上看到的前三」就会分叉。
+ *
+ * 全主要或全不主要都回一整块且不带标题。前者那时「主要」就是这一区本身，挂标题等于把同一句
+ * 话讲两遍；后者是读侧今天不会给的形状，但宁可整块摆出来，也不挂一个下面空着的标题。
+ */
+export function splitPendingSection<T extends { isPrimary: boolean }>(
+  rows: ReadonlyArray<T>
+): ReflectionGroup<T>[] {
+  const primary = rows.filter((row) => row.isPrimary);
+  if (primary.length === 0 || primary.length === rows.length) {
+    return [{ key: 'all', title: null, rows: [...rows] }];
+  }
+  return [
+    { key: 'primary', title: PENDING_SUBSECTION_LABELS.primary, rows: primary },
+    {
+      key: 'rest',
+      title: PENDING_SUBSECTION_LABELS.rest,
+      rows: rows.filter((row) => !row.isPrimary)
+    }
+  ];
+}
+
 export const CITATION_KIND_LABELS: Record<ReflectionCitationKind, string> = {
   SUPPORTS: '支撑：',
   CONTRADICTS: '相反：'

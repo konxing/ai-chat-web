@@ -36,6 +36,13 @@ import { getCognitivePreferences } from './preferences';
  */
 export const REFLECTION_LIST_MAX_ROWS = 100;
 
+/**
+ * 6.6「第一版最多保留 3 条待确认的高价值洞察作为主要展示」——这个数字直接抄任务书，
+ * 不在这里另设阈值：尺子用的是 sweep 落库时那条 `importance`（`reflection-sweep.ts:473`），
+ * 也就是「哪三条值得写进库」和「哪三条摆在最上面」是同一把尺子的两次用途。
+ */
+export const PRIMARY_DISPLAY_MAX = 3;
+
 /** 「稍后」只有三档：任意天数会让 snooze 变成「无限期推迟」的入口。 */
 export type ReflectionSnoozeDays = 3 | 7 | 30;
 
@@ -58,6 +65,14 @@ export interface ReflectionDto {
    * 换算只有一条规则：`confidenceBandOf`，与写侧措辞用的那一条是同一个函数。
    */
   confidenceBand: ConfidenceBand;
+  /**
+   * 「主要展示」那三条之一（6.6）。额度是 3、尺子是库里那列 `importance`，两样都只在
+   * `listReflections` 里用一次：界面拿到的是布尔，不是那个 0–1 的数——这和片Q-3 的
+   * 「分数不出服务端」是同一条口径，而且界面自己排一次序，就会和服务端选出的三条分叉。
+   *
+   * 单条读恒为 false：那里只有一行，「前三」在一行的列表上没有意义。
+   */
+  isPrimary: boolean;
   sampleCount: number;
   observationSpanDays: number;
   counterHitCount: number;
@@ -82,6 +97,7 @@ function toDto(row: ReflectionRecord, now: Date): ReflectionDto {
     body: decryptString(row.bodyCiphertext, aadFor(row.userId, row.id, 'body')),
     alternatives: plain('alternatives', row.alternativesCiphertext),
     confidenceBand: confidenceBandOf(row.confidence),
+    isPrimary: false,
     sampleCount: row.sampleCount,
     observationSpanDays: row.observationSpanDays,
     counterHitCount: row.counterHitCount,
@@ -128,6 +144,10 @@ export async function reflectionModuleEnabled(userId: string): Promise<boolean> 
 /**
  * 列表。`state` 过滤发生在**派生之后**，所以它只能在应用层做：派生出来的 EXPIRED 没有对应的列值，
  * 用 SQL 的 `status = 'PENDING'` 过滤会把「库里还是 PENDING、但已经过期」的那几行放进来。
+ *
+ * 主要展示的标记也在这一层算，而且是**过滤之前**算——6.6 那三条额度说的是「这一屏端出来前三条」，
+ * 界面切个状态标签不该把额度重新分配一次。判定用的是 `deriveStatus` 的结果而不是库里的列，
+ * 否则一条过期但还没被 sweep 收割的 PENDING 会占掉一个位置，把三条还活着的全挤下去。
  */
 export async function listReflections(
   userId: string,
@@ -138,8 +158,35 @@ export async function listReflections(
     orderBy: { generatedAt: 'desc' },
     take: REFLECTION_LIST_MAX_ROWS
   });
-  const dtos = rows.map((row) => toDto(row, input.now));
-  return input.state === undefined ? dtos : dtos.filter((dto) => dto.status === input.state);
+  const entries = rows.map((row) => ({ dto: toDto(row, input.now), importance: row.importance }));
+  return input.state === undefined
+    ? markPrimaryDisplay(entries)
+    : markPrimaryDisplay(entries).filter((dto) => dto.status === input.state);
+}
+
+/**
+ * 待处理整块排在其余状态之前，块内按重要度高的在前；其余状态维持「生成时间新的在前」——
+ * 那个顺序是 SQL 给的，这里不重排。
+ *
+ * 同分时按生成时间新的在前，再同则按 id：`sort` 在现代引擎里是稳定的，但稳定不等于两次调用同序
+ * （SQL 只保证 generatedAt 一列的次序），而「同一批数据两次点进来看到不同的前三条」正是这片要防的。
+ */
+function markPrimaryDisplay(
+  entries: ReadonlyArray<{ dto: ReflectionDto; importance: number }>
+): ReflectionDto[] {
+  const pending = entries
+    .filter((entry) => entry.dto.status === 'PENDING')
+    .sort(
+      (a, b) =>
+        b.importance - a.importance ||
+        Date.parse(b.dto.generatedAt) - Date.parse(a.dto.generatedAt) ||
+        (a.dto.id < b.dto.id ? -1 : 1)
+    );
+  pending.forEach((entry, index) => {
+    entry.dto.isPrimary = index < PRIMARY_DISPLAY_MAX;
+  });
+  const others = entries.filter((entry) => entry.dto.status !== 'PENDING');
+  return [...pending, ...others].map((entry) => entry.dto);
 }
 
 export interface ReflectionCitationDto {

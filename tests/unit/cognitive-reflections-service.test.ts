@@ -260,6 +260,164 @@ describe('列表：密文变回明文，过期在读取时判出来', () => {
   });
 });
 
+/**
+ * 任务书 6.6：「第一版最多保留 3 条待确认的高价值洞察作为主要展示」。
+ *
+ * 这一屏要的不是那个数，是那三条：库里 `importance` 一直是 sweep 用来决定「哪三条值得写进库」
+ * 的尺子（`reflection-sweep.ts:338,351,473`），这片让它再决定一次「哪三条摆在最上面」。
+ * 于是这一列第一次有了界面这边的消费者，而不必在屏上多画一个 0–1 的数（片Q-3 边界第一条）。
+ */
+describe('主要展示：待处理里最重要的三条', () => {
+  beforeEach(() => {
+    tables.clear();
+    switchOn();
+  });
+
+  it('五条待处理按重要度从高到低排，前三个 isPrimary，后两个不是', async () => {
+    // 生成时间故意和重要度反着排：不这样就没法分清排序用的是哪一个。
+    reflectionTable().seed(
+      reflection('hi', { importance: 0.9, generatedAt: new Date('2026-10-01T00:00:00Z') }),
+      reflection('mid', { importance: 0.7, generatedAt: new Date('2026-10-02T00:00:00Z') }),
+      reflection('third', { importance: 0.5, generatedAt: new Date('2026-10-03T00:00:00Z') }),
+      reflection('fourth', { importance: 0.3, generatedAt: new Date('2026-10-04T00:00:00Z') }),
+      reflection('low', { importance: 0.1, generatedAt: new Date('2026-10-05T00:00:00Z') })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.map((row) => row.id)).toEqual(['hi', 'mid', 'third', 'fourth', 'low']);
+    expect(got.map((row) => row.isPrimary)).toEqual([true, true, true, false, false]);
+  });
+
+  it('不足三条就全算主要：「最多 3」不是「恰好 3」', async () => {
+    reflectionTable().seed(
+      reflection('r1', { importance: 0.2 }),
+      reflection('r2', { importance: 0.9 })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.map((row) => row.id)).toEqual(['r2', 'r1']);
+    expect(got.map((row) => row.isPrimary)).toEqual([true, true]);
+  });
+
+  it('额度只给待确认的：SNOOZED 的重要度再高也不占，也不标主要', async () => {
+    reflectionTable().seed(
+      reflection('s1', {
+        status: 'SNOOZED',
+        snoozedUntil: new Date(NOW.getTime() + 3 * DAY),
+        importance: 0.99
+      }),
+      reflection('p1', { importance: 0.5 }),
+      reflection('p2', { importance: 0.4 }),
+      reflection('p3', { importance: 0.3 }),
+      reflection('p4', { importance: 0.2 })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.find((row) => row.id === 's1')!.isPrimary).toBe(false);
+    expect(
+      got.filter((row) => row.isPrimary).map((row) => row.id)
+    ).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('库里还是 PENDING 但已过期 ⇒ 不占额度：三条还活着的全数进主要', async () => {
+    // 这条钉的是「按派生状态算，不按库里的列算」。写侧落库后没人改 status 列，
+    // 过期是读的时候判的（片 6-E-d）；若这里读的是 row.status，那条死行会把 p3 挤出去。
+    reflectionTable().seed(
+      reflection('dead', { importance: 0.99, expiresAt: new Date(NOW.getTime() - DAY) }),
+      reflection('p1', { importance: 0.5 }),
+      reflection('p2', { importance: 0.4 }),
+      reflection('p3', { importance: 0.3 })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.find((row) => row.id === 'dead')!.status).toBe('EXPIRED');
+    expect(
+      got.filter((row) => row.isPrimary).map((row) => row.id)
+    ).toEqual(['p1', 'p2', 'p3']);
+  });
+
+  it('重要度相同按生成时间新的在前，且两次调用给出同一个答案', async () => {
+    reflectionTable().seed(
+      reflection('older', { importance: 0.5, generatedAt: new Date('2026-10-01T00:00:00Z') }),
+      reflection('newer', { importance: 0.5, generatedAt: new Date('2026-11-01T00:00:00Z') })
+    );
+    const module = await service();
+    const first = await module.listReflections(USER, { now: NOW });
+    const second = await module.listReflections(USER, { now: NOW });
+    expect(first.map((row) => row.id)).toEqual(['newer', 'older']);
+    expect(second.map((row) => row.id)).toEqual(['newer', 'older']);
+  });
+
+  it('重要度与生成时间都相同 ⇒ 按 id 升序收尾：种子顺序反过来也是同一个答案', async () => {
+    // 这一条是探针 P9 补出来的：去掉 id 这一级决胜键后，前面所有用例照样绿——
+    // 因为它们的种子要么重要度不同、要么生成时间不同，最后一级从没被执行过。
+    // 真库里同一轮 sweep 会写出重要度和 generatedAt 完全相同的行（同一批、同一个时间戳），
+    // 那时只剩 SQL 的插入顺序能决定谁进前三，而插入顺序不是契约。
+    const same = new Date('2026-11-01T00:00:00Z');
+    reflectionTable().seed(
+      reflection('zz', { importance: 0.5, generatedAt: same }),
+      reflection('aa', { importance: 0.5, generatedAt: same })
+    );
+    const module = await service();
+    const first = await module.listReflections(USER, { now: NOW });
+    expect(first.map((row) => row.id)).toEqual(['aa', 'zz']);
+    expect(first.map((row) => row.isPrimary)).toEqual([true, true]);
+  });
+
+  it('主要标记是布尔，不是那个 0–1 的数：isPrimary 出服务端，importance 不出', async () => {
+    reflectionTable().seed(reflection('r1', { importance: 0.62 }));
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(typeof got[0]!.isPrimary).toBe('boolean');
+    for (const row of got) expect(row).not.toHaveProperty('importance');
+    expect(JSON.stringify(got)).not.toContain('"importance":');
+  });
+
+  it('待处理整块排在其余状态之前，其余仍按生成时间新的在前', async () => {
+    // 这条钉的是列表的整体契约：p1 生成得最晚，但它是待处理，所以排在已采纳的前面；
+    // 已采纳与已过期之间才轮到比生成时间。
+    reflectionTable().seed(
+      reflection('p1', { importance: 0.2, generatedAt: new Date('2026-10-01T00:00:00Z') }),
+      reflection('a1', {
+        status: 'ACCEPTED',
+        decidedAt: new Date('2026-11-03T00:00:00Z'),
+        expiresAt: null,
+        generatedAt: new Date('2026-11-03T00:00:00Z')
+      }),
+      reflection('s1', {
+        status: 'SNOOZED',
+        snoozedUntil: new Date(NOW.getTime() + 3 * DAY),
+        generatedAt: new Date('2026-11-02T00:00:00Z')
+      })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(got.map((row) => row.id)).toEqual(['p1', 'a1', 's1']);
+    expect(got.map((row) => row.isPrimary)).toEqual([true, false, false]);
+  });
+
+  it('按 state 过滤时标记照旧：过滤是界面的事，额度不是', async () => {
+    reflectionTable().seed(
+      reflection('p1', { importance: 0.9 }),
+      reflection('p2', { importance: 0.8 }),
+      reflection('p3', { importance: 0.7 }),
+      reflection('p4', { importance: 0.6 }),
+      reflection('s1', {
+        status: 'SNOOZED',
+        snoozedUntil: new Date(NOW.getTime() + 3 * DAY)
+      })
+    );
+    const module = await service();
+    const pending = await module.listReflections(USER, { now: NOW, state: 'PENDING' });
+    expect(pending).toHaveLength(4);
+    expect(pending.filter((row) => row.isPrimary).map((row) => row.id)).toEqual([
+      'p1',
+      'p2',
+      'p3'
+    ]);
+  });
+});
+
 describe('证据：引用行指到谁，就读出谁', () => {
   beforeEach(() => {
     tables.clear();

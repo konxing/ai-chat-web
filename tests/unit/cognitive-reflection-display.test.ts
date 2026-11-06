@@ -17,10 +17,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ALTERNATIVES_LINE_PREFIX,
   CITATION_KIND_LABELS,
+  PENDING_SUBSECTION_LABELS,
   REFLECTION_CONFIDENCE_LABELS,
   REFLECTION_SECTIONS,
   REFLECTION_SNOOZE_OPTIONS,
   REFLECTION_TYPE_LABELS,
+  splitPendingSection,
   describeAlternatives,
   describeCounterEvidence,
   describeEvidenceVolume,
@@ -218,5 +220,66 @@ describe('纯模块边界', () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith('import') && !line.startsWith('import type'));
     expect(runtimeImports).toEqual([]);
+  });
+});
+
+/**
+ * 任务书 6.6「最多保留 3 条待确认的高价值洞察作为主要展示」在界面这一侧的落点。
+ *
+ * 切分规则放在纯函数里，是因为「什么时候该出现第二个小标题」这件事界面说不清：
+ * 三条以内全是主要，再挂一对「主要 / 其余」的标题就是自己给自己造噪音（也是他定过的
+ * 「不许渲染没有消费者的控件」那一类）。于是这一区到底分不分、标题叫什么，一条用例就能钉死。
+ */
+describe('待处理一区的两个子区', () => {
+  it('两个子区标题逐字钉住：主要 / 其余', () => {
+    expect(PENDING_SUBSECTION_LABELS).toEqual({ primary: '主要', rest: '其余' });
+  });
+
+  it('超过三条 ⇒ 两组各带标题，组里的成员就是服务端标出来的那批', () => {
+    const rows = [
+      { id: 'a', isPrimary: true },
+      { id: 'b', isPrimary: true },
+      { id: 'c', isPrimary: true },
+      { id: 'd', isPrimary: false },
+      { id: 'e', isPrimary: false }
+    ];
+    const groups = splitPendingSection(rows);
+    expect(groups.map((group) => group.title)).toEqual(['主要', '其余']);
+    expect(groups.map((group) => group.rows.map((row) => row.id))).toEqual([
+      ['a', 'b', 'c'],
+      ['d', 'e']
+    ]);
+  });
+
+  it('三条以内 ⇒ 一整块、一个小标题都不留：那时「主要」就是这一区本身', () => {
+    const rows = [
+      { id: 'a', isPrimary: true },
+      { id: 'b', isPrimary: true }
+    ];
+    expect(splitPendingSection(rows)).toEqual([{ key: 'all', title: null, rows }]);
+  });
+
+  it('一条都不主要 ⇒ 也不挂「主要（0）」这种空区标题', () => {
+    // 今天的读侧不会产生这个形状（有待处理行就至少有一条主要）。这条防的是两个模块之间的
+    // 契约变动：额度算法若改在别处算，这一屏不许因此出现一个标题下挂着空列表的区。
+    const rows = [
+      { id: 'a', isPrimary: false },
+      { id: 'b', isPrimary: false }
+    ];
+    expect(splitPendingSection(rows)).toEqual([{ key: 'all', title: null, rows }]);
+  });
+
+  it('切分不重排：顺序由服务端那一次排序定，界面再排一次就会和「前 3 条」的口径打架', () => {
+    // 输入故意按重要度升序（真实响应不会是这样，正因如此这条测的才是「没偷偷排序」）。
+    const rows = [
+      { id: 'low', isPrimary: false },
+      { id: 'mid', isPrimary: true },
+      { id: 'high', isPrimary: true }
+    ];
+    const groups = splitPendingSection(rows);
+    expect(groups.map((group) => group.rows.map((row) => row.id))).toEqual([
+      ['mid', 'high'],
+      ['low']
+    ]);
   });
 });

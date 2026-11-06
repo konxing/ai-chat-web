@@ -224,6 +224,37 @@ describe('置信度档位上屏', () => {
   });
 });
 
+/**
+ * 片Q-4：「主要展示」这一屏只做一件事——按服务端给的标记把待处理那一区分成两块。
+ *
+ * 这里防的是界面自己长出第二套排名：额度（3 条）和尺子（importance）都在读侧，
+ * 界面若再 sort 一次或 slice 一次，同一批行就会在「库里排出来的前三」和「屏幕上看到的前三」
+ * 之间分叉，而那正是片Q-3 用 `confidenceBandOf` 避免过的同一个病。
+ */
+describe('主要展示的切分只在服务端定，界面不重排', () => {
+  it('切分只调一次 splitPendingSection，且面板不自己引那个数', () => {
+    // 钉的是「从 reflection-display 那一条 import 进来的」，不钉换行和逗号怎么排。
+    expect(PANEL).toMatch(
+      /import \{[^}]*\bsplitPendingSection\b[^}]*\} from '@\/lib\/cognitive\/reflection-display'/
+    );
+    expect((PANEL_CODE.match(/splitPendingSection\(/g) ?? [])).toHaveLength(1);
+    // isPrimary 在这个文件里只许出现在 DTO 那一行声明上：出现第二处就说明界面在读它做判断。
+    expect((PANEL_CODE.match(/isPrimary/g) ?? [])).toHaveLength(1);
+  });
+
+  it('界面既没排序也没截断：排序与额度是读侧那一次的事', () => {
+    expect(PANEL_CODE).not.toMatch(/\.sort\(/);
+    expect(PANEL_CODE).not.toMatch(/\.slice\(/);
+    expect(PANEL_CODE).not.toMatch(/importance/i);
+  });
+
+  it('两个小标题只从 group.title 渲染，文案不在界面里另抄一份', () => {
+    expect((PANEL_CODE.match(/\{group\.title\}/g) ?? [])).toHaveLength(1);
+    expect(PANEL_CODE).not.toContain('主要');
+    expect(PANEL_CODE).not.toContain('其余');
+  });
+});
+
 describe('设置页接线', () => {
   it('tab 三处都到位：导航项、渲染分支、Tab 联合类型', () => {
     expect(WORKSPACE).toContain("['reflections', '洞察', Lightbulb]");
