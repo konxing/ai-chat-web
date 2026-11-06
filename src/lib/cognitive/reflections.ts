@@ -4,6 +4,8 @@ import { decryptString, encryptString } from '@/lib/crypto';
 import { prisma } from '@/lib/prisma';
 import { decryptDecisionTopic } from './decisions';
 import { decryptMemoryContent } from './memories';
+import type { ConfidenceBand } from './confidence';
+import { confidenceBandOf } from './reflection-evidence';
 import { getCognitivePreferences } from './preferences';
 
 /**
@@ -50,8 +52,12 @@ export interface ReflectionDto {
   body: string;
   /** 竞争解释（任务书 6.3）：规则分不出几种解释时列出来的那几份，没有就是 null。 */
   alternatives: string | null;
-  confidence: number;
-  importance: number;
+  /**
+   * 档位，不是分数（片Q-3）。库里那列是 `0.62` 这种三位小数，它是规则的产物不是测量值，
+   * 出到服务端就会被读成精确真理——记忆屏 1b 早定了同一个口径：分数不出服务端。
+   * 换算只有一条规则：`confidenceBandOf`，与写侧措辞用的那一条是同一个函数。
+   */
+  confidenceBand: ConfidenceBand;
   sampleCount: number;
   observationSpanDays: number;
   counterHitCount: number;
@@ -75,8 +81,7 @@ function toDto(row: ReflectionRecord, now: Date): ReflectionDto {
     title: decryptString(row.titleCiphertext, aadFor(row.userId, row.id, 'title')),
     body: decryptString(row.bodyCiphertext, aadFor(row.userId, row.id, 'body')),
     alternatives: plain('alternatives', row.alternativesCiphertext),
-    confidence: row.confidence,
-    importance: row.importance,
+    confidenceBand: confidenceBandOf(row.confidence),
     sampleCount: row.sampleCount,
     observationSpanDays: row.observationSpanDays,
     counterHitCount: row.counterHitCount,

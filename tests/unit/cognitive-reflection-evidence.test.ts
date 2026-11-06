@@ -14,6 +14,7 @@ import {
   HYPOTHESIS_PHRASES,
   MEDIUM_BAND_MIN,
   QUOTE_MAX,
+  confidenceBandOf,
   criticizeReflection,
   findCounterEvidence,
   phraseReflection,
@@ -186,6 +187,47 @@ describe('反思置信度：三个因子，档位常量写出来', () => {
       score: 0,
       band: 'low'
     });
+  });
+});
+
+/**
+ * 片Q-3：库里存的是分数，界面上摆的是档位。这两件事之间只许有一个算法——
+ * 读侧从 `row.confidence` 现算档位时，必须和写侧算出的是同一个档，否则同一行会
+ * 在生成时被写成「这几说的是同一件事」、在屏幕上被标成「把握小」。
+ */
+describe('档位只有一条规则：写侧算的档 == 拿分数再算一遍的档', () => {
+  it('两条下界逐字钉住，边界本身算哪一档也钉住', () => {
+    expect(confidenceBandOf(HIGH_BAND_MIN)).toBe('high');
+    expect(confidenceBandOf(0.699)).toBe('medium');
+    expect(confidenceBandOf(MEDIUM_BAND_MIN)).toBe('medium');
+    expect(confidenceBandOf(0.399)).toBe('low');
+    expect(confidenceBandOf(1)).toBe('high');
+    expect(confidenceBandOf(0)).toBe('low');
+  });
+
+  it('规则能算出的每一个分数上，reflectionConfidence 的档与 confidenceBandOf(score) 一个都不差', () => {
+    // 稠密扫，不是随手取几个数：这条要钉的是「写侧和读侧没有两套档」，而两套档的规则只在
+    // **边界那一个数**上给不同答案。稀疏取样（前一版就是这样）会把边界整个绕过去，
+    // 于是 `>= 0.7` 改成 `> 0.7` 也照样全绿。
+    let onHighBoundary = 0;
+    let onMediumBoundary = 0;
+    for (let sampleCount = 1; sampleCount <= 8; sampleCount += 1) {
+      for (let observationSpanDays = 0; observationSpanDays <= 72; observationSpanDays += 1) {
+        for (let counterHits = 0; counterHits <= 4; counterHits += 1) {
+          const { score, band } = reflectionConfidence({
+            sampleCount,
+            observationSpanDays,
+            counterHits
+          });
+          if (score === HIGH_BAND_MIN) onHighBoundary += 1;
+          if (score === MEDIUM_BAND_MIN) onMediumBoundary += 1;
+          expect(confidenceBandOf(score)).toBe(band);
+        }
+      }
+    }
+    // 上面那句断言之所以有分量，是因为这两行：这个扫法真的踩到了两条下界。
+    expect(onHighBoundary).toBeGreaterThan(0);
+    expect(onMediumBoundary).toBeGreaterThan(0);
   });
 });
 

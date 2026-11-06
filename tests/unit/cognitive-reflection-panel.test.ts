@@ -162,7 +162,7 @@ describe('6-G：被截断要说出来，每行要说是哪天生成的', () => {
 describe('客户端包边界', () => {
   it('面板只许引用 reflection-display，不许把带 prisma 的服务端模块拖进浏览器包', () => {
     // 按 from 子句取模块名，不按行首 import：多行 import 的模块名不在 import 那一行上，
-    // 而行首匹配还会把 `importance: number;` 这种字段当成 import（'importance' 以 'import' 开头）。
+    // 而行首匹配会把字段声明（片Q-3 之前的 `importance: number;` 就以 'import' 开头）当成 import。
     const specifiers = [...PANEL.matchAll(/\bfrom\s+'([^']+)'/g)].map((match) => match[1]);
     expect(specifiers).toContain('@/lib/cognitive/reflection-display');
     expect(specifiers.filter((name) => name.startsWith('@/lib/cognitive/'))).toEqual([
@@ -191,6 +191,36 @@ describe('一句解释只渲染一次', () => {
     expect((PANEL_CODE.match(/\{reflection\.body\}/g) ?? [])).toHaveLength(1);
     expect((PANEL_CODE.match(/\{alternativesLine\}/g) ?? [])).toHaveLength(1);
     expect((PANEL_CODE.match(/\{reflection\.title\}/g) ?? [])).toHaveLength(1);
+  });
+});
+
+/**
+ * 片Q-3：置信度终于上屏，但它带来一条更硬的口径——**分数不出服务端**。
+ * 记忆屏（1b）早就是这个形状：服务里是分数，出了服务端只剩档位。这一屏照抄，
+ * 并且把「界面不许自己算档」钉在这里：档位算法只有一份，在 reflection-evidence.ts。
+ */
+describe('置信度档位上屏', () => {
+  it('档位文案只从 REFLECTION_CONFIDENCE_LABELS 取：界面不拼第三份文案', () => {
+    expect(PANEL).toContain('  REFLECTION_CONFIDENCE_LABELS,');
+    expect((PANEL_CODE.match(/REFLECTION_CONFIDENCE_LABELS\[/g) ?? [])).toHaveLength(1);
+    expect(PANEL_CODE).toContain('REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]');
+    // 「把握大/中/小」这三个字只许活在 reflection-display.ts 里。
+    expect(PANEL_CODE).not.toContain('把握');
+  });
+
+  it('界面上没有分数：不带 toFixed，DTO 里也没有 confidence / importance 两个数', () => {
+    expect(PANEL_CODE).not.toContain('.toFixed(');
+    expect(PANEL_CODE).not.toMatch(/confidence:\s/);
+    expect(PANEL_CODE).not.toContain('importance');
+  });
+
+  it('两张 chip 的先后：类型在前、把握在后，都在标题之上（先说这是什么，再说有多确定）', () => {
+    const typeChip = PANEL_CODE.indexOf('REFLECTION_TYPE_LABELS[reflection.type]');
+    const bandChip = PANEL_CODE.indexOf('REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]');
+    const title = PANEL_CODE.indexOf('{reflection.title}');
+    expect(typeChip).toBeGreaterThan(-1);
+    expect(bandChip).toBeGreaterThan(typeChip);
+    expect(bandChip).toBeLessThan(title);
   });
 });
 

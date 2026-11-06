@@ -197,6 +197,35 @@ describe('列表：密文变回明文，过期在读取时判出来', () => {
     expect(got[0]!.alternatives).toBeNull();
   });
 
+  // 片Q-3：库里存的是 0.62 这种三位小数，屏幕上摆的是「把握中」。
+  // 分数一旦出服务端就会长出 `.toFixed(2)`，一个规则算出来的定性数会被读成精确真理——
+  // 记忆屏（1b）早就定了同一个口径，这屏不许反着来。
+  it('服务端只给档位，一个分数都不给：两条下界走的是写侧那一条规则，confidence / importance 都不出服务端', async () => {
+    reflectionTable().seed(
+      // 0.7 / 0.699 / 0.4 / 0.399 是**下界本身**，不是随手取的数：只有它们能测出读侧是不是
+      // 自己另算了一遍档。按记忆屏那组 0.75/0.45 算，0.7 会掉成 medium、0.4 会掉成 low。
+      reflection('r1', { confidence: 0.7 }),
+      reflection('r2', { confidence: 0.699 }),
+      reflection('r3', { confidence: 0.4 }),
+      reflection('r4', { confidence: 0.399 })
+    );
+    const module = await service();
+    const got = await module.listReflections(USER, { now: NOW });
+    expect(new Map(got.map((row) => [row.id, row.confidenceBand]))).toEqual(
+      new Map([
+        ['r1', 'high'],
+        ['r2', 'medium'],
+        ['r3', 'medium'],
+        ['r4', 'low']
+      ])
+    );
+    for (const row of got) {
+      expect(row).not.toHaveProperty('confidence');
+      expect(row).not.toHaveProperty('importance');
+    }
+    expect(JSON.stringify(got)).not.toContain('"confidence":');
+  });
+
   it('PENDING 但 expiresAt 已过 ⇒ 派生成 EXPIRED，且按 state=PENDING 过滤时它不在列表里', async () => {
     reflectionTable().seed(
       reflection('r1'),

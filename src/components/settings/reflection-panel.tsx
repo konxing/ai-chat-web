@@ -6,6 +6,7 @@ import { apiFetch, errorMessage } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
 import {
   CITATION_KIND_LABELS,
+  REFLECTION_CONFIDENCE_LABELS,
   REFLECTION_SECTIONS,
   REFLECTION_SNOOZE_OPTIONS,
   REFLECTION_TYPE_LABELS,
@@ -50,8 +51,8 @@ interface ReflectionDto {
   title: string;
   body: string;
   alternatives: string | null;
-  confidence: number;
-  importance: number;
+  /** 只有档位：分数不出服务端（片Q-3），所以这一屏拿不到 `0.62`，也就没法把它显示成精确数字。 */
+  confidenceBand: keyof typeof REFLECTION_CONFIDENCE_LABELS;
   sampleCount: number;
   observationSpanDays: number;
   counterHitCount: number;
@@ -261,6 +262,9 @@ export function ReflectionPanel() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="chip !px-2.5 !py-1 !text-[11.5px]">
                               {REFLECTION_TYPE_LABELS[reflection.type]}
+                            </span>
+                            <span className="text-[11.5px] text-white/35">
+                              {REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]}
                             </span>
                             {timeLine ? (
                               <span className="text-[11.5px] text-white/35">{timeLine}</span>

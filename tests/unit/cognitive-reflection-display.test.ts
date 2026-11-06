@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ALTERNATIVES_LINE_PREFIX,
   CITATION_KIND_LABELS,
+  REFLECTION_CONFIDENCE_LABELS,
   REFLECTION_SECTIONS,
   REFLECTION_SNOOZE_OPTIONS,
   REFLECTION_TYPE_LABELS,
@@ -29,6 +30,7 @@ import {
   formatSnoozeDate,
   isActionable
 } from '@/lib/cognitive/reflection-display';
+import { CONFIDENCE_BAND_LABELS } from '@/lib/cognitive/memory-display';
 
 /** 枚举成员从 schema 现读，不在这个文件里抄第二份：抄的那一份会先过期。 */
 function enumMembers(name: string): string[] {
@@ -160,6 +162,23 @@ describe('证据量、反证与竞争解释', () => {
   it('两类依据的前缀逐字对上文案表', () => {
     expect(CITATION_KIND_LABELS).toEqual({ SUPPORTS: '支撑：', CONTRADICTS: '相反：' });
     expect(Object.keys(CITATION_KIND_LABELS).sort()).toEqual(enumMembers('ReflectionCitationKind').sort());
+  });
+});
+
+describe('置信度档位：这一屏说「把握」，不说「可信度」', () => {
+  it('三档逐字钉住：没有第四档，也没有哪一档留白', () => {
+    expect(REFLECTION_CONFIDENCE_LABELS).toEqual({ high: '把握大', medium: '把握中', low: '把握小' });
+  });
+
+  it('和记忆屏那组「可信度」不是同一个词：两个阈值答的是两个问题（0.7/0.4 对 0.75/0.45）', () => {
+    // 记忆那条问「这一句可不可信」，洞察这条问「这几句够不够拼成同一件事」。
+    // 共用一个词就是让两个不同算法在同一项目里长出同一个名字，用户读不出差别。
+    expect(REFLECTION_CONFIDENCE_LABELS.low).not.toBe(CONFIDENCE_BAND_LABELS.low);
+    expect(REFLECTION_CONFIDENCE_LABELS.high).not.toBe(CONFIDENCE_BAND_LABELS.high);
+  });
+
+  it('档位是给客户端的那一份：三档之外没有第四档可渲染', () => {
+    expect(Object.keys(REFLECTION_CONFIDENCE_LABELS).sort()).toEqual(['high', 'low', 'medium']);
   });
 });
 

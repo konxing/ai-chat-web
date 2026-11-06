@@ -1,4 +1,5 @@
 import type { ReflectionCitationKind, ReflectionStatus, ReflectionType, TimePrecision } from '@prisma/client';
+import type { ConfidenceBand } from './confidence';
 
 /**
  * 洞察一屏的展示词汇与时间降级规则。
@@ -101,6 +102,21 @@ export function describeAlternatives(alternatives: string | null): string {
   if (alternatives === null || alternatives.trim() === '') return '';
   return `${ALTERNATIVES_LINE_PREFIX}${alternatives}`;
 }
+
+/**
+ * 置信度那一颗 chip。刻意不叫「可信度」——那是 memory-display.ts 里 `CONFIDENCE_BAND_LABELS`
+ * 的名字，它答的是「这一句可不可信」，阈值 0.75/0.45；这里的档位答的是「这几句够不够拼成
+ * 同一件事」，阈值 0.7/0.4（见 reflection-evidence.ts 的 HIGH_BAND_MIN）。
+ * 两个不同的算法共用一个词，用户就读不出差别，那等于给同一屏里两个数撒了同一个谎。
+ *
+ * 出的也只有档位没有分数：`row.confidence` 是规则算出来的三位小数，
+ * 摆成 0.62 就会被当成精确真理读（记忆屏 1b 同一个口径）。
+ */
+export const REFLECTION_CONFIDENCE_LABELS: Record<ConfidenceBand, string> = {
+  high: '把握大',
+  medium: '把握中',
+  low: '把握小'
+};
 
 /** 「已推迟到 {日期}」里的日期：推迟按整天计，所以到日为止，不露时分。 */
 export function formatSnoozeDate(snoozedUntil: string): string {

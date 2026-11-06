@@ -209,6 +209,15 @@ export function findCounterEvidence(
 }
 
 /**
+ * 分数 → 档位。单独成一个函数，因为**有两个调用方**：写侧在措辞前算一次（决定正文用哪句口气），
+ * 读侧从库里那个分数再算一次（决定卡片上那颗 chip）。两条路必须落在同一个档，
+ * 否则同一行会在生成时说「这几句说的是同一件事」、在屏幕上标成「把握小」。
+ */
+export function confidenceBandOf(score: number): ConfidenceBand {
+  return score >= HIGH_BAND_MIN ? 'high' : score >= MEDIUM_BAND_MIN ? 'medium' : 'low';
+}
+
+/**
  * 反思自己的置信度。不复用 `assessConfidence`：那条吃的是「一条记忆的形状」（来源、确认时间、
  * 失效时间），而一条洞察是 N 条记忆的聚合，硬套就得给聚合编一个来源出来——那是假数据。
  * 这里只有三个数：样本多少、跨度多长、有几条反对。三个都来自 finding，没有第四个。
@@ -226,9 +235,7 @@ export function reflectionConfidence(input: {
   // 一个用来定性的数字不该带这种尾巴。
   const score = Math.min(1, Math.max(0, samplePart + spanPart - penalty));
   const rounded = Math.round(score * 1000) / 1000;
-  const band: ConfidenceBand =
-    rounded >= HIGH_BAND_MIN ? 'high' : rounded >= MEDIUM_BAND_MIN ? 'medium' : 'low';
-  return { score: rounded, band };
+  return { score: rounded, band: confidenceBandOf(rounded) };
 }
 
 /**
