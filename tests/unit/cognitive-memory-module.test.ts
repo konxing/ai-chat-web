@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const db = vi.hoisted(() => ({
   memoryEnabled: false,
   memoryWritePaused: false,
+  emotionEnabled: false,
   creates: [] as Array<Record<string, unknown>>,
   revises: [] as Array<Record<string, unknown>>,
   proposals: [] as Array<Record<string, unknown>>,
@@ -34,7 +35,7 @@ vi.mock('@/lib/cognitive/preferences', () => ({
     Promise.resolve({
       memoryEnabled: db.memoryEnabled,
       userModelEnabled: false,
-      emotionEnabled: false,
+      emotionEnabled: db.emotionEnabled,
       associationEnabled: false,
       timelineEnabled: false,
       reflectionEnabled: false,
@@ -182,6 +183,7 @@ async function write(content: string) {
 beforeEach(() => {
   db.memoryEnabled = false;
   db.memoryWritePaused = false;
+  db.emotionEnabled = false;
   db.creates = [];
   db.revises = [];
   db.proposals = [];
@@ -601,6 +603,9 @@ describe('读侧：记忆作为数据进提示词', () => {
 
   it('用户在设置页选的那一档，走到这一轮的提示词里', async () => {
     db.memoryEnabled = true;
+    // 片U 之后情绪类内容要先过总闸才谈得上档位，所以这一条把闸门开到 true；
+    // 它钉的是「偏好行 → 引擎 → 渲染」这条链，不是闸门本身（闸门有自己那两条）。
+    db.emotionEnabled = true;
     db.emotionTransparency = 'explicit';
     db.readRows = [memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' })];
 
@@ -1057,5 +1062,106 @@ describe('读侧：低可信度的记忆要标出来', () => {
     const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
 
     expect(block?.text).toContain('（可信度低，不得以确定性语气使用）');
+  });
+});
+
+/** 片U 的第二把锁：情绪类内容进不进长期库，还归各情境的「允许记住的类型」管。 */
+function withEmotionType() {
+  return {
+    ...DEFAULT_MEMORY_POLICIES,
+    general: {
+      ...DEFAULT_MEMORY_POLICIES.general,
+      allowedMemoryTypes: [...DEFAULT_MEMORY_POLICIES.general.allowedMemoryTypes, 'emotion' as const]
+    }
+  };
+}
+
+describe('情绪总开关 emotionEnabled：写侧闸门与引擎读侧闸门（片U）', () => {
+  it('闸门关着时情绪句一行都不落，也不进待确认候选——今天线上就是这个形状', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = false;
+    // 连「策略放开情绪」这种最容易漏的情况也一起铺上：闸门若在抽取之前不生效，这一条会落库。
+    db.policies = withEmotionType();
+
+    await write('我今天心里很烦。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.proposals).toEqual([]);
+  });
+
+  it('闸门打开、而且那个情境勾了「情绪」这一类，才落库：落的是原话，来源是亲口说', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = true;
+    db.policies = withEmotionType();
+
+    await write('我今天心里很烦。');
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]).toMatchObject({
+      type: 'emotion',
+      context: 'general',
+      origin: 'explicit',
+      content: '我今天心里很烦'
+    });
+  });
+
+  it('闸门打开但策略没放开情绪类型时仍一行都不落：第二把锁归策略表管', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = true;
+
+    await write('我今天心里很烦。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.proposals).toEqual([]);
+  });
+
+  it('闸门打开只让这句话进候选，不越权改写其它类型：同轮的偏好句照旧按偏好落', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = true;
+    db.policies = withEmotionType();
+
+    await write('我不喜欢周三开会。我今天心里很烦。');
+
+    expect(db.creates.map((row) => row.type)).toEqual(['preference', 'emotion']);
+  });
+
+  it('走引擎的读侧：闸门关着时库里已有的情绪行不端给模型，也不进引用清单', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = false;
+    db.readRows = [
+      memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' }),
+      memoryRow({ id: 'mem-tech', content: '我在用 Prisma' })
+    ];
+
+    ensureCognitiveModules();
+    const result = await runCognitiveReads({ ...TURN, content: '在吗' });
+
+    expect(result.blocks[0]?.text).not.toContain('发紧');
+    expect(result.blocks[0]?.memoryIds).toEqual(['mem-tech']);
+    expect(result.blocks[0]?.text).toContain('我在用 Prisma');
+  });
+
+  it('走引擎的读侧：闸门打开后情绪行才轮到三档说话', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = true;
+    db.emotionTransparency = 'explicit';
+    db.readRows = [memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' })];
+
+    ensureCognitiveModules();
+    const result = await runCognitiveReads({ ...TURN, content: '在吗' });
+
+    expect(result.blocks[0]?.text).toContain('最近一想到汇报就发紧');
+    expect(result.blocks[0]?.text).toContain('其中 1 条与情绪有关');
+    expect(result.blocks[0]?.memoryIds).toEqual(['mem-mood']);
+  });
+
+  it('没走引擎的直接调用不看这个闸门：缺席＝今天的形状（评测 Harness 走的就是这一条）', async () => {
+    db.memoryEnabled = true;
+    db.emotionEnabled = false;
+    db.readRows = [memoryRow({ id: 'mem-mood', type: 'emotion', content: '最近一想到汇报就发紧' })];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(block?.text).toContain('最近一想到汇报就发紧');
   });
 });

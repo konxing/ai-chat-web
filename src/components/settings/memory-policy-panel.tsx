@@ -24,9 +24,10 @@ import type { EmotionTransparency } from '@/lib/cognitive/preferences';
  * 只渲染真有代码在消费的字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、
  * 是否允许整理进画像、是否允许拿去联想、保留期，再加上一个全局的「情绪标注」档位和
  * 一个全局的「自动收紧」开关。
- * 这张策略表里今天没有消费者的只剩 `emotionEnabled`——它在偏好表里，grep 得到的是存储和校验声明，
- * 没有任何运行时代码读它。把它做成能拨的控件，就是任务书第八节点名禁止的「用假的交互代替」，
- * 所以不放，接口和存储原样留着。
+ * 这张策略表里最后一个没有消费者的字段是 `emotionEnabled`，11-06 片U 给它接上了读者：
+ * 抽取层（`memory-extractor.ts`，不开就一个情绪词都不比）和读侧候选池（`memory-module.ts`，不开就把
+ * 已有的情绪行整个剔掉）。有了这两处读者，这一屏才摆出它的控件——顺序必须是先有读者再给控件，
+ * 反过来就是任务书第八节点名禁止的「用假的交互代替」。
  *
  * 三个下游许可各是哪天有了读者才拿到控件的：
  * 「允许反思」11-04（洞察扫描 `reflection-sweep.ts` 真按这一列过闸）；
@@ -104,6 +105,12 @@ export function MemoryPolicyPanel() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
+  // 情绪类记忆的总闸：和下面那三档标注住在同一张偏好行上，管的是「存不存 + 看不看」。
+  // 它的读者有两处（片U）：抽取层不开就一个情绪词都不比，读侧 `selectMemoryCandidates` 不开就把
+  // 已有的情绪行整个剔出候选池。控件是有了读者之后才摆的，不是反过来。
+  const [emotionModule, setEmotionModule] = useState<boolean | null>(null);
+  const [emotionModuleBusy, setEmotionModuleBusy] = useState(false);
+  const [emotionModuleError, setEmotionModuleError] = useState('');
   // 全局的「情绪标注」档位：读不到就摆 null，界面显示「档位未知」而不是假装它是默认那档。
   const [emotion, setEmotion] = useState<EmotionTransparency | null>(null);
   const [emotionBusy, setEmotionBusy] = useState(false);
@@ -212,14 +219,20 @@ export function MemoryPolicyPanel() {
   async function loadPreferences() {
     try {
       const data = await apiFetch<{
-        preferences: { emotionTransparency: EmotionTransparency; adaptiveMemoryEnabled: boolean };
+        preferences: {
+          emotionTransparency: EmotionTransparency;
+          adaptiveMemoryEnabled: boolean;
+          emotionEnabled: boolean;
+        };
       }>(PREFERENCES_URL);
       setEmotion(data.preferences.emotionTransparency);
       setLearning(data.preferences.adaptiveMemoryEnabled);
+      setEmotionModule(data.preferences.emotionEnabled);
     } catch {
-      // 读失败留在 null：这两个值都会改变模型看到的东西或系统能替你做的事，猜一个默认值等于替用户决定。
+      // 读失败留在 null：这几个值都会改变模型看到的东西或系统能替你做的事，猜一个默认值等于替用户决定。
       setEmotion(null);
       setLearning(null);
+      setEmotionModule(null);
     }
   }
 
@@ -239,6 +252,25 @@ export function MemoryPolicyPanel() {
       setEmotionError(errorMessage(err));
     } finally {
       setEmotionBusy(false);
+    }
+  }
+
+  async function saveEmotionModule(next: boolean) {
+    if (next === emotionModule) return;
+    setEmotionModuleBusy(true);
+    setEmotionModuleError('');
+    try {
+      const data = await apiFetch<{ preferences: { emotionEnabled: boolean } }>(PREFERENCES_URL, {
+        method: 'PATCH',
+        json: { emotionEnabled: next }
+      });
+      // 以服务端回读的值为准：这一档决定模型能不能看到你的情绪记录，界面和库不许分叉。
+      setEmotionModule(data.preferences.emotionEnabled);
+      push('情绪类记忆已更新');
+    } catch (err) {
+      setEmotionModuleError(errorMessage(err));
+    } finally {
+      setEmotionModuleBusy(false);
     }
   }
 
@@ -489,14 +521,44 @@ export function MemoryPolicyPanel() {
       </div>
 
       <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-        <h3 className="text-[13.5px] text-white/85">情绪标注</h3>
+        <h3 className="text-[13.5px] text-white/85">情绪类记忆</h3>
         <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
-          这一档只改「对话时模型看到的那批记忆里有没有情绪类的那几行」，不改记不记：
-          上面的类型勾选决定落不落库，这里决定端不端给模型。
-          三个档位都不会给你的情绪下判断，最亮的一档也只报一个条数。
+          这一档管的是「情绪类记忆从头到尾存不存、看不看」，是上面那三档标注的总闸：
+          闸门关上，新的情绪句不再被抽成候选，库里已经存下的情绪行也不再进入对话。
         </p>
 
         <div className="mt-3">
+          <label className="flex items-start gap-2 text-[13px] text-white/75">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-emerald-400"
+              checked={emotionModule === true}
+              disabled={emotionModule === null || emotionModuleBusy}
+              onChange={(e) => void saveEmotionModule(e.target.checked)}
+            />
+            使用情绪类记忆
+          </label>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+            打开后还要上面每张情境卡里勾了「情绪」这个类型，那句话才会真的落库；七个情境的默认勾选里都没有它。
+            关掉则两头都关：不再把你说的话抽成情绪类记忆，已有的情绪行连候选池都不进。
+          </p>
+          {emotionModule === null ? (
+            <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+              开关状态没读到。这里不替你猜，因为它决定模型能不能看到你的情绪记录。
+            </p>
+          ) : null}
+          <ul className="mt-2 space-y-1 text-[11.5px] leading-relaxed text-white/30">
+            <li>抽出来的是你那句话的原文，系统不给情绪下判断，也不给它命名。</li>
+            <li>下面的三档标注只改「端给模型时要不要说明有几条和情绪有关」，不改这一档决定存不存。</li>
+          </ul>
+          {emotionModuleError ? (
+            <Alert tone="error" className="mt-2">
+              {emotionModuleError}
+            </Alert>
+          ) : null}
+        </div>
+
+        <div className="mt-4">
           <label className="label">情绪类记忆的用法</label>
           <select
             className="field"
@@ -526,7 +588,6 @@ export function MemoryPolicyPanel() {
       </div>
 
       <p className="mt-5 text-[11.5px] leading-relaxed text-white/30">
-        还没做的部分：偏好表里的情绪总开关至今没有运行时消费者，所以这一屏不给它控件，能用的情绪控件只有上面那三档标注。
         已经有读者的三列各挡住一件事：某个情境不放开反思，那个情境里的记忆就不出现在洞察里；
         不放开画像，它就不出现在画像候选里；不放开联想，它就不和别的记忆连关联线。
       </p>

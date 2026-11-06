@@ -89,7 +89,8 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     policies,
     chatId: turn.chatId,
     now,
-    emotionTransparency
+    emotionTransparency,
+    emotionEnabled: turn.emotionEnabled
   });
   // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
   const confidence = await assessMemories(turn.userId, memories, now);
@@ -118,6 +119,14 @@ export interface MemorySelectionInput {
    * `explicit` 在块尾多附一句条数说明。三档都不改写那一行本身，也不给它加任何情绪判词。
    */
   emotionTransparency?: EmotionTransparency;
+  /**
+   * 情绪总开关（片U）。和上面那档管的是两件事：这一档管「库里的情绪行端不端给模型」，
+   * 上面那档管「端过去的要不要特别说明」。两把锁各自独立，任一把关上，情绪行都不出现。
+   *
+   * 缺席（undefined）按「不关」处理——评测 Harness 和直接调模块的调用方没走引擎，
+   * 拿到的该是今天的形状，而不是一路都带着偏好行的那个值。
+   */
+  emotionEnabled?: boolean;
 }
 
 /**
@@ -131,10 +140,10 @@ export interface MemorySelectionInput {
  * 等 5e 用真端点量出增益再决定要不要为它付一次出站。
  */
 export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[] {
-  // `off` 丢在保留期过滤之前：这一档要的是「连看都不看」，而不是「看了再藏起来」。
+  // `off` 和总开关关着都在保留期过滤之前丢：这两档要的都是「连看都不看」，而不是「看了再藏起来」。
   // 排在前面才同时保证两件事——情绪行不进排序，也就拿不到名额、进不了 memoryIds。
-  const pool =
-    input.emotionTransparency === 'off' ? input.rows.filter((memory) => memory.type !== 'emotion') : input.rows;
+  const dropEmotion = input.emotionEnabled === false || input.emotionTransparency === 'off';
+  const pool = dropEmotion ? input.rows.filter((memory) => memory.type !== 'emotion') : input.rows;
   const usable = pool.filter((memory) =>
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
@@ -201,10 +210,13 @@ export function renderMemoryBlock(
 }
 
 async function writeMemory(turn: CognitiveTurn): Promise<void> {
-  const candidates = extractMemoryCandidates(turn.content);
+  // 偏好行读到候选之前，而不是之后：情绪总开关关掉时，抽取层连情绪词表都不比。
+  // 代价是「这一轮什么都没抽到」的对话多读一行偏好——那是一次主键查询，
+  // 而 8.3 要的是「关闭后不能继续执行对应的数据读取、生成和后台写入」，读它自己的开关不算那条链上的下游。
+  const preferences = await getCognitivePreferences(turn.userId);
+  const candidates = extractMemoryCandidates(turn.content, { emotionEnabled: preferences.emotionEnabled });
   if (candidates.length === 0) return;
 
-  const preferences = await getCognitivePreferences(turn.userId);
   if (!preferences.memoryEnabled) return;
   // 「暂停长期记忆写入」（任务书 7.3）的闸门开在这三行读之前。
   // 放在 excludedHashes / getMemoryPolicies / listMemories 之后就成了「读了但没写」，

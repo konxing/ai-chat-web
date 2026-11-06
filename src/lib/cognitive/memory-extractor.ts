@@ -7,9 +7,14 @@ import type { MemoryType } from './policy';
  * 输入：用户这一轮消息的原文（绝不包含模型回复）。输出：`[{ text, type }]`，顺序按原文。
  * 测试：tests/unit/cognitive-memory-extractor.test.ts
  *
- * 为什么先不用模型：现在没配任何 provider，模型路径既跑不了也测不了；而「用户说了什么」
- * 这件事本来就有确定答案——只有第一人称的陈述句算数。问句、转述、长段落一律不抽，
- * 宁可少记。情绪句不在这里抽（那是情感引擎的活，且默认策略也不允许把情绪落长期库）。
+ * 为什么先不用模型：这个结果决定「要不要把内容写进长期库」，词法表可以逐词解释、可以进评测集比对，
+ * 出错时能找到是哪个词惹的。问句、转述、长段落一律不抽，宁可少记。
+ *
+ * 情绪句是 11-06 片U 才接上的一条：改造前这里只有五种类型，头注释写着「情绪句不在这里抽（那是情感引擎的活）」，
+ * 而偏好表里的 `emotionEnabled` 因为这条链上没有生产者，也一直没有人读。今天它抽的是**用户原话整句**——
+ * 系统不给情绪下判断，也不给情绪命名（任务书 :430），只做一件事：把这一句按情绪类存下来。
+ * 而且它同时受两道闸：`emotionEnabled` 不开就一个词都不比，开了还要该情境的策略把 emotion 列进
+ * 允许类型（七个情境的默认值都没有，见 `policy.ts`），才会真的落库。
  */
 export const MEMORY_CANDIDATE_MIN_CHARS = 4;
 export const MEMORY_CANDIDATE_MAX_CHARS = 200;
@@ -43,6 +48,44 @@ const RULES: ReadonlyArray<{ type: MemoryType; markers: readonly string[] }> = [
   }
 ];
 
+/**
+ * 情绪类候选的词表，只在 `emotionEnabled` 打开时才比对（片U）。
+ *
+ * 三个约束是这张表之所以只有这几个词的理由：
+ * 一、只收**第一人称的说法**。整句还额外要求含「我」且不是问句（下面 `extractMemoryCandidates`），
+ *     所以「她心里很难受」「我很烦吗」都不算。落库的是用户那句话，不是系统对情绪的命名或判断。
+ * 二、不收临床词。「抑郁」「焦虑症」这类不在表里——系统没有资格给用户贴诊断，
+ *     而用户自己说出来的那些字仍然会被整句存下来，那是他的说法，不是我们的结论。
+ * 三、比 `RULES` 更早。一句话同时像感受和偏好时先当感受处理：
+ *     把「我不喜欢现在的自己，我心里难受」标成 preference，等于把一句倾诉存成一条口味记录。
+ */
+const EMOTION_MARKERS: readonly string[] = [
+  '心里难受',
+  '心里烦',
+  '很烦',
+  '好烦',
+  '烦死',
+  '堵得慌',
+  '喘不过气',
+  '想哭',
+  '哭了',
+  '失眠',
+  '睡不着',
+  '压力大',
+  '压力好大',
+  '压力太大',
+  '很委屈',
+  '好委屈',
+  '情绪很低',
+  '情绪低落',
+  '心情很差',
+  '心情不好',
+  '提不起劲',
+  '撑不住',
+  '绷不住',
+  '孤独'
+];
+
 /** 只在句末标点处切：ASCII 句点留给「Next.js」「1.5」这类写法，不然技术句子会被剁碎。 */
 const SENTENCE_SPLIT = /[。；;\n]+|[!?！？]+/;
 
@@ -54,14 +97,20 @@ export interface MemoryCandidate {
   type: MemoryType;
 }
 
-function classifySentence(sentence: string): MemoryType | null {
+export interface ExtractOptions {
+  /** 情绪总开关。缺席（undefined）按关处理：调用方没走引擎时，就不该抽出一类它没打算处理的候选。 */
+  emotionEnabled?: boolean;
+}
+
+function classifySentence(sentence: string, emotionEnabled: boolean): MemoryType | null {
+  if (emotionEnabled && EMOTION_MARKERS.some((marker) => sentence.includes(marker))) return 'emotion';
   for (const rule of RULES) {
     if (rule.markers.some((marker) => sentence.includes(marker))) return rule.type;
   }
   return null;
 }
 
-export function extractMemoryCandidates(content: string): MemoryCandidate[] {
+export function extractMemoryCandidates(content: string, options: ExtractOptions = {}): MemoryCandidate[] {
   const candidates: MemoryCandidate[] = [];
   const seen = new Set<string>();
   for (const raw of content.split(SENTENCE_SPLIT)) {
@@ -69,7 +118,7 @@ export function extractMemoryCandidates(content: string): MemoryCandidate[] {
     const text = raw.trim();
     if (text.length < MEMORY_CANDIDATE_MIN_CHARS || text.length > MEMORY_CANDIDATE_MAX_CHARS) continue;
     if (!text.includes('我') || QUESTION_MARK.test(text)) continue;
-    const type = classifySentence(text);
+    const type = classifySentence(text, options.emotionEnabled === true);
     if (!type) continue;
     const key = text.replace(/\s+/g, '').toLowerCase();
     if (seen.has(key)) continue;

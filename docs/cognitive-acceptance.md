@@ -10,9 +10,10 @@
 核对时间：2026-11-06（7.2 的 ARCHIVE 落地于 11-05；之后 7.1 检索再巩固与 7.3 按主题忘记 + 暂停写入两片落地，**那两片带的迁移 `20261106000000_memory_access` / `20261106000001_memory_write_pause` 已由我在他的批准下执行**——「你直接跑迁移就行了」。跑完立刻补了一次真库回滚探针，把两片各自「只有替身验过」那两条边界换成了实测数字，见下面两片的边界表；今天重跑 `npx prisma migrate status` 报 **20 支全部 up to date**，库里没有漂移的列）。
 片 j 与片 k 都落在 11-06：前者是读侧派生，后者是一屏界面多接一个库里已有的布尔。两片都没跑迁移、没写任何行、
 没替他改过任何一个开关的值。片 k 收尾时按只读计数重新核了一遍「真库实况」那节——旧数字一条没变，那一节另补上 `MemoryPolicy` / `MemoryPolicySignal` 两行的首次实测。
-基线 HEAD `29fedf2`（片T-2 的读侧实测；本文档这次加的是片T-3——Response Policy 那两条规则收成一个出处，**零迁移、零新表、零新文案**：拼出来的表头与改造前逐字相同，基准是抄自 HEAD 的两段字面量）。
+基线 HEAD `5aa96e9`（片T-3 的收出处；本文档这次加的是片U——`emotionEnabled` 从「全仓无人读取」变成两处真读：写侧抽取前挡一次、读侧候选池丢一行，**零迁移、零新表**：开关默认关着时抽取结果、候选池、拼给模型的表头与改造前逐字相同）。
 片T 三片都落在 11-06，且**一片都没跑迁移、没写任何行、没替他改过任何一个开关的值**：T-1 与 T-2 是纯实测，量完都不接线（结论与数字在文末两节）；T-3 是纯重构，改的是出处不是文字。
-全量单测 **114 个文件 1887 条用例**通过（`npx vitest run tests/unit`），`npx tsc --noEmit` 干净。
+片U 也在 11-06，同样**没跑迁移、没写任何行、没替他改过任何一个开关的值**——今天重跑一次只读计数，`MemoryItem` 还是 **2 行、全是 `GOAL`**，`type='emotion'` 在真库里 0 行，所以「默认关 = 和今天一模一样」这条不只在测试里成立。
+全量单测 **115 个文件 1909 条用例**通过（片T-3 收尾时是 114 / 1887，本片 +1 个文件 / +22 条用例；`npx vitest run tests/unit`），`npx tsc --noEmit` 干净。
 Phase 4 之后新增的认知文件把 58 个文件 / 734 条推到 77 / 1066；**Phase 4—6 的界面那几半一条组件测试都没加**——
 这个项目没有组件测试，能测的部分搬进纯函数模块，剩下那句话在各片边界表里单独写着。
 
@@ -288,8 +289,8 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 
 ### 9. 关闭功能后不得继续执行对应模块
 
-**状态：已验收（凡有实现的模块开关都有关闸门的用例；八个键里今天仍然无人读取的只剩 `emotionEnabled` 一个，
-它的「关了不执行」平凡成立——见下面第 2 点）。**
+**状态：已验收（凡有实现的模块开关都有关闸门的用例；八个键今天全都有运行时读者——最后一个 `emotionEnabled` 是
+11-06 片U 补的，写侧抽取与读侧候选池各挡一道，见文末片U 那一节）。**
 
 | 证据 | 层 |
 |---|---|
@@ -326,11 +327,14 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 | `tests/unit/cognitive-profile-reads.test.ts:221` `偏好读不出来时三个闸门全按关闭处理` | 服务（同上；画像一屏的三道闸一次读完） |
 | `tests/unit/cognitive-memory-graph-route.test.ts:155` `associationEnabled 关着时返回 MODULE_DISABLED，一次记忆查询都不发` | 路由（**片 c，11-05**：`graph/route.ts:37`，与时间线同一个理由） |
 | `tests/unit/cognitive-memory-graph-route.test.ts:206` `闸门关着时连策略表都不读：这一屏不开，就没有必要知道七行策略` | 路由（**片 j，11-06**：新增的第二读之后，闸门仍然排在四读之前） |
+| `tests/unit/cognitive-emotion-gate.test.ts:86` `生产者：情绪句只在开关打开时才抽`（5 条） | 纯（**片U，11-06**：不传开关时一条都不抽，抽出来的是原话整句；问句与第三人称不抽） |
+| `tests/unit/cognitive-emotion-gate.test.ts:117` `读侧闸门：emotionEnabled 关掉就不端情绪行`（4 条） | 纯（同上：**在排序之前丢行**，所以既不占名额也不进引用清单；没传这个字段时今天的形状逐字节不变） |
+| `tests/unit/cognitive-memory-module.test.ts:1079` `情绪总开关 emotionEnabled：写侧闸门与引擎读侧闸门（片U）`（7 条） | 服务（同上：写侧「闸门打开、而且那个情境勾了情绪这一类」才落库，读侧走 `runCognitiveReads` 那道真入口） |
 
 **这一条今天有四个必须写清的事实**：
 
 1. **第八个开关 `adaptiveMemoryEnabled` 在这之前全仓无人读取。**
-   `manager.ts:44` 的 `MODULE_SWITCH` 只映射七个模块键，`src/app` / `src/components` 里零命中，
+   `manager.ts:61` 的 `MODULE_SWITCH` 只映射七个模块键，`src/app` / `src/components` 里零命中，
    而策略学习曾在删除链路上无条件执行（`memories/[id]/route.ts:94`、`memories/route.ts:79`、`:87`）——
    门槛 9 对这一层**当时并不成立**。`4a15160` 补上闸门：`policyLearningEnabled()`（`policy-learner.ts:85`）
    读偏好、读不出来当关；`learnAfterSignals` 开头加闸（`policy-learner.ts:127`，一处盖住三条删除链路，route 不用各自记得问），
@@ -338,7 +342,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    **排除规则和摘演化边照常执行**——那是删除本身的派生清理（门槛 2），和「学不学」是两件事。
    上面那两条新测试是先写先红的（6 条新用例在实现前全部失败），不是补的。
 2. **七个模块键里只有 `memory` 真有已注册模块**（**这句到 11-05 片 d 为止作废**：`registerCognitiveModule`
-   今天有三个生产调用方——`memory-module.ts:362`/`:363`/`:364` 分别是记忆、决策记忆、画像注入，
+   今天有三个生产调用方——`memory-module.ts:374`/`:375`/`:376` 分别是记忆、决策记忆、画像注入，
    注册表那三道闸从此是真闸；原文里的 `:242` 是当时的行号，现在那个位置是向量补算那一读）。
    其余六个开关「关了不执行」在 4-T1 之前是**平凡成立**——本来就没有东西在跑，
    不是被测出来的。现在 `timeline` 不再是那六个之一：`src/app/api/account/cognitive/timeline/route.ts:29-38`
@@ -353,13 +357,15 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    上表那四行洞察用例就是它们的证据。剩下两个键（`userModel` / `emotion`）
    到今天仍然没有任何实现读它们，「关了不执行」还是平凡成立，不是被测出来的。
    （**11-05 片 d / 11-06 片 j 之后这一段作废两处**：`userModel` 不再是「无人读」——`userModelModule` 已经
-   `registerCognitiveModule`（`memory-module.ts:364`），画像一屏和画像路由各自有闸，上表新加的四行就是证据；
+   `registerCognitiveModule`（`memory-module.ts:376`），画像一屏和画像路由各自有闸，上表新加的四行就是证据；
    `association` 也不止 5c 那一处——`graph/route.ts:37` 是它的第一个只读闸门，片 j 又把策略表那一读放在它后面。
-   **今天仍然只有 `emotionEnabled` 是全仓无人读取的键**（`manager.ts:59` 只有映射表和 `preferences.ts` 的存取声明，
-   `src/lib` / `src/app` / `src/components` 里没有一个运行时代码读它），所以它照旧没有界面入口。）
-   （`association` 更早那一条：5c 把它当成向量补算的开关，`memory-module.ts:309` 读它——
+   **`emotionEnabled` 曾经是最后一个全仓无人读取的键**（当时 `manager.ts:64` 只有映射表和 `preferences.ts` 的存取声明，
+   `src/lib` / `src/app` / `src/components` 里没有一个运行时代码读它，所以它照旧没有界面入口）——
+   **这一段到 11-06 片U 作废**：抽取层（`memory-extractor.ts:106`）与读侧候选池（`memory-module.ts:145`）两处真读它，
+   界面也因此才摆出它的控件（`memory-policy-panel.tsx:523-561`）。判据没变，变的是这个键有没有读者。）
+   （`association` 更早那一条：5c 把它当成向量补算的开关，`memory-module.ts:321` 读它——
    行号是这片复核时改的，原文写 `:242` 已经漂到注册那几行上。补算那一路**仍然没有单独的闸门用例**，
-   上表因此不放它的行。`MODULE_SWITCH` 里那个名字（`manager.ts:60`，原文写 `:48`）
+   上表因此不放它的行。`MODULE_SWITCH` 里那个名字（`manager.ts:61`，原文写 `:48`）
    管的是对话内的注册表闸门，盖不到后台那趟补算。这个缺口记在这儿，等它真有闸门用例再补行。）
 3. **后台任务这一侧的闸门是三值的，不是开关/关闭两值**：`on` 正常跑、`off` 删行作废、**读偏好失败当 `unknown`，只退避不删行**
    （`tests/unit/cognitive-task-worker.test.ts:220`）。这条是给数据库抖动留的——一次读不出来就把用户排队的活清空，
@@ -384,15 +390,19 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 闸门在 `:129`——关着时这一屏连列表请求都不发）——后两个是 5-F / 6-F 才补的，
 因为开关得先真有消费者，才轮得到它有一个控件。**`adaptiveMemoryEnabled` 在 11-06 片 k 之前只能走
 `/api/account/cognitive` 改，没有界面入口**；片 k 给了它控件，位置不在模块开关那一屏，而在策略那一屏的
-「自动收紧」卡（`memory-policy-panel.tsx:448-490`，复选框在 `:459`）——它的读者是学习层的闸门
+「自动收紧」卡（`memory-policy-panel.tsx:480-522`，复选框在 `:491`）——它的读者是学习层的闸门
 （`policy-learner.ts:85`），改的又是这张屏上那七行策略，入口放在被改的东西旁边才说得清它在改什么。
-这不是遗漏：`memory-policy-panel.tsx:24-29` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
+这不是遗漏：`memory-policy-panel.tsx:24-30` 写明了立场——不做没人消费的控件，也不做用户拨了没反应的旋钮。
 三个下游许可各自都是「先有代码读它，再给它控件」：`allowReflection` 是 11-04 的 6-F 补的
-（控件 `memory-policy-panel.tsx:360`，消费者 `reflection-sweep.ts:454`）；`allowUserProfile` 是 11-05 片 d 补的
-（控件 `:375`，消费者 `profile-candidates.ts:62`）；`allowAssociation` 是 11-06 片 j 补的
-（控件 `:390`，消费者 `memory-graph.ts:97` 那个关联池）。
-这三处控件行号是片 k 在同一个文件里插了一张卡之后重新指的；原文写 `:325`/`:340`/`:355`，那是片 j 时代的位置。
-至此这张七行情境策略表里每一列都有运行时读者；仍然没有读者的只剩偏好表里的 `emotionEnabled`，所以它仍然没有控件。
+（控件 `memory-policy-panel.tsx:392`，消费者 `reflection-sweep.ts:454`）；`allowUserProfile` 是 11-05 片 d 补的
+（控件 `:407`，消费者 `profile-candidates.ts:62`）；`allowAssociation` 是 11-06 片 j 补的
+（控件 `:422`，消费者 `memory-graph.ts:97` 那个关联池）。
+这三处控件行号是片 k 在同一个文件里插了一张卡之后重新指的；原文写 `:325`/`:340`/`:355`，那是片 j 时代的位置；
+片U 又在这张屏里插了情绪总闸那张卡，三处再一次整体下移 32 行，上面给的是 11-06 片U 之后的实测位置。
+至此这张七行情境策略表里每一列都有运行时读者。偏好表里最后一个没人读的键走的是同一个走法：`emotionEnabled`
+先由 11-06 片U 让两处代码真读它（写侧抽取 `memory-extractor.ts:106`、读侧候选池 `memory-module.ts:145`），
+控件才跟着出现在 `memory-policy-panel.tsx:523-561`。到这片为止，八个用户级开关全都有运行时读者，
+设置页上不再挂着「摆着但没人听」的旋钮。
 
 ### 10. 新增模块全部关闭时，原有聊天功能回归通过
 
@@ -421,7 +431,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 每条用例开头还有一句 `expect(memoryItem.rows.size).toBe(1)`：先证明有东西可注入，再断言它没出去，否则「零认知内容」可能只是「零数据」。
 
 **四条变异探针，证明这些断言真的连着被测代码，而不是碰巧绿**（跑完立刻 `git checkout --` 回滚，`git diff --stat src/` 为空；P1/P2 管闸门，P3/P4 管出站字节这一层）：
-- P1 删掉 `manager.ts:122` 那道闸门 ⇒ `:497` 与 `:515` 双双变红、`:477` 照旧绿（`Tests 2 failed | 11 passed`）。这正是设计如此：正向对照本来就不该测出闸门缺失。
+- P1 删掉 `manager.ts:130` 那道闸门 ⇒ `:497` 与 `:515` 双双变红、`:477` 照旧绿（`Tests 2 failed | 11 passed`）。这正是设计如此：正向对照本来就不该测出闸门缺失。
 - P2 把 `preferences.ts:41` 的 `memoryEnabled` 默认从 `false` 翻成 `true` ⇒ **只有** `:515` 变红（`expected [ { userId: 'user-1', …(3) } ] to deeply equal []`，`Tests 1 failed | 12 passed`）。
   这条证明了「库里没有偏好行」那半边真的走 `preferences.ts:87` 的 `{ ...OFF }`，而不是碰巧和显式全关得出同一个结论。
 - P3 把 `src/lib/ai.ts:126` 的 `messages: input.messages` 改成出口前过滤掉 system ⇒ **只有**回环层的 `:105` 变红。这条钉的是「数组→字节」那段真有人看着：
@@ -434,7 +444,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    `ai-outbound-request-body.test.ts:105` 用真本地 HTTP 服务证明这段序列化逐字保真（多行中文认知块与 `ChatContentPart[]` 两种形状都在），
    两条合起来才得出「全关时字节层同样没有认知内容」——这是复合结论，不是单条断言。
    没覆盖的是 TLS 出口与真模型服务：集成链上的 `tests/mock-ai.mjs:30-48` 收下请求体、只把最后一句用户话回显成 `MOCK_REPLY:`，从不落盘，那里仍无字节断言。
-2. **八个键里只有 `memoryEnabled` 真的参与了这条断言**。`manager.ts:44` 的 `MODULE_SWITCH` 映射七个模块键，而除 `memory` 外没有已注册模块
+2. **八个键里只有 `memoryEnabled` 真的参与了这条断言**。`manager.ts:61` 的 `MODULE_SWITCH` 映射七个模块键，而除 `memory` 外没有已注册模块
    （见门槛 9 第 2 点），其余键「关了不注入」是**平凡成立**，等模块实现时这条门槛才第一次真正吃紧。
    `timelineEnabled` 现在有服务端消费者了，但它在**只读接口**那一侧，不在这条出站上下文的链路上，所以这句话对它同样成立。
 3. **内存替身不是 PostgreSQL**。读侧那段真实谓词（`supersededAt: null`、`origin.notIn`、`validFrom/validTo` 的双 `OR`）由 `tests/unit/prisma-mock.ts`
@@ -490,7 +500,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 
 任务书 4.2 要的是「自然语言时间解析」。这一片只做了**一个纯函数**：
 `src/lib/cognitive/temporal.ts` 的 `resolveTemporalFrame(text, saidAt)`，返回 `{ precision, validFrom }` 或 `null`；
-唯一消费者是写侧的 `src/lib/cognitive/memory-module.ts:275`（候选那一路）与 `:291`（落库那一路），
+唯一消费者是写侧的 `src/lib/cognitive/memory-module.ts:287`（候选那一路）与 `:303`（落库那一路），
 两处都是 `frame?.precision ?? 'unknown'`——片 4-T2 之前这里一律写 `precision: 'unknown'`，
 第一片时间线每行都挂「发生时间未知」就是这个原因。没有新增开关：这一条跟 `memoryEnabled` 走，
 落不落地都不改变「这条记忆允不允许存在」。
@@ -545,7 +555,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 |---|---|
 | 真库 | `MemoryItem` 11-04 实测 **2 行**（这一片写下时是 0 行，见「真库实况」），两行 `validPrecision` 全是 `UNKNOWN`——「发生时间未知」第一次有了真数据。但我没起他的服务，落库后的 `validFrom` 列长什么样、那一屏上少了几条，仍然**无法验收** |
 | 覆盖率 | 11%（4/36）是这片的全部实际收益，且分母是虚构评测语料，不是真实用户语料（任务书 7.1 禁止拿真实家庭成员聊天记录做测试）。真实占比只会不同，不会更可信 |
-| 前置依赖 | 抽取器要有 marker 才产出候选（`memory-extractor.ts:19` 那张表）。一句带时间的实话如果压根没被抽成候选，这片永远轮不到它——探针时实测「每周三晚上我打球。」落不进候选，改成「我习惯周三打球。」才走通写侧 |
+| 前置依赖 | 抽取器要有 marker 才产出候选（`memory-extractor.ts:24` 那张表）。一句带时间的实话如果压根没被抽成候选，这片永远轮不到它——探针时实测「每周三晚上我打球。」落不进候选，改成「我习惯周三打球。」才走通写侧 |
 | 中文分词 | 词表是子串匹配，没有词边界。理论上「这两年」里的字面不会误命中，但「去去年」这类叠字、以及未来任何新增词都可能踩到；这是词表法的天花板，不是用例能补的 |
 
 **两个后续靶子，判完了：都不做。判词连实测数字留在这里，下次不必重推**：
@@ -569,7 +579,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    - 「每周三打球」不是一件有起止区间的事。加 recurrence 等于把双时间模型换成两套时间语义，
      而**区间那一半在生产里从来没被写过**：`validTo` 有四个读取点（`memories.ts:373-376` 的 asOf 过滤、
      `confidence.ts:72` 的 expired 因子、`memory-display.ts:243` 的区间回显、`timeline.ts:119` 的透传），
-     但四个写入调用点（`memory-module.ts:268`、`memory-module.ts:295`、`memory-module.ts:301`、
+     但四个写入调用点（`memory-module.ts:280`、`memory-module.ts:307`、`memory-module.ts:313`、
      `src/app/api/account/cognitive/memories/[id]/route.ts:50`）**没有一个传它**，`src/app` 下 `validTo` 零命中
      ——也就是 expired 那个置信度因子在真实数据上永不触发。
    - 「周三」已经在正文密文里，用户看得见、AI 读注入块时也看得见；再加字段是把同一句话说两遍。
@@ -596,7 +606,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 | 误合（候选把 gold 里两条仍在世的判成同一件事） | 0 |
 | 原话重说（归一化同句，走 `recordRestatement` 那条分支） | 0 |
 
-**一句话结论：这套相似度在这份语料上一次也没触发过。** UPDATE 分支（`memory-module.ts:246` 查旧行 →
+**一句话结论：这套相似度在这份语料上一次也没触发过。** UPDATE 分支（`memory-module.ts:257` 查旧行 →
 `memories.ts:411` 给旧行盖 `supersededAt`）在这份语料上是死路——不是擦边没过 0.8，是最高值只有 0.34。
 
 **为什么那 30 条 `category: 'update'` 的探针看着像已经覆盖了**：`scripts/cognitive-eval/metrics.ts:38` 自己标的是
@@ -752,7 +762,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 `embedding` 进了能力清单（`src/lib/providers.ts:10`），向量以 **AES-256-GCM 密文**存进
 `MemoryItem.embeddingCiphertext`（`bytea`，AAD 绑定 `userId + memoryId + 字段名`；pgvector 已实测排除），
 后台写记忆时顺手补算（`associationEnabled` 闸门，5c），读侧的余弦与 RRF 混合排序已接进那条唯一的纯函数接缝
-`selectMemoryCandidates`（`src/lib/cognitive/memory-module.ts:133`，5d）。
+`selectMemoryCandidates`（`src/lib/cognitive/memory-module.ts:142`，5d）。
 **5d 之后线上读侧的行为逐字节没变**：`readMemory` 不传查询向量，混合排序就没有入口——
 一次查询 embedding 是每轮对话关键路径上的一个出站请求，付不付它由 5e 的实测增益决定。
 关键词基线在 5d 之后重跑仍是 Recall@8 **0.7274** / MRR **0.5828** / 违禁 **0**（`npm run eval:cognitive`，
@@ -859,8 +869,9 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
    画像模块已建（一张 `UserProfileEntry` + 三条读闸 + 一屏界面），门槛 7 的正面一半改判为「有用例守着」，
    证据行在门槛 7 那一节的边界段里；它剩下的缺口和其余三道是同一件事——他库里那张表今天 0 行。
 5. 界面暴露更多开关之前，先让那个开关真的有消费者——第八个开关这次的顺序就该反过来：先有代码读它，再谈要不要给它一个控件。
-   **这条已经按它说的顺序执行完三轮**：`allowReflection`（6-F）、`allowUserProfile`（片 d）、`allowAssociation`（片 j）
-   都是先补运行时读者、再补控件；`emotionEnabled` 至今没有读者，所以至今没有控件。
+   **这条已经按它说的顺序执行完四轮**：`allowReflection`（6-F）、`allowUserProfile`（片 d）、`allowAssociation`（片 j）
+   和 `emotionEnabled`（11-06 片U：写侧 `memory-extractor.ts:106` + 读侧 `memory-module.ts:145` 两处真读，控件随后才上屏）
+   都是先补运行时读者、再补控件。
    上一段那个「八个开关」里的最后一个缺口——`associationEnabled` 在对话内的注册表闸门盖不到后台向量补算——**仍然开着**。
 6. **Phase 4 到此四片判完，另加片 h、片 i**：时间线读侧（已建）、时间解析（已建，收益 11%）、
    变化检测（11-03 实测 0/36，**词法的「逐条取代识别」方案不做**，判词在上一节）、纠正与删除事件（已建，判词在「Phase 4 第四片」）、
@@ -1097,8 +1108,8 @@ P5 和 P7 落的是同一条规律，也不是他自己选的三条判词里的�
 
 | 环节 | 位置 | 只干什么 |
 |---|---|---|
-| 块的形状 | `src/lib/cognitive/manager.ts:29-34` | `CognitiveBlock` 多一个可选的 `memoryIds`，注释写明「填的必须是进了 `text` 的那几条」 |
-| 谁进的提示词 | `src/lib/cognitive/memory-module.ts:181,184,186` | `renderMemoryBlock` 边拼行边记 id，预算截断掉的那条**不记** |
+| 块的形状 | `src/lib/cognitive/manager.ts:43-45` | `CognitiveBlock` 多一个可选的 `memoryIds`，注释写明「填的必须是进了 `text` 的那几条」 |
+| 谁进的提示词 | `src/lib/cognitive/memory-module.ts:190,193,195` | `renderMemoryBlock` 边拼行边记 id，预算截断掉的那条**不记** |
 | 本轮的清单 | `src/lib/chats.ts:353-362,410,454` | `buildConversation` 的返回值从 `AiMessage[]` 变成 `{ messages, citedMemoryIds }`，清单是各块 `memoryIds` 的去重并集 |
 | 交出去 | `src/app/api/chats/[id]/messages/route.ts:148-151` | `done` 帧多一个 `memoryIds` 字段；只有成功帧给 |
 | 说话 | `src/lib/cognitive/citation-display.ts`（新）+ `chat-workspace.tsx:112,158,178-187,554-560,1398,1417-1486` | 纯模块出句子和行形状，组件只管渲染与点开时那一次读 |
@@ -1329,7 +1340,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 | 检查 | 今天有没有 | 这一片 |
 |---|---|---|
-| 新的支持信息 | 有：`recordRestatement` 会补一条 SUPPORTS（`memory-module.ts:338-352`），证据行带 `createdAt` | **做**：`createdAt > recordedAt` 才算新的 |
+| 新的支持信息 | 有：`recordRestatement` 会补一条 SUPPORTS（`memory-module.ts:350-364`），证据行带 `createdAt` | **做**：`createdAt > recordedAt` 才算新的 |
 | 新的反例 | **行**有（`reviseMemory` 写 CONTRADICTS，`memories.ts:455`），**发现**没有 | **只报库里已有的行**。词法反例发现不接进来，见 `docs/cognitive-acceptance.md:537-570` 那次实测 36 条候选 0 条真是反例 |
 | 已经过时 | 全有，读侧：`validTo` / `supersededAt` | **做**，且与 `confidence.ts:72` 用同一个 `<=`，不留两处口径 |
 | 需要更新摘要 | **「记忆摘要」这个东西不存在**：`MemoryItem` 没有摘要列 | **不做**。不发明一个没有库存的对象来凑一项 |
@@ -1414,8 +1425,8 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 |---|---|---|
 | 迁移 | `prisma/migrations/20261106000001_memory_write_pause/migration.sql` | 只加一列 `memoryWritePaused Boolean @default(false)`。**11-05 已执行**（真库列形状与读写往返见下面边界第二条）。默认 false 让「库里没有这一行」等于没暂停，和这张表其余开关同构 |
 | 它不是第九个模块开关 | `preferences.ts:27`（`FlagKey` 把它和 `emotionTransparency` 一起 `Exclude` 掉）、`:90`（单独一条 PATCH 分支） | 模块开关管「这个模块要不要工作」，关掉后读侧也不注入；这一列只管「还记不记新东西」。**混进 `COGNITIVE_FLAGS` 会让它变成一个能被批量清空的开关**，P5 探针专门咬这个 |
-| 写侧闸门 | `memory-module.ts:203-221` | 开在能开的最早处：`memoryEnabled`（`:208`）之后、`excludedHashes` / `getMemoryPolicies` / `listMemories`（`:216-221`）**之前**。所以门槛 9 那句「关闭后不再执行对应的数据读取」在这一臂上字面成立——零读零写，不是「读了但没写」 |
-| 读侧不动 | `memory-module.ts:76-97` | `readMemory` 一次都不看这张偏好。「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停，两件事必须分得开 |
+| 写侧闸门 | `memory-module.ts:212-224` | 开在能开的最早处：`memoryEnabled`（`:208`）之后、`excludedHashes` / `getMemoryPolicies` / `listMemories`（`:216-221`）**之前**。所以门槛 9 那句「关闭后不再执行对应的数据读取」在这一臂上字面成立——零读零写，不是「读了但没写」 |
+| 读侧不动 | `memory-module.ts:76-98` | `readMemory` 一次都不看这张偏好。「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停，两件事必须分得开 |
 | 服务函数 | `forgetting.ts:282-304`（`purgeMemoriesByContext`） | 照 `purgeMemoriesByChat`（`:231`）抄，三处差异：where 换成 context；**不**扫决策；**不**撤别的主题的欠账。同一事务里顺手建原句排除、清版本链指针、清访问痕迹 |
 | API | `memories/route.ts:140-147` + `:24` | 新分支 `scope=context`，独立限流桶 `memory-purge-context:{userId}`（20/小时，和另外两臂同宽），审计 `user.memory_purge_by_context`，`targetType='context'`、`after.purged` **只带条数和主题名，不带正文** |
 | 界面 | `memory-panel.tsx:433`（`purgeByContext`）/ `:675-711`（行内按钮）/ `:525-544`（暂停三态控件） | 「忘记这个主题」和「忘记这次对话」两个入口都摆着，因为它们不是一件事。暂停控件在总开关打开时才摆——总开关关着时暂停是句废话 |
@@ -1437,7 +1448,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | P3 跳过 `recordSources` | **3 红**（计划预期 1 红）：「每条被删正文进排除表一次」那条 + 按主题删的两条连带断言。红得比预期多，方向是对的 |
 | P4 把暂停检查挪到 `listMemories` 之后 | **1 红**：「暂停时写侧一次数据库读都不发生」。那条断言的是 `db.exclusionCalls` / `db.policyCalls` / `db.listFilters` **为空**——「没问」和「问了但没写」在这里第一次能被区分 |
 | P5 把新列塞进 `COGNITIVE_FLAGS` | **1 红**（计划预期 ≥2 红）。**预期错了**：`grep` 复核后只有 `cognitive-preferences.test.ts` 那一条专门用例吃这张表，路由与面板都按字段名点名，所以「批量清空」的第二处红源并不存在。数目如实记 1 |
-| P6 暂停连读一起挡 | **1 红**，但这条是返工过一次才有效力的。第一版用例直接 `await memoryModule.read(...)`，而读侧的闸根本不在模块里，在 `manager.ts:128` 的 `enabledModules` 上——把变异放在闸门处，那条用例绿给你看。**改成走 `runCognitiveReads`（线上真正的读入口）后**，同一条变异：**1 红**（「暂停只管记、不管用」）。另记一笔：第一次实现这条变异时我在 `runCognitiveReads` 里多插了一次没有 try/catch 的 `getCognitivePreferences`，于是多红了第二条（「开关本身读不出来时……」）——那条红的是我这只手，不是那个语义；换成在 `enabledModules` 里改，才是 1 红 |
+| P6 暂停连读一起挡 | **1 红**，但这条是返工过一次才有效力的。第一版用例直接 `await memoryModule.read(...)`，而读侧的闸根本不在模块里，在 `manager.ts:128（今天在 `:85`）` 的 `enabledModules` 上——把变异放在闸门处，那条用例绿给你看。**改成走 `runCognitiveReads`（线上真正的读入口）后**，同一条变异：**1 红**（「暂停只管记、不管用」）。另记一笔：第一次实现这条变异时我在 `runCognitiveReads` 里多插了一次没有 try/catch 的 `getCognitivePreferences`，于是多红了第二条（「开关本身读不出来时……」）——那条红的是我这只手，不是那个语义；换成在 `enabledModules` 里改，才是 1 红 |
 
 探针逐个当场回滚，回滚后立刻 `grep` 复核当前内容；全程只用字面替换，不碰 `git checkout` / `git stash`。
 
@@ -1543,7 +1554,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | **画像不随「清空全部长期记忆」删** | 它是你确认过的东西，不是派生记录；`forgetting.ts` 一行都不碰这张表，面板另给一个明确的清空入口（`clearProfileEntries`，`user-profile.ts:156`） | 忘记一条记忆不该连带抹掉你当时确认过的那句话。这条由静态用例钉着（`cognitive-user-profile.test.ts:319-321` 不许在 `forgetting.ts` 里出现 `userProfileEntry`），P15 把删除语句塞进去就红 |
 | **改写覆盖同一行，不开版本链** | 记忆要被时间线追溯、要能回滚成「那个说法」；画像条目只有「你确认过这句」和「你刚改成这句」两个状态，中间那次说法从来不是事实的来源——来源是原会话 | 一张 revision 表换不来任何能被追问的东西。所以 `reviseProfileEntry`（`:128`）只动正文和 `editedAt`，`confirmedAt` 故意不碰 |
 | **正文密文落库，AAD 绑死三样** | `user-profile:v1:${userId}:${id}:content`（`:28`），跟记忆、洞察同一套口径；解不开的那一行不拖垮整屏，正文位置换成一句实话（`toDto`） | 密文搬到另一行或另一个人下面就读不出来。P9 把 `v1` 改成 `v2` 红 2 条，其中一条正是别处抄了这句 AAD 的锁 |
-| **情绪只报条数，不贴标签** | 三档只改「端不端给模型、说不说有」：`off` 在排序之前就把情绪类的行丢掉（`memory-module.ts:137`，连看都不看），`explicit` 只在末尾加一句「其中 N 条与情绪有关」（`:192`）。界面把三档各自的实际效果逐条写全（`memory-policy-panel.tsx:394` 起那张卡） | 系统不许在这里长出「焦虑」「抑郁」这种给用户情绪命名的词——用例直接对 `/焦虑\|抑郁\|悲伤\|紧张\|情绪不稳定/` 做反向断言。而 `emotionEnabled` 至今没有运行时消费者，所以界面上不摆它：一个没人读的开关摆在设置页就是骗人（P12 实测） |
+| **情绪只报条数，不贴标签** | 三档只改「端不端给模型、说不说有」：`off` 在排序之前就把情绪类的行丢掉（`memory-module.ts:145`，连看都不看），`explicit` 只在末尾加一句「其中 N 条与情绪有关」（`:201`）。界面把三档各自的实际效果逐条写全（`memory-policy-panel.tsx:524` 起那张卡） | 系统不许在这里长出「焦虑」「抑郁」这种给用户情绪命名的词——用例直接对 `/焦虑\|抑郁\|悲伤\|紧张\|情绪不稳定/` 做反向断言。而 `emotionEnabled` 在那之前至今没有运行时消费者，所以界面上不摆它：一个没人读的开关摆在设置页就是骗人（P12 实测）。**这一句到 11-06 片U 作废**：写侧抽取和读侧候选池两处开始真读它，控件才跟着上屏（`memory-policy-panel.tsx:523-561`），判据本身没变。 |
 
 ### 代码事实（八个新文件、三处改造、四处接线）
 
@@ -1556,7 +1567,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 注入 | `user-model-module.ts:31` | 每轮只端**最近 6 条、800 字**（`:20-21`），只读已确认的条目——候选连这个函数都进不来。没有 `memoryIds`：画像不是这一轮的引用 |
 | API | `src/app/api/account/cognitive/profile/route.ts` + `[id]/route.ts` | GET 走闸门，POST / DELETE 走 `assertWritable`（`:81`），PATCH / DELETE 单条在 `[id]`。限流 60 次/小时、清空 3 次/小时。审计只带条目 id 和来源条数，**正文不进日志也不进审计** |
 | 界面 | `src/components/settings/profile-panel.tsx`（407 行） | 已确认条目 + 待确认候选两栏；句子只从 `user-profile-display.ts` 取，界面不许自己编 |
-| 情绪档位 | `memory-module.ts:133-201` + `manager.ts:83` | `renderMemoryBlock` 多收一个档位参数；那一行偏好每轮只读一次，由引擎递给模块（P13 实测：manager 里硬编码成 `implicit` 就红） |
+| 情绪档位 | `memory-module.ts:142-207` + `manager.ts:83` | `renderMemoryBlock` 多收一个档位参数；那一行偏好每轮只读一次，由引擎递给模块（P13 实测：manager 里硬编码成 `implicit` 就红） |
 | 设置页接线 | `settings-workspace.tsx` | import / Tab 联合类型 / 导航项 / 渲染分支四处，和「时间线」「洞察」「记忆网络」同一形状。策略面板一屏现在是六列控件 |
 
 ### 先红
@@ -1582,7 +1593,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | P9 画像 AAD 从 `v1` 改成 `v2` | **2 红**：本文件那条列表解密 + `profile-reads` 里那句「长期记忆关着，已确认的画像条目照常带回」——后者用的是**抄在另一个文件里的那句 AAD**，它一红就说明这份复制是被看着的 |
 | P10 注入条数 `USER_MODEL_MAX_ITEMS` 6 → 12 | **1 红**，红的是面板那条「三行数字不许从服务端抄：条数上限由服务层拿」的 drift 用例。服务端自己的用例**挡不住这个**——它按常量走，不认数值 |
 | P11 界面摆出「拒绝候选」 | **1 红**：「候选只有『收进画像』一个动作：服务层没有拒绝的写路径」 |
-| P12 策略面板摆出 `emotionEnabled` | **1 红**：「`emotionEnabled` 至今没有运行时消费者，界面不许摆」 |
+| P12 策略面板摆出 `emotionEnabled`（片U 把这条用例改写成正向断言，见片U 第五节） | **1 红**：「`emotionEnabled` 至今没有运行时消费者，界面不许摆」 |
 | P13 manager 硬编码 `emotionTransparency: 'implicit'` | **1 红**：「那一行偏好每轮只读一次，档位由引擎交给模块」 |
 | P14 `listProfileEntries` 的 `Math.min` 拆掉 | **1 红**：「调用方能收紧上限，但放宽不了」 |
 | P15 忘记路径顺手删画像表 | **1 红**：「『清空全部长期记忆』不碰这张表」 |
@@ -1608,9 +1619,9 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 
 ### 为什么不建站点抽象（四条，带证据）
 
-- **接口已经有了**：`manager.ts:43` 的 `CognitiveModule`（键 + `read` + 可选 `write`）、`:56` 的 `MODULE_SWITCH` 逐键闸、`:53` 的 1000 ms 硬截止、`:88-92` 的错误隔离——四件套齐全，缺的从来不是抽象。
-- **编排器已经有了**：`runCognitiveReads`（`manager.ts:77`）就是那个「按开着的键依次读、单点挂了不带走全链」的循环，唯一调用点在 `chats.ts:404`。
-- **注册表只有三个模块**：`memory-module.ts:362-364` 注册 `memory` / `decisionMemory` / `userModel`。`MODULE_SWITCH` 里另外四个键（`emotion` / `association` / `timeline` / `reflection`）**没有模块挂着**——它们各自的开关由别处的闸门消费（时间线一屏、图一屏、反思后台），不进读管线。这就是下面那张表里「存在但不在这个站点上」那几行的由来。
+- **接口已经有了**：`manager.ts:48` 的 `CognitiveModule`（键 + `read` + 可选 `write`）、`:61` 的 `MODULE_SWITCH` 逐键闸、`:58` 的 1000 ms 硬截止、`:95-101` 的错误隔离——四件套齐全，缺的从来不是抽象。
+- **编排器已经有了**：`runCognitiveReads`（`manager.ts:82`）就是那个「按开着的键依次读、单点挂了不带走全链」的循环，唯一调用点在 `chats.ts:404`。
+- **注册表只有三个模块**：`memory-module.ts:374-376` 注册 `memory` / `decisionMemory` / `userModel`。`MODULE_SWITCH` 里另外四个键（`emotion` / `association` / `timeline` / `reflection`）**没有模块挂着**——它们各自的开关由别处的闸门消费（时间线一屏、图一屏、反思后台），不进读管线。这就是下面那张表里「存在但不在这个站点上」那几行的由来。
 - **想把它接到反思读侧也不行**：`cognitive-reflection-states.test.ts:71-80` 明令 `reflections.ts` 不建记忆、不改画像、不 `registerCognitiveModule`。采纳一条洞察只翻状态——多一层管线正好会诱使它「顺手挂进对话链路」。
 
 ### 16 站点对照表（+1 行本片新增）
@@ -1620,24 +1631,24 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 | 任务书站点 | 在不在 | 落点（今天实测过的行号） |
 |---|---|---|
 | 身份鉴权 | 存在，且在认知之前 | `messages/route.ts:47` `requireUser` → `:49` 限流 → `:56` `getChatOwned`。认知读全部发生在这之后 |
-| 用户模块配置 | 存在 | `manager.ts:78` 每轮读一次偏好行，`:80` 按 `=== true` 筛站点；偏好缺失时 `:79` 直接返回空 |
-| Memory Retrieval | 存在 | `memory-module.ts:76-97` 取池 → 排序 → 算置信度 → 渲染。排序在 `retrieval.ts:75`（关键词）/ `:161`（余弦）/ `:209`（RRF 混合） |
+| 用户模块配置 | 存在 | `manager.ts:83` 每轮读一次偏好行，`:85` 按 `=== true` 筛站点；偏好缺失时 `:84` 直接返回空 |
+| Memory Retrieval | 存在 | `memory-module.ts:76-98` 取池 → 排序 → 算置信度 → 渲染。排序在 `retrieval.ts:75`（关键词）/ `:161`（余弦）/ `:209`（RRF 混合） |
 | Graph Association | **不存在**（作为站点） | 图是**只读派生视图**：`account/cognitive/graph/route.ts:31-34` 两道闸 + `memory-graph.ts` 从记忆行现算。读管线里没有这个键的模块 |
 | Temporal Filtering | 行侧在跑，问侧没料 | 读侧有效期过滤 `memories.ts:373-376`（`validTo ≥ asOf` 且 `validFrom ≤ asOf`）；写侧时间框架 `temporal.ts:45`。**检索排序不看时间**，只有 `recordedAt desc` 的取行次序（`memories.ts:381`）。问侧那一半在片T-2 量过：116 个提问只有 1 个解析得出框架、可见池 186 行的 `validFrom` 全为空，量不出收益所以不接线 |
-| User Modeling | 存在（片 d 起） | `user-model-module.ts:52` 读已确认画像条目、`:57` 挂键、`memory-module.ts:364` 注册。开关 `userModelEnabled` 第一次有了真消费者 |
-| Emotion Analysis | **不存在** | 没有任何「分析情绪」的代码：`emotion` 键在 `manager.ts:59` 的开关表里，但**没有模块注册它**。存在的只有呈现档位 `memory-module.ts:137`（`off` 丢行）/`:192`（`explicit` 报条数），它不给用户的情绪命名 |
+| User Modeling | 存在（片 d 起） | `user-model-module.ts:52` 读已确认画像条目、`:57` 挂键、`memory-module.ts:376` 注册。开关 `userModelEnabled` 第一次有了真消费者 |
+| Emotion Analysis | **不存在** | 没有任何「分析情绪」的代码：`emotion` 键在 `manager.ts:64` 的开关表里，但**没有模块注册它**。存在的只有呈现档位 `memory-module.ts:145`（`off` 丢行）/`:201`（`explicit` 报条数），它不给用户的情绪命名 |
 | Response Policy | **存在，但不是那一站点** | 片T-3 起，两条用法规则只有一个出处：`response-policy.ts:53`（`renderFramingHeader`）+ `:65`（低可信度那句）+ `:74`（情绪透明那句）。它是**规则出处**，不是一个会读会写的站点：没有 `CognitiveModule`、没有开关、不读数据库 |
 | Context Assembler | 存在 | `chats.ts:390` 基础 system → `:409` 逐块追加认知 system → `:420` 历史窗口 → `:454` 本轮（含附件）。就是那个装配器 |
 | 原有 AI Provider | 存在，未改动 | `ai.ts:111` `streamChatCompletion`，`messages/route.ts:115` 调用。认知块以普通 system 消息递进去，模型侧不知道它来自哪 |
 | 流式回复 | 存在，未改动 | `route.ts:101` `ReadableStream`，`:111` 逐帧 `data: …\n\n` |
 | 后台记忆提取 | 存在，且不阻塞 | `route.ts:154` `close()` **之后**才 `:162` `enqueueCognitiveTask`；真正执行在 `task-worker.ts:186` `runCognitiveWrites`。落库而不是当场跑，所以进程被杀也不丢这一轮 |
 | 事件更新 | **不存在**（是读时派生的改名） | `timeline.ts:65` `deriveTimelineEvents` 把记忆行 + 演化边现算成事件。没有任何「事件表」被写过——这是 4.1 那一片明写的取舍 |
-| 关联更新 | 只有向量这一路，且从没成功过 | 写侧 `memory-module.ts:309` 按 `associationEnabled` 决定补不补向量，`:323-328` 失败只记一条不含正文的告警。**今天实测：`MemoryItem` 2 行、`embeddingCiphertext` 非空 0 行** |
+| 关联更新 | 只有向量这一路，且从没成功过 | 写侧 `memory-module.ts:321` 按 `associationEnabled` 决定补不补向量，`:323-328` 失败只记一条不含正文的告警。**今天实测：`MemoryItem` 2 行、`embeddingCiphertext` 非空 0 行** |
 | 决策候选提取 | 存在，但读侧只认已确认 | 写侧 `decision-module.ts:44-51`（候选 `:48`、结果 `:50`）只落 `PENDING_CONFIRM`；读侧 `decisions.ts:252` 只取 `status='CONFIRMED'`。**实测：`DecisionRecord` 里 `CONFIRMED` 0 行**，所以这一路今天递出去的是空块 |
 | 反思任务触发判断 | 存在 | `task-worker.ts:113` 每轮按「这轮有活的 user」触发 `runReflectionSweep`（`reflection-sweep.ts:139`），冷却由它自己那道条件 UPDATE 保证 |
-| **本轮哪个站点挂了**（本片新增） | 存在 | `manager.ts:89` 收键 → `chats.ts:458` 交回 → `route.ts:237-242` 写进 `writeAudit.after.cognitiveFailed`。**只有模块键，没有正文、没有报错原文**（同 `:91` 那条 `log.warn` 立的规矩） |
+| **本轮哪个站点挂了**（本片新增） | 存在 | `manager.ts:98` 收键 → `chats.ts:458` 交回 → `route.ts:237-242` 写进 `writeAudit.after.cognitiveFailed`。**只有模块键，没有正文、没有报错原文**（同 `:100` 那条 `log.warn` 立的规矩） |
 
-**「并行任务不应该阻塞主回复」这一句的判法**：不是并行，是**入队即返回**——`close()` 已经把字节全交给客户端之后才 `enqueueCognitiveTask`（`route.ts:154-162`）。读侧那一半靠 `manager.ts:53` 的每模块 1000 ms 截止兜住，最坏比没有认知多花一秒，不会更多。后台是串行的：`task-worker.ts:55-60` 的 `drain` 锁让「一轮跑完才进下一轮」成为事实。**没有给 `CognitiveTaskKind` 加枚举值**——那是 `schema.prisma` 的迁移，给不存在的站点排队务只会多一种要清尸体。
+**「并行任务不应该阻塞主回复」这一句的判法**：不是并行，是**入队即返回**——`close()` 已经把字节全交给客户端之后才 `enqueueCognitiveTask`（`route.ts:154-162`）。读侧那一半靠 `manager.ts:58` 的每模块 1000 ms 截止兜住，最坏比没有认知多花一秒，不会更多。后台是串行的：`task-worker.ts:55-60` 的 `drain` 锁让「一轮跑完才进下一轮」成为事实。**没有给 `CognitiveTaskKind` 加枚举值**——那是 `schema.prisma` 的迁移，给不存在的站点排队务只会多一种要清尸体。
 
 ### 那个真的洞：`failed` 以前被扔掉
 
@@ -1667,12 +1678,12 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 | E-P1 `chats.ts` 交回硬编码空数组 | **1 红**：「站点开着但读挂了：交回挂了的那个模块键」 |
 | E-P2 `route.ts` 的 `after` 里去掉这个键 | **1 红**：那条静态断言的 `after: {…cognitiveFailed…}` 正则 |
 | E-P3 把它从 `after` 挪到 `writeAudit` 的同级参数 | **1 红**，红因同上。这条钉的是**位置**：审计的行形状由 `after` 承载，挪出去等于没进库 |
-| E-P4 `manager.ts:89` 不再 `failed.push` | **1 红**：「站点开着但读挂了」。**这条同时证明接线用例没在自证**——它 mock 的只有 prisma，`runCognitiveReads` / `settle` / 截止全是真的 |
-| E-P5 `manager.ts:80` 的筛选从 `=== true` 改成 `!== false` | **1 红**：红的是「站点开着但读挂了」那条，**不是**「站点关着」那条。原因值得记：测试替身的偏好行只填了 `memoryEnabled` 一个键，`!== false` 于是把其余站点当成开着，它们的读在缺模型的 mock 上炸掉，`failed` 多出键。所以「关了不是挂了」那条用例挡不住这个变异，挡住它的是**数组恰等于 `['memory']`** 这个形状 |
+| E-P4 `manager.ts:89`（今天 `:98`） 不再 `failed.push` | **1 红**：「站点开着但读挂了」。**这条同时证明接线用例没在自证**——它 mock 的只有 prisma，`runCognitiveReads` / `settle` / 截止全是真的 |
+| E-P5 `manager.ts:80`（今天 `:85`） 的筛选从 `=== true` 改成 `!== false` | **1 红**：红的是「站点开着但读挂了」那条，**不是**「站点关着」那条。原因值得记：测试替身的偏好行只填了 `memoryEnabled` 一个键，`!== false` 于是把其余站点当成开着，它们的读在缺模型的 mock 上炸掉，`failed` 多出键。所以「关了不是挂了」那条用例挡不住这个变异，挡住它的是**数组恰等于 `['memory']`** 这个形状 |
 
 ### 这一片的边界（含无法验收项）
 
-- **相邻的那个洞没修，也没用例**：`manager.ts:79`——**整行偏好读不出来**时（`readPreferences` 抛错）返回 `{ blocks: [], failed: [] }`，于是「配置面挂了」仍然和「全关着」同形。今天只有 `cognitive.preferences_unavailable` 那条**日志**（`manager.ts:144`）能证明它发生过，库里没有痕迹。不修的代价是失败方向安全（什么都不读、什么都不写），修的代价是给 `CognitiveReadResult` 和审计形状再加一个旋钮。**这一条留给裁决，不混进本片。**
+- **相邻的那个洞没修，也没用例**：`manager.ts:84`——**整行偏好读不出来**时（`readPreferences` 抛错）返回 `{ blocks: [], failed: [] }`，于是「配置面挂了」仍然和「全关着」同形。今天只有 `cognitive.preferences_unavailable` 那条**日志**（`manager.ts:153`）能证明它发生过，库里没有痕迹。不修的代价是失败方向安全（什么都不读、什么都不写），修的代价是给 `CognitiveReadResult` 和审计形状再加一个旋钮。**这一条留给裁决，不混进本片。**
 - **`after.cognitiveFailed` 至今没有真实一行**：要它非空得真有一个站点挂掉，本机 2 条记忆、模块全默认关，跑不出一条非空审计。**「写进了库」这一句目前只有静态断言 + 单测里的 `writeAudit` 参数为证，无法验收真库那一行。**
 - **界面不读这个字段**：`.tsx` 里 `cognitiveFailed` 零命中。它是给排障和审计看的，不是给用户看的——所以按「不摆没人消费的东西」那条规矩，它不该出现在任何屏上；这里它也没成为一个控件，只是一个后端数组。
 - **表里那四处「不存在」一片都没动**：Graph Association、Emotion Analysis、Response Policy、事件更新四行当时都写「不存在」（事件更新那一行的真相是「读时派生换了个名字」）。这一片只把 User Modeling 从「不存在」改成「存在」——那是片 d 的成果，今天才落进表。**不建它们**：图是只读派生、情绪呈现是档位、回复策略没有需求来源——凭空建站点违反「认知模块一律默认关，且必须带实测增益」。**这一条里 Response Policy 那半句已经被片T-3 取代**：需求来源是有的（任务书 :808 把它排在情绪分析与上下文构建之间、:430 给了「置信度不足不得用确定语气」那条禁令），只是落下来的形状不是站点而是一个规则出处，所以这一片没有为它建模块；今天那一行改成了「存在，但不是那一站点」。
@@ -2234,7 +2245,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 它有存储（`policy.ts:55`）、有校验（`validation.ts:158`）、有 PATCH 通路（`policy.ts:214`），写入计划里还带着它
 （`write-decision.ts:143`）——唯独没有读者。也就是说用户在那一屏能说出一句系统不听的话：
 「这类东西不要拿去联想」。这一片先让这句话有反应，再谈要不要给它一个控件，顺序按仓库自己的立场走
-（`memory-policy-panel.tsx:23-31`：不做没人消费的控件）。
+（`memory-policy-panel.tsx:21-33`：不做没人消费的控件）。
 
 ### 一、为什么这一片不是「补上 LINK 和 DELETE 两个动作」
 
@@ -2322,7 +2333,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 | 门槛 4 状态行 | 「但行看不到、点不动」 | 「点不动」被片 g 解开；这一屏剩下的缺口是 `ReflectionRecord` 0 行，起服务走那一屏的动作仍未做过 |
 | 门槛 5 状态行 | 「机制已验收，『洞察』无对象」 | 和它自己下面那段边界自相矛盾（那段早就写了 6-E/6-F 落地）；改成「有对象，缺真库那行与目测」 |
 | 门槛 7 状态行 + 边界 | 「画像模块仍不存在，正面陈述无从验收」「`allowUserProfile` 全仓无读取方」 | 片 d 建了表、服务、界面与三道闸；正面一半现在有三条独立用例（候选不落库 / 状态过滤在库里 / `confirmedAt` 那个旋钮根本不存在），已把那三条逐条指到位 |
-| 门槛 9 状态行 + 第 2 点 | 「`userModel` / `emotion` / `association` 三个键仍无人读取」「只有 `memory` 真有已注册模块」 | 今天只剩 `emotionEnabled` 无人读取；`registerCognitiveModule` 有三个生产调用方（`memory-module.ts:352-354`）。同时给上表补了四行真存在的闸门用例（画像路由、画像读侧、图路由两道），并把漂走的 `:242` / `manager.ts:48` 两处行号换成 `:299` / `:60`。**这一栏记的是当时那次修订**：片T-3 之后那几个位置今天分别是 `:362-364`、`:309`、`:228` |
+| 门槛 9 状态行 + 第 2 点 | 「`userModel` / `emotion` / `association` 三个键仍无人读取」「只有 `memory` 真有已注册模块」 | 今天只剩 `emotionEnabled` 无人读取；`registerCognitiveModule` 有三个生产调用方（`memory-module.ts:352-354`）。同时给上表补了四行真存在的闸门用例（画像路由、画像读侧、图路由两道），并把漂走的 `:242` / `manager.ts:48` 两处行号换成 `:299` / `:60`。**这一栏记的是当时那次修订**：片T-3 之后那几个位置今天分别是 `:374-376`、`:321`、`:290` |
 | 「下一步」第 4/5/6 条 | 「画像模块仍然不存在」「4.1 事件抽取今天不存在，12 类有 4 类生成不了」 | 分别被片 d 与片 i 取代：4.1 落地为「给已有事件起名」，12 类里 9 类有出处、3 类是**没有出处**而不是没做 |
 
 同一片还改了：文档头的「基线 HEAD」与全量单测数字（`de70c83` + 81/1225 → `67127fb` + 97/1575），
@@ -2439,7 +2450,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 - **界面这一半仍是无法验收**。10 条全是 `readFileSync` + `stripComments` 的静态断言：
   能证明「那句话没写过期的话」「控件读写的就是那一个键」「数字来自接口而不是文案」，
   不能证明这张卡真渲染出来读得通、点得动。**这一屏在情境卡列表和「情绪标注」之间又插了 43 行 JSX**
-  （`memory-policy-panel.tsx:448-490`），七张情境卡 + 自动收紧 + 情绪标注同屏会不会太长、
+  （`memory-policy-panel.tsx:480-522`），七张情境卡 + 自动收紧 + 情绪标注同屏会不会太长、
   卡与卡之间的层级会不会看不出来——没量过，要他在服务上点开一次。11-05 片 g 那把真渲染的锁仍然要求他自己起服务。
 - **真库上这条链路今天没有走过一次**（11-06 片 k 只读计数，见「真库实况」）：`MemoryPolicySignal` **0 行**、
   `MemoryPolicy` **0 行**、`MemoryItem` 2 行、`MemoryRevision` 0 行。两个后果分开说清：
@@ -2473,7 +2484,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
    （「归档得有地方恢复，否则这个动作就是一扇进得去出不来的门」），也和任务书第七节结尾
    「用户始终拥有对这些记忆、推断和数据的查看、修改、暂停和删除权」直接相冲。
 3. 补上它**买不到**任何隔离收益：正文只有 session 里这一个用户读得到，`userId` 只从 session 取；
-   也补不上「关着还继续记」——写侧闸门在 `memory-module.ts:208`，开关关着时新的候选一行都不产生。
+   也补不上「关着还继续记」——写侧闸门在 `memory-module.ts:220`，开关关着时新的候选一行都不产生。
 
 裁决落在两处：`src/app/api/account/cognitive/memories/route.ts:51-61` 的 GET 文档块（将来谁会想补闸门，
 先在这段字前停下来），和本片新加的 5 条用例。
@@ -2529,7 +2540,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 那句话既没记住，也没问过，直接消失。
 
 **比「没实现」更糟的是它静默**：用户设了这一档，记忆屏上一个字都看不到，也没有任何一处告诉他
-「有两句在等你答」。他还以为自己设的东西在生效。现在的分支在 `memory-module.ts:266`。
+「有两句在等你答」。他还以为自己设的东西在生效。现在的分支在 `memory-module.ts:278`。
 
 ### 二、另开一张表，而不是给 MemoryItem 加一列 status
 
@@ -2566,7 +2577,7 @@ M-真2 为什么必要：单测跑的是内存替身，`(userId, contentHash)` �
 三种「落一行不该发生」的场合，「问一句」同样不该发生（`cognitive-memory-module.test.ts` 片M 那一节）：
 总开关关着 `:342`、写入暂停着 `:350`、内容被永久删除过 `:360`；再加库里已有同一句 → 按重复陈述处理，不问 `:369`。
 
-**一条容易写错的判据单独钉着**：落库和提问是**两个计数器**（`memory-module.ts:228` `written`、`:231` `proposed`）。
+**一条容易写错的判据单独钉着**：落库和提问是**两个计数器**（`memory-module.ts:318` `written`、`:290` `proposed`）。
 合并成一个听着更严（「一轮总共只动两次」），实际后果是这一轮一旦写满两行，
 后面那些该问的句子一句都不问——策略回到空转，正是这片要修的那个毛病。
 用例 `:393`「落库和问句各算各的额度：落了一行不挤掉问句的位置」，牙齿见下面 P8。
@@ -2614,7 +2625,7 @@ M-真2 为什么必要：单测跑的是内存替身，`(userId, contentHash)` �
 | M-P8 | 两个计数器合并（`proposed += 1` 之外再 `written += 1`） | 1 红：`:393` 那条，别的都不叫 |
 
 M-P8 这支顺带把我自己写的一句假注释抓了出来：它一度声称候选和落库「共用同一个计数器」。
-**那是错的**，`memory-module.ts:228`/`:231` 从片M 起就是两个，注释现在说的是真话。
+**那是错的**，`memory-module.ts:318`/`:290` 从片M 起就是两个，注释现在说的是真话。
 这一支的用法是：先按错误的理解改了注释，再拿用例去验理解——用例红了才说明理解错的是我，
 不是代码。回滚时手滑留下一行重复的 `continue;`，也在下一次 `sed` 核对里被看见并删掉了。
 
@@ -3863,7 +3874,7 @@ worker 是同进程里的轮询（`task-worker.ts:58 pollOnce` / `:103 runCognit
 | 整池 RRF（来源） | 0.7181 | 0.0959 | 0.3975 | 0 |
 | 整池 RRF（证据） | 0.6900 | 0.0927 | 0.3760 | 0 |
 
-「现状」那一栏调的就是线上函数 `selectMemoryCandidates`（`memory-module.ts:133`），不是它的复刻——
+「现状」那一栏调的就是线上函数 `selectMemoryCandidates`（`memory-module.ts:142`），不是它的复刻——
 harness 喂 fixture 行、走同一个纯函数，这从 3a 抽出接缝那天起就是这样。
 
 ### 三、四条读出来的东西比那张表重要
@@ -3926,7 +3937,7 @@ fixture 里根本没有这个字段，本地库的 `MemoryAccessTurn` 也是 0 �
 
 | 探针 | 改动 | 红了谁（实测） |
 |---|---|---|
-| P1 | 把 salience 真的装进 `selectMemoryCandidates`：关键词排完再按 `userConfirmed` 提到前面（`memory-module.ts:155-157`，当时行号；今天在 `:141-143`） | **3 条 / 2 个文件**：`cognitive-eval-snapshot` 的 summary 与 report 两处逐字节比对 + 本片「现状那一栏的数字」。全量 `3 failed / 1865 passed`，随后按字面回滚 |
+| P1 | 把 salience 真的装进 `selectMemoryCandidates`：关键词排完再按 `userConfirmed` 提到前面（`memory-module.ts:155-157`，当时行号；今天在 `:150-152`） | **3 条 / 2 个文件**：`cognitive-eval-snapshot` 的 summary 与 report 两处逐字节比对 + 本片「现状那一栏的数字」。全量 `3 failed / 1865 passed`，随后按字面回滚 |
 
 P1 想证明的不是「能测出来」，是**门禁的形状**：`cognitive-eval-snapshot` 里那条聚合兜底
 「现状不许比改造前的基线更差」（`recallAt8`/`mrr`/违禁项三项对 A2 比）**照样是绿的**——
@@ -4128,7 +4139,7 @@ T-1 是「测出来了，是零收益」，T-2 是「这台仪器在这副语料
 | 「不要向用户逐条复述……」 | 同上，两处（后半句各自不同） | 模板在 `:57`，块专属的两半由 framing 的 `recite` / `tail` 递进来 |
 | 低可信度标注（:430 那句禁令） | `memory-module.ts:72` | `response-policy.ts:65` |
 | 情绪透明说明（8.3 的 `explicit` 档） | `memory-module.ts:81` | `response-policy.ts:74` |
-| 给界面用的块名（`label`） | 两处硬编码 `'长期记忆'` / `'用户画像'` | 与表头同源：`memory-module.ts:196`、`user-model-module.ts:46` 都取 `*_FRAMING.bracket` |
+| 给界面用的块名（`label`） | 两处硬编码 `'长期记忆'` / `'用户画像'` | 与表头同源：`memory-module.ts:205`、`user-model-module.ts:46` 都取 `*_FRAMING.bracket` |
 | **决策块表头** | `decisions.ts:300-301` | **没动**，并且有用例钉着它「不含这两条规则」（见第四节） |
 
 接缝本体 76 行，只有一个纯函数 `renderFramingHeader`（`:53`）和两个常量、一个模板函数；没有读取、没有排序、没有置信度计算。
@@ -4140,7 +4151,7 @@ T-1 是「测出来了，是零收益」，T-2 是「这台仪器在这副语料
 二、块专属的说法收成 `CognitiveFraming` 五个字段（`bracket` / `subject` / `drift` / `recite` / `tail`，`:23-34`）——
 **用例还反过来断言这五个字段里不许夹带共用那半句**（`cognitive-response-policy.test.ts:105-110`），否则「同一个句子写两遍」只是换了个放法；
 三、两个模块各自的表头改成 `renderFramingHeader(...)` 的一次调用，`label` 从此与表头同源；
-四、预算的起点从接缝取（`memory-module.ts:175` 的 `MEMORY_TEXT_HEADER.length + reserve`、`user-model-module.ts:33`），
+四、预算的起点从接缝取（`memory-module.ts:184` 的 `MEMORY_TEXT_HEADER.length + reserve`、`user-model-module.ts:33`），
 表头占多少字这件事不再有第二份算法。
 
 **没做的事同样重要**：**一个字都没改**（下面第三节那两条逐字基准证明的就是这个）；没建 `CognitiveModule`、没加开关、没加环境变量、
@@ -4257,11 +4268,164 @@ T-1 是「测出来了，是零收益」，T-2 是「这台仪器在这副语料
 三、**接缝不禁止复制，只让复制变显眼**。静态枚举（`readdirSync` + `includes`）能抓「在 `src/lib/cognitive` 里再抄一遍」，
 抓不到把同一句话换个标点抄到别处（如 `src/lib/ai/`），也抓不到在**测试文件**里重写一份。这是这类守卫的固有形状，写明白比夸它有用。
 
-四、**片U 仍然欠 `emotionEnabled` 一个读者**。这一片只把「情绪呈现档位」的措辞收了出处（`:74`），
-那个开关至今零消费者——按「一个没人读的开关摆在设置页就是骗人」，界面上仍然不摆它。#225 继续挂着。
+四、~~**片U 仍然欠 `emotionEnabled` 一个读者**~~ **这一条当天就作废了**：写它的时候片U 还没动手，同一天下午片U 落了地——
+写侧 `memory-extractor.ts:106` 与读侧 `memory-module.ts:145` 两处真读它，控件才跟着上屏。判据（没人读的开关不摆）一条没改，
+改的是这个键有没有读者。#225 已关闭，证据与探针在文末「片U」那一节。
 
 五、**决策块那半句要不要补，是一个裁决，不是一片实现**。第四节给了不改的三条理由和那条断言；
 如果将来要改，先删 `cognitive-response-policy.test.ts:180-181` 那两条反向断言、重生成评测基线，再动 `decisions.ts`。
+
+## 片U：`emotionEnabled` 从「没人读的键」变成两处真闸——顺手把情绪类记忆的生产者补上（11-06）
+
+任务书 1.1 要八个用户级开关，并且明写「所有模块开关必须在服务端执行」；8.3 要「所有设置必须由后端真正执行。
+关闭模块后，不能继续执行对应的数据读取、生成和后台写入」。前七道闸各有归属，最后没人执行的就是这一列：
+`emotionEnabled`。这一片把八个开关收口——**但它不是「补一道闸」，是补一条链**。
+
+### 一、动手前量的三件事（结论同时是这片为什么长成这样的全部理由）
+
+一、**这个键零运行时读者**。全仓只有四处碰它：`preferences.ts:14`（类型声明）、`:39`（键表）、`:56`（默认 `false`）、
+`validation.ts:126`（PATCH 校验）。`manager.ts:64` 的 `MODULE_SWITCH` 里那一条 `emotion: 'emotionEnabled'`
+看着像读者，其实不是——那张表回答的是「`emotion` 这个**模块**归哪个开关管」，而 `runCognitiveReads:85` 拿它筛的是
+模块注册表；情绪从来不是一个注册模块，它是记忆模块里的一类行。所以这张表永远不会替这个开关执行任何事。
+
+二、**情绪类记忆行零生产者**。`memory-extractor.ts` 的 `RULES` 只认 decision / project / goal / preference / fact
+五种类型，头注释里原本明写「情绪句不在这里抽（那是情感引擎的活）」；而七个情境的默认 `allowedMemoryTypes`
+（`policy.ts` 的 `DEFAULT_MEMORY_POLICIES` 与 `sensitiveDefaults`）**一个都没有包含 `emotion`**。
+读侧那三档 `emotionTransparency` 早就有消费者（`memory-module.ts:145`/`:201`），它管的只是「端出去时要不要说明有几条」——
+一个只管怎么说、不管有没有的东西。
+
+三、**真库里情绪行 0 条**。收尾时又重跑一次只读 `groupBy`：`MemoryItem` 仍是 **2 行、全 `GOAL`**，
+`type='emotion'` 一行都不存在（`MemoryCandidate` 0 行）。
+
+三件事叠起来的结论是：**只补闸门不够**。闸门下面没有水源，控件摆出来还是一个骗人的旋钮，而且是一个更坏的骗人旋钮
+——它让用户以为「打开就会记住情绪」，而实际什么都不会发生。所以这片补的是整条链：生产者 + 两道闸 + 有读者之后的控件。
+这条判断也决定了顺序：先读者、后控件，反过来就是任务书第八节点名禁止的「用假的交互代替」。
+
+### 二、做了什么（五处接线，零迁移、零新表）
+
+| # | 位置 | 这一行管的是什么 |
+|---|---|---|
+| ① 生产者 | `memory-extractor.ts:62` `EMOTION_MARKERS` + `:105-111` `classifySentence(sentence, emotionEnabled)`；闸就一个字面：`:106` 的 `emotionEnabled &&` 前置 | 开关不开，一个情绪词都不比。抽的是**用户原话整句**，类型标 `emotion`，不改写、不命名、不下判断 |
+| ② 写侧接线 | `memory-module.ts:217`：`extractMemoryCandidates(turn.content, { emotionEnabled: preferences.emotionEnabled })` | 递的是这一轮已经读出来的那份偏好，**没有第二次查库** |
+| ③ 读侧闸门 | `memory-module.ts:145-146`：`dropEmotion` 在**排序之前**把情绪行整个剔出候选池 | 与 `emotionTransparency === 'off'` 是两把独立的锁；关掉的行不占名额，也不进 `memoryIds` 引用清单 |
+| ④ 引擎递参 | `manager.ts:91`（`runCognitiveReads` 把服务端刚读的偏好挂进 scoped turn）+ `memory-module.ts:93`（`readMemory` 转发给 `selectMemoryCandidates`） | 任务书要的「在服务端执行」：界面传什么都改不了它，值只从库里来 |
+| ⑤ 控件 | `memory-policy-panel.tsx:523-561` 一张「情绪类记忆」卡；复选框 `:532-538`，读 `:230`、PATCH 只带 `emotionEnabled` 这一个键（`:265`） | 它出现的原因是 ①②③ 现在真读它。文案把两处闸都说全，并且明写「打开还要情境卡勾了『情绪』才真落库」 |
+
+**没做什么**：没跑迁移、没建新表、没写他库里任何一行、没替他改过任何一个开关的值；没动 `context-classifier.ts`
+（下一节）；没给情绪句做任何「命名 / 打标 / 归类成焦虑抑郁」的事——这一片之后系统依旧只知道「这句是用户原话、
+类型是 emotion」，不知道用户有什么情绪。
+
+### 三、一条方向性红线：关掉只会更保守，不会更松
+
+`context-classifier.ts` 里也有一套情绪词表，但它的作用**不是记住情绪，是把一句话引到最保守的那个情境上**
+（`emotionalSupport` 的默认策略不落长期库）。如果让这个开关也去关掉它，结果就是：用户一关「情绪类记忆」，
+他的私密倾诉反而改按普通情境落库。那是隐私倒退，不是「模块关了」。
+
+所以这一片明确不做，并且钉了两条：`cognitive-emotion-gate.test.ts:192` 反向断言那台分类器源码里不许出现
+`emotionEnabled`；`:195` 正向断言 `classifyContext('我心里难受，整夜睡不着').winner === 'emotionalSupport'`——
+**这一条今天是绿的，将来谁把它接上开关，它就红**。
+
+### 四、先红（三步，每一步红的数量都等于当时缺的东西）
+
+| 时点 | 结果 | 红的是什么 |
+|---|---|---|
+| 两份测试写完、实现之前 | `Test Files 2 failed / Tests 12 failed \| 74 passed (86)` | 生产者抽不出情绪句、读侧不丢行、写侧不认闸门——①②③④ 全都还没有 |
+| ①②③④ 做完、控件还没上屏 | `Tests 4 failed \| 82 passed (86)` | 4 条**全在「界面：有读者之后才有控件」那一组**，一条不多一条不少 |
+| ⑤ 上屏之后 | 全绿 | — |
+
+中间那个「4 条正好落在同一组」是要紧的：它证明前面三步没顺手把界面也做了，控件确实是最后一步才出现的。
+
+### 五、用例（新文件 15 条 / 5 组，另 7 条接在既有模块测试尾部）
+
+**`tests/unit/cognitive-emotion-gate.test.ts`（新，197 行）**：
+
+| 组 | 锚点 | 条数 | 守住的是 |
+|---|---|---|---|
+| 生产者：只在开关打开时才抽 | `:86` | 5 | `:87` 不传开关一条都不抽（＝今天线上的形状）、`:91` 打开才抽且抽原话、`:97` 问句不算陈述、`:101` 非第一人称不是「用户说自己」、`:105` 一句同时像偏好和情绪时**先当情绪**（关掉时那句话仍按 `preference` 落，闸门不越权改写） |
+| 读侧闸门 | `:117` | 4 | `:120` `false` 时不进排序也不占名额、`:127` **没传这个字段时形状逐字节不变**（评测 Harness 与既有 fixture 走的就是这条）、`:133` `true` 不拦但 `transparency=off` 仍连池都不进（两把锁独立）、`:147` 丢的只有情绪行 |
+| 单一出处 | `:155` | 1 | `:156` 枚举 `src/lib/cognitive/*.ts`，除声明处（`preferences.ts` / `manager.ts`）外真读这个键的文件恰好是 `['memory-extractor.ts', 'memory-module.ts']` |
+| 界面：有读者之后才有控件 | `:166` | 4 | `:167` 读 `preferences.emotionEnabled`、PATCH 只带这一个键；`:173` 文案把「总闸 + 还要情境勾选」说全；`:179` 读不到状态时 `disabled` 且不替用户猜；`:184` 尾段那句「情绪总开关至今没有运行时消费者」**必须从源码里消失**——这片之后它是假话 |
+| 方向性 | `:190` | 1 | `:191` 见上一节 |
+
+**`tests/unit/cognitive-memory-module.test.ts` 尾部（`:1068` 那个 fixture + `:1079` 的 describe，7 条）**：
+`:1080` 关着时一行不落、也不进待确认候选（并且故意把「策略已放开情绪」铺上，防的是闸门排在抽取之后）；
+`:1092` 打开 + 情境勾了「情绪」才落库，落的是原话、来源是 `explicit`；`:1108` 打开但策略没放开仍不落——
+**第二把锁归策略表管**；`:1118` 打开只让这句进候选，同轮偏好句照旧按偏好落；`:1128` 走引擎的读侧：
+关着时库里已有的情绪行既不端给模型也不进 `memoryIds`；`:1144` 走引擎的读侧：打开后才轮到三档说话；
+`:1158` **不走引擎的直接调用不看这个闸门**（缺席＝今天的形状）。
+
+`withEmotionType()`（`:1068`）是这片新加的 fixture：它把 `general` 情境的 `allowedMemoryTypes` 补上 `emotion`，
+专门用来把「总闸」和「七个情境各自的第二道闸」拆成两件能被分别证伪的事。
+
+**两条既有断言被这片改写了**（必须写出来，它们是「反着钉」的守卫，改了就可能失去作用）：
+`cognitive-policy-panel.test.ts:37` 原来钉的是 `expect(POLICY_PANEL).not.toContain('emotionEnabled')`——
+那句禁令的前提是「没有读者」，前提一消失，这条断言就从守卫变成了阻碍。现在它正向钉 `使用情绪类记忆` +
+`preferences.emotionEnabled` 在屏上，同时**换成钉另一句假话不许留着**（`not.toContain('情绪总开关至今没有运行时消费者')`）：
+禁令的形状没变（不许说没执行的话），只是方向反了过来。
+`cognitive-profile-panel.test.ts:110` 那一条**没有放松**：画像那一屏仍然不许出现 `emotionEnabled`
+（`:113` 的反向断言原样留着），改的只是理由——从「它没有读者」换成「它的控件住在记忆策略那一屏，同一件事不许有两个入口」。
+这条区分要紧：一个开关有两个入口时，两边会各自漂移，而界面说的话就不再可信。
+
+### 六、变异探针（七条，逐条当场字面回滚，不用 `git checkout` / `git stash`）
+
+| 探针 | 变异 | 实测 |
+|---|---|---|
+| P1 | `memory-extractor.ts:106` 去掉 `emotionEnabled &&` 前置 | emotion-gate **2 红 / 13 绿**：「不传开关时一条都不抽」+「一句话同时像偏好和情绪时先当情绪处理」；回滚后 15 绿 |
+| P2 | `memory-module.ts:145` 的 `dropEmotion` 去掉 `input.emotionEnabled === false \|\|` | **2 红 / 13 绿**：「false：情绪行不进排序、不占名额」+「闸门丢的只有情绪行」；回滚后 15 绿 |
+| P3 | `memory-module.ts:217` 改回 `extractMemoryCandidates(turn.content, {})` | memory-module **2 红 / 69 绿**：「闸门打开、而且那个情境勾了情绪这一类，才落库」+「不越权改写其它类型」；回滚后 2 文件 86 绿 |
+| P4 | `manager.ts:91` 不再把 `emotionEnabled` 递进 turn | **1 红 / 70 绿**：「走引擎的读侧：闸门关着时…不端给模型，也不进引用清单」；回滚后 6 文件 140 绿 |
+| P5 | `memory-module.ts:93` 的转发改成 `emotionEnabled: undefined` | 2 文件 **1 红 / 85 绿**（同一条引擎读侧用例）；回滚后 86 绿 |
+| P6 | `classifySentence` 里把 `RULES` 循环挪到情绪判断之前（优先级倒置） | 2 文件 **1 红 / 85 绿**：「一句话同时像偏好和情绪时先当情绪处理」；回滚 |
+| P7 | 面板复选框 `disabled={emotionModuleBusy}`（去掉 `=== null` 守卫） | emotion-gate **1 红 / 14 绿**：「读不到状态时不替用户猜」；回滚后全量绿 |
+
+**P4 与 P5 命中的是同一条用例**——两处代码（引擎递参、模块转发）都在「读侧闸门在引擎路径上真的生效」这一个断言面下。
+这不是缺陷（红就是红），但它意味着**这两处里任意一处单独坏掉，只有那一条用例知道**；写在这里是为了下次别把它当成两道网。
+
+### 七、门禁
+
+`npx tsc --noEmit` 干净；`npx vitest run tests/unit` **115 个文件 / 1909 条用例**全绿
+（片T-3 收尾时是 114 / 1887；本片 +1 个测试文件、+22 条用例 = 15 条新文件 + 7 条接在既有文件尾部）。
+
+### 八、行号复核（本片覆盖四类被引用文件）
+
+片U 把 `memory-module.ts` 从 365 行推到 377、`manager.ts` 190→200、`memory-extractor.ts` 80→129、
+`memory-policy-panel.tsx` 535→596。全文按 `git diff -U0` 算出的偏移表逐条机械改号并逐条读回原文验证，
+共 **66 处引用、64 处需要动**（另 2 处是文档行 392-393 上的裸 `:NNN` 续句，不在 `file.ts:NNN` 形状里，第一次脚本漏过，已单独补正）。
+四个文件的偏移分段（旧号 → 新号）：
+
+| 文件 | 旧号区间 → 位移 |
+|---|---|
+| `memory-module.ts` | `≤92` → 0；`93-204` → +9；`205-206` → +13；`208-365` → +12 |
+| `manager.ts` | `≤27` → 0；`28-83` → +5；`≥84` → +10 |
+| `memory-extractor.ts` | `≤9` → 0；`10-45` → +5；`46-57` → +43；`58-80` → +49 |
+| `memory-policy-panel.tsx` | 控件那批 `245-493` → +32；`500-529` → +62 |
+
+顺带修掉的三处**内容**过期（不是行号）：门槛 9 的状态行与那段「第八个开关全仓无人读取」、
+第 8.2/8.3 节里「`emotionEnabled` 至今没有消费者所以不摆控件」那句、片T-3 边界四那句「片U 仍然欠一个读者」。
+文档 396-401 那三处控件行号（`:392` / `:407` / `:422`）也重指过一次——片U 在同一屏插了情绪总闸那张卡，三处整体下移 32 行。
+
+### 九、这一片的边界（含无法验收项）
+
+一、**真 JSX 渲染仍然无法验收**。和前面每一片一样，界面那四条走的是 `readFileSync` + 字符串断言：
+能证明复选框的 `checked` / `disabled` / `onChange` 表达式长成那样、那句文案在源码里，
+**不能证明它在浏览器里画出来、点下去真发了一次 PATCH**。`无法验收`。
+（对照：片g 那次是手起服务真点过的四条路径，与这种静态断言分开算。）
+
+二、**「打开开关之后真的会记住情绪句」这一条在他真库里没有事件发生过**。默认关 + 库里 0 情绪行，
+所以端到端只有替身层证据（`vi.mock('@/lib/prisma')` 那套内存 Map）。开关打开后的第一条真情绪行落在哪一刻、
+`validFrom` 与 `context` 在真 SQL 下长什么样，仍然是**没量过**，不是量过且没问题。
+
+三、**`EMOTION_MARKERS` 是一张词法表**。它判的是「这句话里有第一人称 + 有这些词」，不是「用户有情绪」。
+词表覆盖不到的说法（反讽、省略主语、「算了」这类）不产候选——**漏抽是这片接受的形状**，
+因为宁缺勿造比让它给用户的情绪命名更符合总原则。词表本身在 `:62`，逐词可查。
+
+四、**P4 / P5 共用一条用例**（见第六节末）。两处代码站点，一张网。
+
+五、**#225 到此关闭**。八个用户级开关全都有运行时读者，也全都有服务端执行的闸门；
+门槛 9 那句「关了就真的不读不写」到这片才算逐键成立。
+它旁边那条老缺口——`associationEnabled` 在对话内的注册表闸门盖不到**后台向量补算**——**依旧开着**，
+那片动的是模块开关表，不是这一列，别把两件事记成一件。
+
 
 
 

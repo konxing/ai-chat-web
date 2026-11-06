@@ -25,6 +25,11 @@ export interface CognitiveTurn {
    * 缺席就是 `implicit`：直接调模块的调用方（评测 Harness、后台写侧）拿到的都是今天的形状。
    */
   emotionTransparency?: EmotionTransparency;
+  /**
+   * 情绪总开关（片U）。同样由引擎在这一行偏好刚读过之后填上，模块不为同一个值各查一遍库。
+   * 缺席按「关」处理：情绪类内容默认只活在当前会话，直接调模块的调用方不该抽出一类它没打算处理的候选。
+   */
+  emotionEnabled?: boolean;
 }
 
 /** 模块产出的一段可注入提示词的文本。label 是给前端分组用的中文名。 */
@@ -78,9 +83,13 @@ export async function runCognitiveReads(turn: CognitiveTurn): Promise<CognitiveR
   const preferences = await readPreferences(turn.userId);
   if (!preferences) return { blocks: [], failed: [] };
   const enabled = [...registry.values()].filter((module) => preferences[MODULE_SWITCH[module.key]] === true);
-  // 那一行偏好刚读过一次，档位就在这里顺手交给模块：每轮对话都走这条路，
+  // 那一行偏好刚读过一次，情绪相关的两档就在这里顺手交给模块：每轮对话都走这条路，
   // 让每个模块为同一个值各查一遍库只会把关键路径变长，读到的还是同一个数。
-  const scoped: CognitiveTurn = { ...turn, emotionTransparency: preferences.emotionTransparency };
+  const scoped: CognitiveTurn = {
+    ...turn,
+    emotionTransparency: preferences.emotionTransparency,
+    emotionEnabled: preferences.emotionEnabled
+  };
   const blocks: CognitiveBlock[] = [];
   const failed: CognitiveModuleKey[] = [];
   for (const outcome of await settleAll(enabled, (module) => module.read(scoped), COGNITIVE_MODULE_DEADLINE_MS)) {

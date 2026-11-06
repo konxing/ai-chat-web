@@ -17,7 +17,8 @@ import {
  * 这里验的是能验的两件事：
  * 一、**批准的文案逐字钉住**，尤其是那两条候选标注——它们必须和服务端派生层用的是同一个常量，
  *    因为「系统推断」和「你亲口说的」在界面上长得一模一样，是这套设计最不能出错的地方。
- * 二、**不许出现没有消费者的交互**：`emotionEnabled` 至今没有运行时读它，界面上就不许摆这个开关；
+ * 二、**不许出现没有消费者的交互**：画像这一屏不摆 `emotionEnabled`，它的读者和控件都在「记忆策略」那一屏
+ *    （片U），同一件事不许有两个入口；
  *    画像条目的来源是「确认那一刻的依据」，所以改正文那扇门不许带来源编辑控件。
  */
 const read = (relative: string) => readFileSync(path.resolve(process.cwd(), relative), 'utf8');
@@ -106,9 +107,11 @@ describe('批准的文案逐字钉住', () => {
 });
 
 describe('不许有没人消费的交互', () => {
-  it('emotionEnabled 至今没有运行时消费者，界面上不摆这个开关', () => {
+  it('情绪总开关有读者了才摆控件：这一屏仍然不摆它', () => {
+    // 这一屏的禁令不变——它的读者在抽取层和记忆模块，控件住在「记忆策略」那一屏（片U），
+    // 画像这一屏不许出现第二个入口。
     expect(PANEL_CODE).not.toContain('emotionEnabled');
-    expect(POLICY_PANEL_CODE).not.toContain('emotionEnabled');
+    expect(POLICY_PANEL_CODE).toContain('emotionEnabled');
   });
 
   it('能用的情绪控件只有三档 transparency：它真的被渲染侧读（片 d-4）', () => {

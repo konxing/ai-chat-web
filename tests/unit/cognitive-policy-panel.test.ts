@@ -34,10 +34,12 @@ describe('记忆策略一屏：不许说过期的话', () => {
     expect(PANEL).toContain('不放开联想，它就不和别的记忆连关联线');
   });
 
-  it('仍然没有消费者的只剩情绪总开关，这一句要留着', () => {
-    expect(PANEL).toContain('情绪总开关');
-    // 界面不许摆一个没人读的旋钮：这条禁令由代码里不出现那个字段名来守（同片 d 的 P12）。
-    expect(PANEL).not.toContain('emotionEnabled');
+  it('情绪总开关有了读者，这一屏才摆它的控件', () => {
+    // 片U 之前这一屏的尾段写着「情绪总开关至今没有运行时消费者，所以不给它控件」——那句话本身没错，
+    // 错的是它留到今天会变成假话。控件和读者是同一片落地的，这里两头都钉住。
+    expect(PANEL).toContain('使用情绪类记忆');
+    expect(PANEL).toContain('preferences.emotionEnabled');
+    expect(PANEL).not.toContain('情绪总开关至今没有运行时消费者');
   });
 });
 
