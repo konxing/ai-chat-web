@@ -517,7 +517,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 **validTo 一律不给**。「去年在学吉他」的去年只是起点，这段说法什么时候失效我们并不知道，
 填一个年末等于替用户宣布「今年就不学了」。开区间由 `validTo === null` 表达。
 
-**精度对齐不是风格问题，是硬闸门**：`src/lib/cognitive/memories.ts:226-233` 会拒掉
+**精度对齐不是风格问题，是硬闸门**：`src/lib/cognitive/memories.ts:253-261` 会拒掉
 `day` 带时分秒、`month` 不是 1 日、`year` 不是 1 月 1 日的写入（报「有效时间不许写成更精确的日期」）。
 所以解析器全部用 `Date.UTC(...)` 和 UTC 日界向下取整产出时刻，测试里复刻了同一道校验（`expectAlignedToPrecision`）。
 两边各守一半：解析器证明「给出的时刻与精度对齐」，`cognitive-memories.test.ts:276` 证明「服务端真的拒不对齐的」——
@@ -553,7 +553,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    `prisma/migrations/20261030172159_email_change_tokens/migration.sql:2` 只有一条
    `ALTER TYPE "EmailTokenPurpose" ADD VALUE 'EMAIL_CHANGE'`，PG17 允许，Prisma 不重建类型。
    真正的成本是两处**语义决定**：
-   - `src/lib/cognitive/memories.ts:226-233` 那道 `validateMoment` 要加 `week` 分支，就得先定「周从周一算还是周日算」——这个约定是我们替用户定的；
+   - `src/lib/cognitive/memories.ts:253-261` 那道 `validateMoment` 要加 `week` 分支，就得先定「周从周一算还是周日算」——这个约定是我们替用户定的；
    - `src/lib/cognitive/memory-display.ts:231-240` 的 `formatDate` 要能回显「周」。ISO 周号（`2026年第44周`）几乎不可读，
      要显示成「11月2日那一周」就得把跨度算出来。两处都不是加一个 `if` 了事的。
 
@@ -565,7 +565,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 
 2. **循环事件（`frequency` 那一类新字段）——不做，而且这一片现有的形状就是对的。**
    - 「每周三打球」不是一件有起止区间的事。加 recurrence 等于把双时间模型换成两套时间语义，
-     而**区间那一半在生产里从来没被写过**：`validTo` 有四个读取点（`memories.ts:336` 的 asOf 过滤、
+     而**区间那一半在生产里从来没被写过**：`validTo` 有四个读取点（`memories.ts:373-376` 的 asOf 过滤、
      `confidence.ts:72` 的 expired 因子、`memory-display.ts:243` 的区间回显、`timeline.ts:119` 的透传），
      但三个写入调用点（`memory-module.ts:204`、`memory-module.ts:209`、
      `src/app/api/account/cognitive/memories/[id]/route.ts:50`）**没有一个传它**，`src/app` 下 `validTo` 零命中
@@ -595,7 +595,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 | 原话重说（归一化同句，走 `recordRestatement` 那条分支） | 0 |
 
 **一句话结论：这套相似度在这份语料上一次也没触发过。** UPDATE 分支（`memory-module.ts:173` 查旧行 →
-`memories.ts:371` 给旧行盖 `supersededAt`）在这份语料上是死路——不是擦边没过 0.8，是最高值只有 0.34。
+`memories.ts:411` 给旧行盖 `supersededAt`）在这份语料上是死路——不是擦边没过 0.8，是最高值只有 0.34。
 
 **为什么那 30 条 `category: 'update'` 的探针看着像已经覆盖了**：`scripts/cognitive-eval/metrics.ts:38` 自己标的是
 `update: 'mirror'`，而 `:34` 那段注释写明 mirror 的含义——「靠 harness 里那份 `visibleAt` 复刻守住，真实来源是
@@ -674,7 +674,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 - **为什么必须改**：只删当前那一行会留下带 `supersededAt` 的旧行，而时间线的折叠口径在找不到后继时
   **会把孤立的旧行单独成一个事件**（`src/lib/cognitive/timeline.ts:96-101`，由 `tests/unit/cognitive-timeline.test.ts:168` 守着）——
   用户刚删掉的内容换个旧说法回到他眼前，正撞 4.4 的「删除事件及其派生记录」。
-  而且旧行一旦孤立就没有别的入口：「记忆」那一屏列的是当前有效行（`memories.ts:331` 的 `supersededAt: null` 过滤），
+  而且旧行一旦孤立就没有别的入口：「记忆」那一屏列的是当前有效行（`memories.ts:370` 的 `supersededAt: null` 过滤），
   版本链要从头一行点进去走，头一行没了链就走不到。
 - **实现**：`src/lib/cognitive/forgetting.ts:178` 的 `eventChainIds` 沿 `MemoryRevision.previousId` 从被点那一行往回走
   （`where` 带 `userId`、`orderBy: { createdAt: 'asc' }`、`seen` 集合挡成环），`purgeMemory`（`:113`）把整条 id 列表
@@ -1166,7 +1166,7 @@ P5 和 P7 落的是同一条规律，也不是他自己选的三条判词里的�
 EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式永久删除。四条到这片才算齐。
 
 为什么不能拿既有动作冒充归档，三条都是硬的：
-一、**撤回不是归档**。`retractMemory`（`src/lib/cognitive/memories.ts:430`）覆写的是 `origin=RETRACTED`，
+一、**撤回不是归档**。`retractMemory`（`src/lib/cognitive/memories.ts:461`）覆写的是 `origin=RETRACTED`，
 被覆掉的原值（explicit / inferred / hypothesis）没有任何路径换回来，界面上也没有恢复入口——它是单向的。借它表达「收起」，
 「仍可在允许范围内恢复」就只是句漂亮话。二、**EXPIRE 不是逐条动作**，它按情境（`MemoryContext`）整块算窗口，
 用户没法只收起一句话。三、**`validTo` 不是保留期**，它回答的是「这件事到什么时候不再成立」，不是「这条记录还留不留」。
@@ -1186,8 +1186,8 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 |---|---|---|
 | 数据列 | `prisma/schema.prisma:529-532` | `MemoryItem` 多一个可空 `archivedAt`，注释写明为什么不走 `origin` |
 | 迁移 | `prisma/migrations/20261105000000_memory_archive/migration.sql` | 一条 `ALTER TABLE ... ADD COLUMN`。**只加列不加索引**：读侧永远先按 `userId` 筛，现有的 `(userId, supersededAt)` 前导列已覆盖，且列表本身有 200 行硬上限。**这一支已于 11-05 由他执行**（`npx prisma migrate status` 报 15 支 up to date），见下面边界第一条 |
-| 服务 | `src/lib/cognitive/memories.ts:464`（归档）/ `:473`（恢复） | 各一条 `updateMany`，条件里带 `userId`；除此之外一个字节都不写 |
-| 读侧默认口径 | `src/lib/cognitive/memories.ts:335`（`archivedAt: null`）+ `:337`（`archivedOnly` 反过来） | 对话注入、记忆管理、时间线、写侧去重池**共用这一个漏斗**，所以一处改完四处都收 |
+| 服务 | `src/lib/cognitive/memories.ts:495`（归档）/ `:504`（恢复） | 各一条 `updateMany`，条件里带 `userId`；除此之外一个字节都不写 |
+| 读侧默认口径 | `src/lib/cognitive/memories.ts:366`（`archivedAt: null`）+ `:368`（`archivedOnly` 反过来） | 对话注入、记忆管理、时间线、写侧去重池**共用这一个漏斗**，所以一处改完四处都收 |
 | 读侧漏在漏斗外的第五处 | `src/lib/cognitive/reflection-sweep.ts:381-382` | 反思池自己 `findMany`，不读 `listMemories`——得自己带上同一口径，否则用户收起来了，洞察还在正文里复述它 |
 | API | `.../memories/[id]/archive/route.ts`、`.../restore/route.ts`（两个新文件） | POST：鉴权 → 分桶限流（各 60 次/小时）→ 服务函数 → 0 行即 404 → 审计只带 id。**不要求理由** |
 | GET | `.../memories/route.ts:47-49,63-64` | 同一份响应多带一个 `archived`（`archivedOnly: true`，与当前那一份**并行**发出），不喂 chats、不参与置信度；两份列表各带自己的截断标志 `capped` / `archivedCapped` |
@@ -1328,7 +1328,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 检查 | 今天有没有 | 这一片 |
 |---|---|---|
 | 新的支持信息 | 有：`recordRestatement` 会补一条 SUPPORTS（`memory-module.ts:274-288`），证据行带 `createdAt` | **做**：`createdAt > recordedAt` 才算新的 |
-| 新的反例 | **行**有（`reviseMemory` 写 CONTRADICTS，`memories.ts:424`），**发现**没有 | **只报库里已有的行**。词法反例发现不接进来，见 `docs/cognitive-acceptance.md:537-570` 那次实测 36 条候选 0 条真是反例 |
+| 新的反例 | **行**有（`reviseMemory` 写 CONTRADICTS，`memories.ts:455`），**发现**没有 | **只报库里已有的行**。词法反例发现不接进来，见 `docs/cognitive-acceptance.md:537-570` 那次实测 36 条候选 0 条真是反例 |
 | 已经过时 | 全有，读侧：`validTo` / `supersededAt` | **做**，且与 `confidence.ts:72` 用同一个 `<=`，不留两处口径 |
 | 需要更新摘要 | **「记忆摘要」这个东西不存在**：`MemoryItem` 没有摘要列 | **不做**。不发明一个没有库存的对象来凑一项 |
 | 需要修改关联关系 | **没有可写的关系表**（2a 那次校准的结论，`cognitive-relations-calibration.test.ts:7-29`），派生图是只读的 | **不做**。检查将来能从只读派生邻居回答，动作没有可写的地方 |
@@ -1475,7 +1475,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 |---|---|---|
 | 派生纯函数 | `src/lib/cognitive/memory-graph.ts:77`（`deriveMemoryGraph`） | 输入三份已经在库里的行，输出节点/边/分组/预算。**不碰 prisma、不解密**。节点先按 `recordedAt→id` 定序再截最近 120 条（`:79`）；三种边按「演化 → 同场 → 共引用」的优先级生成，同一条 `push`（`:85-91`）做双向去重 |
 | 引用行的定序 | `memory-graph.ts:108` | 读回来的那批是「最近 200 条、时间倒序」，**那个次序不是这里的输入契约**。派生层自己按 `(reflectionId, memoryId)` 排一次，否则上限一截、边的先后跟着晃（这条是 P2 探针实测的，见下面） |
-| 第四批关系的读 | `memories.ts:540`（`listCitationEdges`） | `where: { userId, memoryId: { not: null } }`、`take: 200`、只 `select` 两列。放在 `memories.ts` 而不是 `reflections.ts`：`cognitive-reflection-states.test.ts` 那条导入禁令不许别的模块 `import` 洞察服务，而「记忆之间的关系」本来也是记忆这一侧的事 |
+| 第四批关系的读 | `memories.ts:571`（`listCitationEdges`） | `where: { userId, memoryId: { not: null } }`、`take: 200`、只 `select` 两列。放在 `memories.ts` 而不是 `reflections.ts`：`cognitive-reflection-states.test.ts` 那条导入禁令不许别的模块 `import` 洞察服务，而「记忆之间的关系」本来也是记忆这一侧的事 |
 | 浏览器侧的词表 | `memory-graph-display.ts` | 只有 `import type`，零运行时依赖。线的三种说法、点的七种颜色、`isGraphDrawable`、`describeNotAGraph`、`describeGraphBudget`、`truncateNodeLabel` 全在这一个文件，界面不许自己编句子 |
 | 只读 API | `src/app/api/account/cognitive/graph/route.ts:27` | 三个读并发（`Promise.all`），派生，会话标题走旁表、空图时一次都不发（`:45`）。返回体只有图 + `chats`，没有正文之外的列 |
 | 界面 | `src/components/settings/memory-graph-panel.tsx:62` | 手写 SVG 圆周布局（`CANVAS = 360`，`:44`），不引任何图布局库。被取代的旧说法仍画出来（它就是那条边的另一端），但降透明度 + 虚线描边 + 「已被新说法取代」标记 |
@@ -1621,7 +1621,7 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 | 用户模块配置 | 存在 | `manager.ts:78` 每轮读一次偏好行，`:80` 按 `=== true` 筛站点；偏好缺失时 `:79` 直接返回空 |
 | Memory Retrieval | 存在 | `memory-module.ts:88-108` 取池 → 排序 → 算置信度 → 渲染。排序在 `retrieval.ts:75`（关键词）/ `:161`（余弦）/ `:209`（RRF 混合） |
 | Graph Association | **不存在**（作为站点） | 图是**只读派生视图**：`account/cognitive/graph/route.ts:31-34` 两道闸 + `memory-graph.ts` 从记忆行现算。读管线里没有这个键的模块 |
-| Temporal Filtering | 存在，但只两处 | 读侧有效期过滤 `memories.ts:342-345`（`validTo ≥ asOf` 且 `validFrom ≤ asOf`）；写侧时间框架 `temporal.ts:45`。**检索排序不看时间**，只有 `recordedAt desc` 的取行次序（`memories.ts:350`） |
+| Temporal Filtering | 行侧在跑，问侧没料 | 读侧有效期过滤 `memories.ts:373-376`（`validTo ≥ asOf` 且 `validFrom ≤ asOf`）；写侧时间框架 `temporal.ts:45`。**检索排序不看时间**，只有 `recordedAt desc` 的取行次序（`memories.ts:381`）。问侧那一半在片T-2 量过：116 个提问只有 1 个解析得出框架、可见池 186 行的 `validFrom` 全为空，量不出收益所以不接线 |
 | User Modeling | 存在（片 d 起） | `user-model-module.ts:48` 读已确认画像条目、`:53` 挂键、`memory-module.ts:354` 注册。开关 `userModelEnabled` 第一次有了真消费者 |
 | Emotion Analysis | **不存在** | 没有任何「分析情绪」的代码：`emotion` 键在 `manager.ts:59` 的开关表里，但**没有模块注册它**。存在的只有呈现档位 `memory-module.ts:149`（`off` 丢行）/`:204`（`explicit` 报条数），它不给用户的情绪命名 |
 | Response Policy | **不存在** | 全仓库无 `responsePolicy` / 回复策略。`MemoryPolicy` 是**写侧**策略（决定记不记），不改回复的一个字 |
@@ -3958,6 +3958,148 @@ salience 掉的那点召回离 A2 还远，聚合下限抓不住它。真正拦�
 `ReflectionRecord.importance`（`schema.prisma:847`），由规则层给的候选标签；记忆行至今没有这一列，
 `MemoryItem` 整块（`schema.prisma:541-585`）里 `importance` / `salience` / `priority` 三个词一个都不出现，本片也没加。
 如果将来要加，它进的是片W 的四臂对照，不是这里的兜底重排。
+
+## 片T-2：读侧 Temporal Filtering 量过了——问侧 1 条、答侧 0 行，这一项量不出来（11-06）
+
+任务书 3.4 六项召回能力里的第四项。流程和片T-1 一样（先实测，再决定接不接线），但**结论的性质不一样，这两件事必须分开写**：
+T-1 是「测出来了，是零收益」，T-2 是「这台仪器在这副语料上没有可测的对象」。
+后一个人如果只看到「不接线」三个字，会以为时间过滤已经被证明没用——它只是从来没被称过。
+
+### 一、判据：先问有没有可测的对象，再问有没有收益
+
+三条，缺一不可：
+
+1. **问侧**要真能解析出时间框架（116 个提问跑 `resolveTemporalFrame`）；
+2. **答侧**要真有时间坐标可丢（186 行可见池里 `validFrom` 非空的行数）；
+3. 过滤要**真开火过**——否则「过滤臂 == 现状臂」这句话可以只是「过滤压根没跑」。
+
+只有前两条都成立，才轮得到「收益」这个问题。实测是前两条都不成立。
+
+### 二、问侧：116 个提问里只有 1 个解析得出框架
+
+| 量 | 数 |
+|---|---|
+| 提问总数 | 116 |
+| 解析出框架 | **1**（`s12-p3`「这个月的存款进度我在跟吗」→ `month` / `2026-11-01T00:00:00.000Z`） |
+| 一张刻意放宽的时间字样表捞出、但解析不出的 | 4 |
+
+那 4 条逐条看过（宽表 `WIDE_TIME_RE` 故意把「点」「之前」都算进去，宁可多捞再逐条排除，也不漏一条却说「问侧没料」）：
+
+| 提问 | 判 |
+|---|---|
+| `s10-p2`「日语角是星期几」 | 在**问**时间，不是按时间限定；拿「星期」去圈窗口等于替用户猜哪天 |
+| `s16-p4`「远程那天我几点在线」 | 同上，一个问「那天」的几点 |
+| `s7-p4`「睡眠的事我之前提过吗」 | 「之前」是一个没有边界的副词；解析不出来正是 `temporal.ts` 第一条形状（拿不准就 `null`）的正确行为 |
+| `s26-p1`「我的情绪触发点是什么」 | 一个时间字样都没有——宽表误报了「点」字。**这是仪器的假阳性，不是语料的漏项**，记在这里免得被读成「还有 4 条没接住」 |
+
+### 三、答侧：可见池里一个坐标都没有
+
+全部 231 行 fixture 只有 3 行写了 `validFromDay`：`s4-m6` +20、`s14-m7` +3、`s21-m5` +40 天。三条全是「下个月开始」「下周一跟主管提」这类**还没开始的计划**；
+而 harness 的可见性镜像（`harness.ts:42`）正好把还没生效的行挡在池子外，于是此刻可见的 186 行里 `validFrom` 非空的有 **0 行**，`precision` 全是 `unknown`。
+
+这两个 0 的来源不同，分开记：`validFrom` 那个 0 是**被上游过滤掉的**（那三行确实有坐标，只是还没生效）；
+`precision` 那个 `unknown` 是**镜像压根没算**——`harness.ts:56` 把这个字段写死成 `'unknown'`，fixture 行没走过写侧解析，就没有精度可言。
+
+### 四、两侧合起来的后果：一个诚实的过滤器在这里只能得到「一行都没丢」
+
+`inWindow` 只在「行自己有坐标、且坐标明确落在窗口外」时才丢；说不出这条从哪天开始，就留着他。
+这个 fail-open 是有意的：丢行不可逆，用户问「去年」而系统把一个没写日期的正确答案划掉，界面上什么都不会说。
+
+于是三个数写死在测试里：`FILTER_APPLIED = 1`、`DROPPED_TOTAL = 0`、过滤臂与现状臂**逐键相同**
+（`0.7274 / 0.097 / 0.5828 / 违禁 0 / 零命中 21`，与片T-1 钉住的那份基准一字不差）。
+
+**这个相等是结构保证的，不是经验发现，它不构成「时间过滤没坏处」的证据。**
+
+接线判据：不接。任务书那句「必须以实测效果确定权重」在这一项上读作——要的是一个能算出效果的东西，这里算不出。
+给这副语料接一个恒不生效的过滤器，比不接更像是骗人。
+
+### 五、行侧那一半早就在跑，本片不许实现第二遍
+
+「这条记忆此刻还算不算数」由 `listMemories` 的 SQL 用 `asOf` 两道条件判（`memories.ts:373-376`，本片最后一条用例用 `readFileSync` 把它钉在源码上）。
+3.4 这一项剩下的只有**问侧**那一半。
+
+`s21-p1` 是最好的物证，也是答侧缺口最清楚的illustration：旧日期 `s21-m3`（`validToDay: -3`，报名已取消）进不了池子，
+标准答案 `s21-m4`「改到明年三月」能——**而后者能被看见，恰恰是因为它没有 `validFrom`**：「明年三月」这句话从未被写成坐标。
+行侧过滤救得了「已失效」，救不了「还没开始」。
+
+### 六、用例与探针（本片净增 1 个文件 / 7 条）
+
+| 用例 | 钉住什么 |
+|---|---|
+| 问侧只有 1 个 | 116 条提问、解析集合恰好 `['s12-p3']`、那个框架是 `month` / `2026-11-01` |
+| 宽表 4 条的逐条归类 | id 恰好四条；其中按「星期 / 那[天时]」命中恰好 `['s10-p2','s16-p4']`；`s7-p4` 解析为 `null`；`s26-p1` 是宽表自己误报 |
+| 答侧 0 坐标 | 带 `validFromDay` 的行恰好三行且全在未来；三行都不在池子里；186 行、`validFrom` 非空 0 行、`precision` 只有 `unknown` |
+| 两臂逐键相同 | `FILTER_APPLIED` 是 1、`DROPPED_TOTAL` 是 0、过滤臂 summary 等于现状 summary 且等于那份钉住的基准 |
+| 这台仪器有牙 | 年 / 月 / 日三种精度各切四个时刻，`[false, true, true, false]`——左闭右开 |
+| 拿不准就不丢 | `validFrom` 为 `null` 留着；`precision` 为 `unknown` 的 2019 年那行照样留着；`POOL.every(inWindow)` 为真 |
+| 行侧不重复实现 | `memories.ts` 源码里那两道 `asOf` 条件逐字存在 |
+
+| 探针 | 改动 | 红了谁（实测） |
+|---|---|---|
+| P1 | 把 fail-open 改成 fail-close（`inWindow` 的 `unknown` / `null` 分支 `return false`） | **2 条**：「两臂相同」变成 `expected 166 to be +0`——那个唯一提问的整个候选池 166 行被划掉；「拿不准就不丢」`expected false to be true` |
+| P2 | 年精度窗口塌成零宽（`Date.UTC(year + 1, 0, 1)` → `Date.UTC(year, 0, 1)`） | **1 条**：只有「这台仪器有牙」红（`expected [ false, false, false, false ]`），其余 6 条全绿 |
+| P3 | 日精度窗口放宽到整月（`Date.UTC(year, month, day + 1)` → `Date.UTC(year, month + 1, 1)`） | **1 条**：`expected [ false, true, true, true ] to deeply equal [ false, true, true, false ]` |
+| P4 | 把过滤整段跳过（`frame` 恒为 `null`，`applied` 记 `false`） | 第一次跑 **0 条红**（本片自己的洞，见下）；补上 `FILTER_APPLIED` 这条断言后 **1 条**：`expected +0 to be 1` |
+
+四支探针全部当场按字面回滚，没有用过 `git checkout` / `git stash`。
+
+两处教训记在这里，它们比数字有用：
+
+一、**P2 是本片最有用的一条**。窗口算错了，六个聚合断言一个都没反应——因为**没有任何提问解析得出年框架**，那条分支在生产路径上根本走不到。
+片T-1 也见过同一个形状（聚合下限抓不住排序改动），那一次的成因是「换人不换分数」，这一次更直接：**被测的分支没有流量**。
+所以「两臂相同」这类比对必须配一条「过滤真的跑过」的计数，否则它什么都不能证明——这正是 `FILTER_APPLIED` 存在的全部理由。
+
+二、**P4 测出的是我自己那个洞**。先写的那一版把过滤整段跳过，7 条照样全绿；是这一条让我回去给每个臂加上 `applied` 键、
+并把 `expect(FILTER_APPLIED).toBe(1)` 放在两臂比对**之前**。「先红后绿」在这里也一样适用于测试本身：这条断言自己是先红过的。
+
+### 七、门禁
+
+`npx tsc --noEmit` 无输出；全量单测 `113 files / 1875 tests` 全绿（片T-1 收尾时 `112 / 1868`，本片 +1 文件 / +7 条）。
+`tsc` 中途抓到一处本片自己的错：P4 的修法给 `filteredSelect` 的返回值加了 `applied` 键，而函数签名那行还写着旧的字面量类型，
+报了 3 处（TS2353 × 2、TS2339 × 1）；补进签名后清。测试跑绿不等于类型对——这两道门各有各的作用，这一次各挡住了一样东西。
+`src/` 与 `scripts/` 无改动，所以 `report.md` / `summary.json` 两份基线一个字节都没重生成。
+
+### 八、行号复核（本片一次，覆盖 `memories.ts` 的全部引用）
+
+`memories.ts` 现在 618 行。全文指进这个文件的引用重跑了一遍对账，**10 处过期，全部按实测更正**：
+
+| 旧 | 新 | 那处在说什么 |
+|---|---|---|
+| `:226-233`（两处） | `:253-261` | `validateMoment` 那道精度硬闸门 |
+| `:336` | `:373-376` | `validTo` 区间那一半在生产里从没被写过 |
+| `:371` | `:411` | `reviseMemory` 给旧行盖 `supersededAt` |
+| `:331` | `:370` | 「记忆」那一屏的 `supersededAt: null` 过滤 |
+| `:335` / `:337` | `:366` / `:368` | `archivedAt: null` 与 `archivedOnly` 反过来 |
+| `:342-345` | `:373-376` | 3.4 六项对照表里 Temporal Filtering 那一行 |
+| `:350` | `:381` | 取行次序 `recordedAt desc` |
+| `:424` | `:455` | `reviseMemory` 写 CONTRADICTS 证据 |
+| `:430` | `:461` | `retractMemory` |
+| `:464` / `:473` | `:495` / `:504` | 归档 / 恢复两条服务 |
+| `:540` | `:571` | `listCitationEdges` |
+
+同一次顺手更新了那张 3.4 对照表里 Temporal Filtering 那一行——它的状态从「存在，但只两处」改成「行侧在跑，问侧没料」，并指向本片。
+`temporal.ts:45`（`resolveTemporalFrame`）与 `temporal.ts` 全文 87 行复核后**没有漂移**，本片也没改它。
+
+漂移的来源说清楚：本片没动 `memories.ts`。行数是在片M（`MemoryCandidate` 服务）和片S（AAD 参数）里长起来的，
+那两片各自复核了自己直接引用的文件，没有回头对账 `memories.ts`。行号错了的验收文档等于没有验收文档，这一类漂移以后每片都要扫一遍被引用的文件，
+而不只是被改动的文件。
+
+### 九、这一片的边界（含无法验收项）
+
+一、**真实提问侧同样是「量不出来」，不是「量过没用」**。真库 `MemoryItem` 至今 2 行、两行 `validPrecision` 全是 `UNKNOWN`
+（11-04 实测、11-06 只读 `count` 复核，见「真库实况」那两张表），他没有在问题里说过时间——这句话**没有证据**，只有 2 行样本。
+这一项要等他真用过才算量得动，本片不替这 2 行编结论。
+
+二、**接线之前还缺一个前置裁决：窗口套在哪一列**。行侧用 `validFrom` 判生效；而用户说「去年在学吉他」时，
+他要的是**那段时间里说过／做过的事**，那更可能该压 `recordedAt`。这两个列给同一个窗口套上去，结果不一样。
+这是一个设计决定，不属于一片测量，留给真要接线的片——**在那之前把过滤器装上，等于替他把这个决定做了。**
+
+三、**词表覆盖面本片不动**。「周三」「上半年」「国庆那周」都不在 `TOKEN_RE`（`temporal.ts:42-43`）里。
+加词属于写侧那一片（4-T2），而且答侧没有坐标时，加多少词表都只会让 `FILTER_APPLIED` 变大、`DROPPED_TOTAL` 仍是 0。
+
+四、**片W 的前置要求（交接，已写进 #227）**：扩语料时必须铺出**已生效**的时间坐标——过去的 `validFromDay`，配 `precision` 的取值，
+而不是只写未来的计划。现在的 3 行全在未来，被镜像全数挡掉，等于答侧永远为空。
+这一条不做，Temporal Filtering 在片W 的四臂对照里仍然是一个测不出来的项目，而不是一个测过没用的项目。
 
 
 
