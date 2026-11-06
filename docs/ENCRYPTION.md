@@ -28,6 +28,9 @@ AAD 绑定：
 - `provider-key:<providerId>`
 - `attachment-name:<attachmentId>`、`attachment-text:<attachmentId>`、`attachment-chunks:<attachmentId>`
 - 文件内容：`file:<attachmentId>`
+- 认知层：`<purpose>:v1:<userId>:<recordId>:<fieldName>`。`v1` 是 schemaVersion；
+  `fieldName` 让同一行里 A 列的密文搬到 B 列也解不开。记忆家族用列名，决策 / 反思 / 画像用
+  历史短名；两套口径与 25 个密文列的唯一出处是 `src/lib/cognitive/encrypted-columns.ts`。
 
 把一条记录的密文复制到另一条记录会导致 GCM 认证失败，而不是静默解密。
 
@@ -78,6 +81,9 @@ npm run rotate-keys -- --new-key-id k2
 脚本会：
 
 - 逐条重加密 Chat 标题、Message 正文、AiProvider Key、Attachment 名称/提取文本/分块；
+- 逐表逐行重加密认知层全部 **25 个密文列**（九个模型；24 个字符串 + 1 个 Bytes 向量）。
+  清单来自 `COGNITIVE_ENCRYPTED_COLUMNS`，脚本不手抄 AAD：新增密文列漏登记时，
+  单元测试的「schema ↔ 表逐列对照」会直接红；
 - 解密每个 `FAC1` 文件并用新 key 原子重写（同一目录临时文件 + rename）；
 - 跳过已在新 key 上的记录/文件；无法识别的文件格式会告警并跳过，不再中断整轮轮换；
 - **在改动任何数据之前**把新密钥写入 `ROTATE_KEY_DIR`（默认 `BACKUP_DIR/key-rotation`，文件已存在则拒绝覆盖）：轮换中途失败时，已改成新密钥的那部分数据仍然解得开；

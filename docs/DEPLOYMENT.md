@@ -297,3 +297,86 @@ curl -sS -o /dev/null -D - https://chat.example.com/login | grep -i -E 'content-
 gzip level 5/6 是 CPU 换带宽。静态 chunk 由 Nginx 压，应用进程几乎不承担；`/login`、`/chat` 这类 SSR HTML 每次响应都要压一遍，本机实测 74KB 文本 level 6 用 1.3ms。要量化前后差异，就比对同一 URL 的 `curl -w '%{size_download}'`（带/不带 `Accept-Encoding` 各一次）。
 
 `Content-Security-Policy` 之类的头不受影响；`X-Content-Type-Options` 等安全头由 `addSecurityHeaders` 在压缩包装之前设置，两层互不覆盖。
+
+## 15. 个人认知层运维
+
+认知层没有新增环境变量，也没有新增服务进程；它复用现有 App、现有 PostgreSQL 与
+现有备份链路。新增的只有：十五张表、一个进程内 worker、一个可选的 embedding 模型配置。
+
+### 默认状态
+
+八个用户级开关**默认全关**，库里没有 `CognitivePreference` 行时按 `OFF` 处理。
+关闭状态下：不召回记忆、不写记忆、不跑后台任务、对应 API 返回 409 `MODULE_DISABLED`。
+开启入口在设置页的「认知中心」与各分屏；每个开关都要用户自己点开，部署不会替任何人开。
+
+### 数据库迁移
+
+```bash
+npm run db:migrate      # 生产：prisma migrate deploy
+```
+
+认知层的迁移全部是**新增表/新增列**，没有改写既有聊天数据。没有自动 down migration：
+回滚方式是停应用、用升级前的备份恢复数据库，再切回旧版本代码。升级前请先 `npm run backup`。
+
+### 后台 worker
+
+`src/instrumentation.ts` 在 Node runtime 下启动它：进程内轮询（2 秒一次，`unref` 定时器），
+从 `CognitiveTask` 领取欠账，重建那一轮对话，跑写侧（记忆、事件、决策候选、
+反思扫描的触发）。要求与限制：
+
+- **单实例假设**：每个实例都会启动 worker。多副本不会重复执行（条件 UPDATE + fencing token），
+  但抢输的一方会白占一次 `attempts`；家庭单实例部署不需要额外配置。
+- worker 的异常全部被吞掉：`server.js` 直接 `await app.prepare()`，`register()` 抛错会让端口不监听，
+  所以它的失败只能从日志看（`cognitive.task_*`、`cognitive.read_failed`、`cognitive.write_failed`）。
+- 任务表只装欠着的活：成功与作废都删行；判死（`DEAD`）的行留下给「失败任务」屏与 `logs:prune`。
+
+### embedding（可选）
+
+向量臂不使用独立的 env 配置，而是复用一条具备 embeddings 能力的 `AiProvider`：
+在该 Provider 的 `params` 里填 `embeddingModel`，任务就会请求 `/embeddings`；
+不填则退回它的对话模型名。**没有任何可用 Provider 时不报错**：读侧自动降级为关键词检索，
+写侧只把「补向量」记为失败并退避。想彻底关掉向量，关掉 `associationEnabled` 即可
+（已知缺口：后台补向量不受这道闸门约束，见 SECURITY.md）。
+
+### 密钥轮换
+
+```bash
+npm run rotate-keys -- --new-key-id k2 --dry-run   # 先看数
+npm run rotate-keys -- --new-key-id k2             # 真正执行
+```
+
+脚本会重裹：聊天标题、消息、Provider Key、附件名/文本/分块、FAC1 文件，
+以及认知层全部 **25 个密文列**（由 `cognitive-encrypted-columns` 表驱动，逐行、逐列）。
+新密钥先落盘再动数据；旧密钥留在 `MASTER_KEYRING`。确认服务正常后再移除旧 key。
+**移除旧 key 之前，历史备份可能解不开；请先确认备份策略。**
+
+### 保留与清理
+
+| 对象 | 行为 |
+|---|---|
+| `CognitiveTask` | 成功/作废即删；`DEAD` 行由 `npm run logs:prune` 按保留期清 |
+| `ReflectionRecord` | 有 TTL；过期的由读侧标成 `EXPIRED`，不参与主展示 |
+| `MemoryCandidate` | 每个用户最多 200 条待确认，超出淘汰最旧的 PENDING |
+| 日志表 | 沿用现有 `logs:prune`，认知日志只含 id / 模块键 / 计数 |
+
+「清空全部长期记忆」只删记忆及其派生（版本链、证据、访问账本、候选、待执行任务），
+不会删除原会话；「删除会话」才走聊天删除并连带清理由它派生的记忆。
+用户画像条目**不随**「清空长期记忆」删除，只随账号消亡——这是设计约束，不是遗漏。
+
+### 排障
+
+| 症状 | 先查 |
+|---|---|
+| 聊完没有新记忆 | 开关是否为开；是否 `memoryWritePaused`；worker 是否在跑（查 `cognitive.task_*` 日志） |
+| 认知中心各块显示「未打开」 | 正常：这是门厅的默认状态，去对应分屏打开开关 |
+| 接口 409 `MODULE_DISABLED` | 对应模块关着；`message` 会说明去哪一屏打开 |
+| 记忆列表空但开关是开的 | 该用户还没被写入过；或全部被归档/过期（列表同时返回 `archived`） |
+| 召回质量差 | 是否配置了 embedding Provider；没有时走关键词，属于预期降级 |
+| 轮换后某列读不出 | 旧 key 是否还在 `MASTER_KEYRING`；该列是否在覆盖表里（测试 A 组会先红） |
+| 任务堆积 | `DEAD` 行的 `lastErrorCode`；上游模型是否超时；`availableAt` 是否在未来 |
+
+### 备份与恢复
+
+认知层数据全部在 PostgreSQL 里（向量也是密文列，不在 pgdata 之外的独立索引里），
+现有备份/恢复流程原样覆盖。恢复时**必须使用同一把主密钥**（或包含它的 keyring），
+否则认知密文与聊天密文一样不可解。恢复后建议验证：登录 → 认知中心 → 记忆列表能读出正文。

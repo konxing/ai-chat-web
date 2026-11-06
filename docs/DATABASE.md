@@ -49,7 +49,7 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 
 ## 认知层表
 
-认知层的十二张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
+认知层的十五张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
 其中四条边是**复合外键**（`(id, userId)` 成对引用）：`DecisionOutcome→DecisionRecord`、`ReflectionCitation→ReflectionRecord`、`ReflectionCitation→MemoryItem`，加上 `MemoryItem`/`ReflectionRecord` 为支撑它们而建的 `@@unique([id, userId])`。跨用户连边在库层就插不进去，不靠应用层记得校验。
 
 ### CognitivePreference
@@ -65,7 +65,7 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 
 ### MemoryItem
 `userId`、`chatId?`、`sourceMessageId?`、`type`、`context`、`origin`、`contentCiphertext`、`confirmedAt?`、`version`、`supersededAt?`、`validFrom?`、`validTo?`、`validPrecision`、`recordedAt`、`updatedAt`。索引 `(userId, supersededAt)`、`(userId, type)`。
-双时间模型：`validFrom/validTo` 是事实成立的区间，`recordedAt` 是系统记下的时间，两者互不替代。正文用 AES-GCM 加密，AAD 绑住 `userId` 与记录 id，整表导出读不出内容。
+双时间模型：`validFrom/validTo` 是事实成立的区间，`recordedAt` 是系统记下的时间，两者互不替代。正文与向量两列都是密文；AAD 是四坐标 `purpose:v1:userId:recordId:fieldName`（`aad.ts`），`fieldName` 让同一行的正文和向量不能互换。整表导出读不出内容。
 
 ### MemoryRevision
 `userId`、`action`、`memoryId`、`previousId?`、`reasonCiphertext`、`sourceMessageId?`、`createdAt`。索引 `(memoryId)`、`(previousId)`、`(userId, createdAt)`。
@@ -79,6 +79,10 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 `userId`、`memoryId`、`kind`、`origin`、`sourceMessageId?`、`sourceChatId?`、`noteCiphertext?`、`createdAt`。唯一 `(userId, memoryId, kind, sourceMessageId)`，索引 `(userId, memoryId)`。
 置信度不存在 `MemoryItem` 上，读时按这些证据算——存一列就要维护刷新时机，漏一处就是一个过期的假数字。`sourceMessageId` 可空是给手工输入的记忆留的，PostgreSQL 唯一索引把 NULL 视为互不相同，这一类去重由服务层负责。
 
+### MemoryCandidate
+`userId`、`chatId?`、`sourceMessageId?`、`type`、`context`、`contentCiphertext`、`contentHash`、`status`(PENDING/CONFIRMED/REJECTED)、`validPrecision`、`validFrom?`、`decidedAt?`、时间戳。唯一 `(userId, contentHash)`，索引 `(userId, status, createdAt)`。
+写入策略判成 `ASK_CONFIRM` 的那句话落在这里，**不落 `MemoryItem`**：确认后才建正式记忆（任务书 1.2）。`decidedAt` 非空就是用户答过了，PENDING 恒为 null——「没答」和「答了」用这一列分，不靠时间猜。候选也有上限（200 条），淘汰最旧的 PENDING。
+
 ### CognitiveTask
 `id`、`userId`、`chatId`、`sourceMessageId`、`kind`、`status`(PENDING/RUNNING/DEAD)、`attempts`、`availableAt`、`leaseOwner?`、`leaseUntil?`、`lastErrorCode?`、时间戳。唯一 `(sourceMessageId, kind)`，索引 `(status, availableAt)`、`(userId, chatId)`。
 一行＝「这一句话的认知写入还欠着」。**表里没有任何正文**：要重建这一轮，靠 `sourceMessageId` 把 Message 行解密出来，所以「派生数据不许出现明文」这条红线在这里是结构上违反不了的——没有可以放正文的列。
@@ -87,7 +91,7 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 
 ### DecisionRecord
 `id`、`userId`、`category`(TECH_CHOICE/PROJECT_PLANNING/CAREER/LEARNING/PURCHASE/PERSONAL_GOAL)、`status`(PENDING_CONFIRM/CONFIRMED/AWAITING_REVIEW/OUTCOME_RECORDED/REJECTED)、九个内容列全密文（`topicCiphertext`、`choiceCiphertext` 必填，background/constraints/options/reason/criteria/expectedOutcome/risks 可空）、`decidedAt?`、`reviewAfter?`、`confirmedAt?`、`sourceMessageId`(必填)、时间戳。唯一 `(id, userId)`、`(sourceMessageId, category)`，索引 `(userId, status)`。
-**只有 CONFIRMED 才算正式决策记录**（7.4 门槛 8）：后台只写 PENDING_CONFIRM，确认由用户在界面做；REJECTED 是终态，留着只为「同一条不再反复来问」。AAD 形如 `decision:v1:用户:记录:字段名`，绑住字段名，所以一列的密文换不到另一列上。
+**只有 CONFIRMED 才算正式决策记录**（7.4 门槛 8）：后台只写 PENDING_CONFIRM，确认由用户在界面做；REJECTED 是终态，留着只为「同一条不再反复来问」。AAD 形如 `decision:v1:用户:记录:字段名`（`v1` 是 schemaVersion；这一族的字段名用短名 `topic`，不是列名——历史行依赖这个口径），绑住字段名，所以一列的密文换不到另一列上。
 
 ### DecisionOutcome
 `id`、`userId`、`decisionId`、`linkStatus`(CANDIDATE/LINKED/DETACHED)、五个内容列密文（`actualCiphertext` 必填，gap/rating/missedFactors/lesson 可空）、`sourceMessageId`、`recordedAt`。唯一 `(sourceMessageId, decisionId)`，索引 `(userId, decisionId)`、`(userId, linkStatus)`。
@@ -97,10 +101,27 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 `id`、`userId`、`type`(任务书 6.1 的七类)、`status`(六态，默认且只能以 PENDING 落地)、`dedupKey`(VARCHAR(80))、`titleCiphertext`、`bodyCiphertext`、`alternativesCiphertext?`、`counterTokensCiphertext`、`counterHitCount`、`timeFrom?`、`timeTo?`、`timePrecision`、`sampleCount`、`observationSpanDays`、`confidence`、`importance`、`generatedAt`、`snoozedUntil?`、`expiresAt?`、`decidedAt?`、`updatedAt`。唯一 `(id, userId)`、`(userId, dedupKey)`，索引 `(userId, status)`、`(userId, generatedAt)`。
 `dedupKey` 上的库层唯一让同主题的第二条插不进来（6.6 的合并不是靠应用层记着）。`counterTokensCiphertext` 是反证搜索用过的关键词集合——它同样是记忆正文的派生物，所以按同一口径加密；`counterHitCount=0` 也要留行，门槛 4 要的是「搜过反证」有凭据。`sampleCount`/`observationSpanDays` 摊在界面上，是数据不足（INSUFFICIENT_EVIDENCE）的判据本身。
 
+### MemoryAccessTurn
+`id`、`userId`、`sourceMessageId`、`memoryIds String[]`、`createdAt`。唯一 `(sourceMessageId)`，索引 `(userId, createdAt)`。
+一轮对话「被注入了哪几条记忆」的账。任务书 7.1 要求检索次数只影响排序、不进置信度；这张表就是「次数」的唯一来源，再巩固检查（`reconsolidation.ts`）读它判断「这条记忆被用过之后有没有出现新证据」。永久删除记忆时相应行一并清掉。
+
+### UserProfileEntry
+`id`、`userId`、`contentCiphertext`、`sourceMemoryIds String[]`、`sourceReflectionIds String[]`、`confirmedAt`、`editedAt?`、时间戳。索引 `(userId, confirmedAt)`。
+画像**只存用户确认过的自我描述**，这一点由结构兜住：`confirmedAt` 不可空、迁移不给 DEFAULT、服务层入参没有这个字段。没确认的候选只在纯函数层现算，永不落库。来源 id 是数组，故意不建外键：用户忘记某条记忆后，这个「当时依据」不该被悄悄改写，也不该连带删掉画像条目——画像不是派生记录。正文加密，AAD 用短名 `content`（历史口径，见 `encrypted-columns.ts`）。
+
 ### ReflectionCitation
 `id`、`userId`、`reflectionId`、`memoryId?`、`decisionId?`、`kind`(SUPPORTS/CONTRADICTS)、`createdAt`。唯一 `(reflectionId, memoryId)`、`(reflectionId, decisionId)`，索引 `(userId, reflectionId)`、`(userId, memoryId)`、`(userId, decisionId)`。两侧来源都是复合外键。
 一条洞察引用了哪条证据、站在支持还是反对的一侧。来源可以是记忆，也可以是决策——6.1 的 DECISION_LESSON 和「决策落定」那一类 MILESTONE 的证据本来就是 `DecisionRecord` 那两行，硬转写成记忆 id 就是造假。**恰好一列非空由服务层保证**：Prisma 表达不了 CHECK，而手写进迁移的 CHECK 会让下一次 `migrate diff` 想把它删掉。
 用连接表而不是把 id 串成文本写进洞察里，为的是来源被永久删除时这条引用随行消失（任务书 7.3 的派生清理），读侧再按剩下几条判这条洞察还该不该留着。
+
+### 密文列与轮换覆盖
+
+九个认知模型合计 **25 个密文列**（24 个 `String` + `MemoryItem.embeddingCiphertext` 一个 `Bytes`）。
+「哪个模型的哪一列、用哪一段 AAD、是字符串还是字节」只有一处出处：
+`src/lib/cognitive/encrypted-columns.ts` 的 `COGNITIVE_ENCRYPTED_COLUMNS`。
+写侧查它，`npm run rotate-keys` 也遍历它——新增密文列只要漏登记，单元测试会直接红。
+轮换脚本另外四个非认知家族（会话标题、消息、Provider Key、附件）的 AAD 仍内联在脚本里，
+因为改一个字符就会让历史行读不回来；两套清单在 `tests/unit/cognitive-rotate-coverage.test.ts` 里都被钉住。
 
 ## ER 图
 
@@ -128,6 +149,12 @@ erDiagram
   AiProvider ||--o{ Chat : selected
   MemoryItem ||--o{ MemoryRevision : evolves
   MemoryItem ||--o{ MemoryEvidence : supportedBy
+  User ||--o{ MemoryCandidate : pendingFor
+  Chat ||--o{ MemoryCandidate : sourcedFrom
+  Message ||--o{ MemoryCandidate : sourceOf
+  User ||--o{ MemoryAccessTurn : accesses
+  Message ||--o{ MemoryAccessTurn : sourceOf
+  User ||--o{ UserProfileEntry : describes
   User ||--o{ DecisionRecord : decides
   Message ||--o{ DecisionRecord : sourceOf
   DecisionRecord ||--o{ DecisionOutcome : trackedBy

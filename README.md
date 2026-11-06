@@ -71,6 +71,7 @@ docs/               架构、数据库、加密、管理、IP、部署、备份�
 ## 文档
 
 - [架构与请求链路](docs/ARCHITECTURE.md)
+- [API 参考](docs/API.md)
 - [数据库与数据隔离](docs/DATABASE.md)
 - [加密与密钥轮换](docs/ENCRYPTION.md)
 - [超级管理员手册](docs/ADMIN_GUIDE.md)

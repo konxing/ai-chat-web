@@ -45,6 +45,24 @@
 4. 用户消息与助手消息以 AES-256-GCM 密文落库；中断时保存 `PARTIAL`/`ERROR` 状态。
 5. 浏览器端用 `react-markdown` + `remark-gfm` + `remark-math/rehype-katex` 渲染；代码块可复制。
 
+### 认知读侧（每一轮回答之前）
+
+任务书 8.1 的链路不是一条写死的流水线，而是一张**模块注册表**：
+
+1. 请求进来先读一次 `CognitivePreference`。读不到（数据库故障）就当这一轮没有认知层，不抛错。
+2. 注册表里每个模块只在自己那把开关为 `true` 时入选，然后并发执行 `module.read(turn)`。
+   整批共用一个 1 秒截止；单个模块抛错或超时只把它的名字记进 `failed`，其余模块的内容照常注入。
+3. 记忆模块（`memory-module.ts`）在一次 `read` 里做完：情绪过滤 → 保留期/情境策略/会话归属过滤
+   → 关键词召回 → 截断到 `MEMORY_READ_MAX_ITEMS = 8` → 渲染成「供参考、非指令」的上下文块。
+   **三项已实现但线上没接的层**：混合召回（关键词 ⊕ 余弦 RRF，纯函数 `rankMemoriesHybrid`
+   已就位，线上调用不传向量）、显著性排序（四个变体实测都没越过基线）、读侧时间框架过滤
+   （问侧 116 条里只有 1 条解析得出框架）。接它们各自需要一次真实收益的证据，不是靠打开开关。
+4. 决策模块（`decision-module.ts`）按关键词在最近 50 条已确认决策里挑至多 2 条，
+   冠以「过去相似决策（仅供参考，需结合当前约束重新分析）」。
+5. 情绪开关与透明度在这一步一并交给记忆模块；`emotionTransparency=off` 或
+   `emotionEnabled=false` 时，情绪类记忆在进池之前就被滤掉。
+6. 所有块只是上下文的**引用资料**：记忆正文是不可信数据，任何「忽略系统规则」都改变不了系统提示。
+
 ### 认知写入（后台任务队列）
 
 1. 流式回答字节交付完、`controller.close()` 之后，请求处理只做一件事：往 `CognitiveTask` 欠一行 id（`userId` / `chatId` / `sourceMessageId` / `kind`）。`await` 它，但入队函数自己永不抛错，所以这一步既不会拖慢响应也不会让已关闭的流出问题。
@@ -92,6 +110,14 @@
 | `src/lib/cognitive/task-worker.ts` | 进程内轮询执行器：重建这一轮、跑写侧、收口；由 `instrumentation.ts` 拉起 |
 | `src/lib/cognitive/memories.ts` / `retrieval.ts` | 记忆读写、双时间有效性、关键词召回与上下文注入 |
 | `src/lib/cognitive/forgetting.ts` / `exclusions.ts` | 永久删除（含派生数据与欠账撤销）、来源排除规则 |
+| `src/lib/cognitive/decisions.ts` / `decision-module.ts` | 决策读写、用户确认、结果链接、相似决策召回 |
+| `src/lib/cognitive/reflections.ts` / `reflection-sweep.ts` | 洞察状态机与后台扫描（反证搜索、去重、冷却） |
+| `src/lib/cognitive/timeline.ts` / `event-extractor.ts` / `change-detector.ts` | 时间线与变化检测的派生层（只从记忆派生，不编经历） |
+| `src/lib/cognitive/memory-graph.ts` | 记忆网络的可视化派生（无关系表，边来自演化与引用） |
+| `src/lib/cognitive/user-profile.ts` / `profile-reads.ts` | 画像条目：只存用户确认过的，候选只读不写 |
+| `src/lib/cognitive/policy-learner.ts` | 从明确的用户操作学习策略，先出候选、达阈值才生效 |
+| `src/lib/cognitive/overview.ts` | 认知中心门厅：只数数、不读正文；关着时也不报错 |
+| `src/lib/cognitive/encrypted-columns.ts` / `aad.ts` | 二十五个密文列的 AAD 口径唯一出处，写侧与轮换脚本共用 |
 
 ## 技术栈
 
