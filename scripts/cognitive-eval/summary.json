@@ -273,6 +273,11 @@
       ]
     }
   },
+  "metricsCoverage": {
+    "total": 29,
+    "computed": 8,
+    "blocked": 21
+  },
   "dilution": {
     "previousThrough": 19,
     "olderPoolSize": 114,

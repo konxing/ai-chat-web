@@ -1,6 +1,7 @@
 import { MEMORY_RETRIEVAL_POOL } from '@/lib/cognitive/memory-module';
 import { STORIES, allMemories } from './fixtures/stories';
 import type { ProbeScore, ArmSummary } from './metrics';
+import { METRIC_COVERAGE, coverageCounts } from './metric-coverage';
 
 /**
  * 报告是**从 summary 数据渲染出来的**，不是手写的：
@@ -20,6 +21,18 @@ export interface ReportInput {
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+/** 7.3 的 29 项逐条：有数的指向代码位置，没有的写清缺什么、怎么解锁。 */
+function coverageTable(): string {
+  const lines = ['| 组 | 指标 | 状态 | 依据 / 缺什么 | 解锁条件 |', '|---|---|---|---|---|'];
+  for (const entry of METRIC_COVERAGE) {
+    lines.push(
+      `| ${entry.group} | ${entry.name} | ${entry.status === 'computed' ? '有数' : '没有'} | ` +
+        `${entry.detail} | ${entry.unblock ?? '—'} |`
+    );
+  }
+  return lines.join('\n');
 }
 
 function categoryTable(arms: ReportInput['arms']): string {
@@ -252,19 +265,21 @@ ${missed.length === 0 ? '无' : missed.map((score) => `- ${score.id}：期望 ${
 
 ${current.unreachableGold.length === 0 ? '无' : current.unreachableGold.join(', ')}
 
-## 7.3 里今天测不了的指标
+## 7.3 指标账本（${coverageCounts().total} 项：${coverageCounts().computed} 项有数 / ${coverageCounts().blocked} 项没有）
 
-| 指标 | 为什么没有 |
-|---|---|
-| 向量召回质量（B 臂） | 向量臂 11-05 实测不通：两个开着 embedding 能力的 host 一个返 HTTP 400 一个返 404，库里 0 / 2 行有向量。解锁条件是 \`params.embeddingModel\` 填上对面真提供的模型名（见上表 B 行） |
-| 图关联命中、多跳路径正确率 | 关系表没建（实测否掉，见上） |
-| 时间线完整性、演化链正确率 | Phase 4 认知时间线未开始 |
-| 反思相关指标 | Phase 6 未开始 |
-| 决策经验复用率 | Phase 5 未开始，且 requireConfirmation 的确认界面缺失 |
-| 后台任务成功率与延迟 | 队列已落地（\`src/lib/cognitive/task-queue.ts\` / \`task-worker.ts\`），但这个 harness 测不到：它跑的是离线纯函数池，没有进程、没有真库，也就没有「一条任务从入队到收口耗时」这个可观测量。耗时目前只在 \`cognitive.task_done\` 日志里，60 秒租约仍是推断 |
-| 存储增长曲线 | 需要真实库和真实时间跨度 |
-| 检索延迟（ms） | 见下面「延迟」一节：不进 snapshot |
-| 撤回/永久删除后的不可见率 | 已由 tests/unit/cognitive-memories.test.ts 在 SQL 层守住，harness 里重述一遍只会多一个可能不一致的来源 |
+${coverageTable()}
+
+**「有数」只指报告里能指到代码位置的那几项。** 其余不是「还没做」，而是缺一个可测对象：
+关系表、事件 / 决策 / 洞察的标注，或一个真模型端点。最后一列写着解锁条件——
+没有那一行，就别把这一项算进验收。
+
+两条不在 7.3 的 29 项里、但容易被误算进来的：
+
+- **向量召回质量（B 臂）** 属于 7.2 的对照臂，不属于 7.3 指标。它 11-05 实测不通：
+  两个开着 embedding 能力的 host 一个返 HTTP 400 一个返 404，库里 0 / 2 行有向量。
+  解锁条件是 \`params.embeddingModel\` 填上对面真提供的模型名。
+- **撤回 / 永久删除后的不可见率** 已由 \`tests/unit/cognitive-memories.test.ts\` 在 SQL 层守住，
+  harness 里重述一遍只会多一个可能不一致的来源。
 
 ## 延迟
 
@@ -300,6 +315,7 @@ export function renderSummary(input: ReportInput): string {
       probes: input.arms.current.probes
     },
     arms: { A2: input.arms.A2, current: input.arms.current },
+    metricsCoverage: coverageCounts(),
     dilution: input.dilution,
     scores: input.scores
   };
