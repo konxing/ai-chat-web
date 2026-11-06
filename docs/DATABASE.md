@@ -49,12 +49,13 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 
 ## 认知层表
 
-认知层的十五张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
-其中四条边是**复合外键**（`(id, userId)` 成对引用）：`DecisionOutcome→DecisionRecord`、`ReflectionCitation→ReflectionRecord`、`ReflectionCitation→MemoryItem`，加上 `MemoryItem`/`ReflectionRecord` 为支撑它们而建的 `@@unique([id, userId])`。跨用户连边在库层就插不进去，不靠应用层记得校验。
+认知层的十六张表全部以 `userId` 为隔离锚点，删除用户时逐行级联。只有 `MemoryExclusion` 的 `chatId`/`sourceMessageId` 故意不建外键（排除必须比来源活得久），其余关系都是真外键。
+其中六条边是**复合外键**（`(id, userId)` 成对引用）：`DecisionOutcome→DecisionRecord`、`ReflectionCitation→ReflectionRecord`、`ReflectionCitation→MemoryItem`、`ReflectionCitation→DecisionRecord`，以及 `MemoryRelation` 的两端（`source` / `target` → `MemoryItem`），加上 `MemoryItem`/`ReflectionRecord`/`DecisionRecord` 为支撑它们而建的 `@@unique([id, userId])`。跨用户连边在库层就插不进去，不靠应用层记得校验。
 
 ### CognitivePreference
-`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、`reflectionSweptAt?`、时间戳。
+`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、`memoryReadLimit`(1–8，默认 8)、`reflectionSweptAt?`、时间戳。
 **默认全关**：库里没有行时应用层补 `OFF`，开关由服务端在每个模块入口读取，前端传什么都不算。`reflectionSweptAt` 不是设置项，是后台那趟反思扫描的节流标记。
+`memoryReadLimit` 是任务书 8.3「记忆检索设置」那一档的落点：它只截断读侧每轮注入的条数（`selectMemoryCandidates` 的 `limit`），上限 8 与内置常量 `MEMORY_READ_MAX_ITEMS` 取小，越界由服务层夹回，不新增开关也不影响写侧。
 
 ### MemoryPolicy
 复合主键 `(userId, context)`，七个情境各一行。`allowPersistence`、`allowedMemoryTypes[]`、`requireConfirmation`、`retention`(SESSION_ONLY/…)、`allowUserProfile`、`allowReflection`、`allowAssociation`。
@@ -114,6 +115,12 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 一条洞察引用了哪条证据、站在支持还是反对的一侧。来源可以是记忆，也可以是决策——6.1 的 DECISION_LESSON 和「决策落定」那一类 MILESTONE 的证据本来就是 `DecisionRecord` 那两行，硬转写成记忆 id 就是造假。**恰好一列非空由服务层保证**：Prisma 表达不了 CHECK，而手写进迁移的 CHECK 会让下一次 `migrate diff` 想把它删掉。
 用连接表而不是把 id 串成文本写进洞察里，为的是来源被永久删除时这条引用随行消失（任务书 7.3 的派生清理），读侧再按剩下几条判这条洞察还该不该留着。
 
+### MemoryRelation
+`id`、`userId`、`sourceMemoryId`、`targetMemoryId`、`relationType`(八种：`RELATED_TO`/`SAME_TOPIC`/`EVOLVES_FROM`/`CAUSES_WITH_EVIDENCE`/`CONTRADICTS`/`ELABORATES`/`PRECEDES`/`USER_STATED_LINK`)、`confidence`(0–1，默认 0.5)、`origin`(SYSTEM/USER)、`status`(ACTIVE/REJECTED)、`evidenceIds String[]`、时间戳。唯一 `(userId, sourceMemoryId, targetMemoryId, relationType)`，索引 `(userId, sourceMemoryId, status)`、`(userId, targetMemoryId, status)`。
+两端都是 `(id, userId)` 复合外键、`onDelete: Cascade`：跨用户的边在库层就插不进去，删掉任一条记忆时挂在它身上的边随行一起消失——边是派生记录，不该比端点活得久。
+**系统今天只自动写两种有确定证据的边**：`reviseMemory` 落 `EVOLVES_FROM`（置信度 1，证据是那条 `MemoryRevision` 的 id），`createMemory` 落 `SAME_TOPIC`（主题词重合 ≥2 才连，置信度 `min(0.9, 0.5+0.1×重合数)`，证据是来源消息 id）。其余六种类型没有自动生成者，`CAUSES_WITH_EVIDENCE` 尤其不许按时间先后自动连——「之后发生」不是「因此发生」，这条是任务书最高原则的落点。
+`MemoryRelation` 没有密文列：它只存 id 和类型，正文一律在 `MemoryItem` 那边，所以 25 列的轮换覆盖不受这张表影响。
+
 ### 密文列与轮换覆盖
 
 九个认知模型合计 **25 个密文列**（24 个 `String` + `MemoryItem.embeddingCiphertext` 一个 `Bytes`）。
@@ -162,6 +169,9 @@ erDiagram
   ReflectionRecord ||--o{ ReflectionCitation : evidencedBy
   MemoryItem ||--o{ ReflectionCitation : citedBy
   DecisionRecord ||--o{ ReflectionCitation : groundedIn
+  User ||--o{ MemoryRelation : relates
+  MemoryItem ||--o{ MemoryRelation : sourceEdge
+  MemoryItem ||--o{ MemoryRelation : targetEdge
 ```
 
 ## 隔离与权限规则

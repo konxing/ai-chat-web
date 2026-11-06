@@ -105,3 +105,14 @@ describe('记忆策略一屏：第八个开关的控件', () => {
     expect(PANEL).toContain('系统能不能替你改策略');
   });
 });
+
+describe('检索设置（任务书 8.3）', () => {
+  it('面板有真控件，且只提交 memoryReadLimit 这一个字段', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'src/components/settings/memory-policy-panel.tsx'), 'utf8');
+
+    expect(source).toContain('检索设置');
+    expect(source).toContain('memoryReadLimit');
+    expect(source).toContain('saveReadLimit');
+    expect(source).toMatch(/\[1, 2, 3, 4, 5, 6, 7, 8\]\.map/);
+  });
+});

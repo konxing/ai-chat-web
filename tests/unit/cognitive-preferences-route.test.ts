@@ -101,7 +101,8 @@ describe('认知开关接口', () => {
       adaptiveMemoryEnabled: false,
       emotionTransparency: 'implicit',
       reflectionCooldown: 'daily',
-      memoryWritePaused: false
+      memoryWritePaused: false,
+      memoryReadLimit: 8
     });
   });
 

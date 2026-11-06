@@ -51,13 +51,15 @@ const CANVAS = 360;
 const CENTER = CANVAS / 2;
 const RADIUS = CANVAS / 2 - 40;
 
-/** 三种线各自的画法。名字在 `GRAPH_EDGE_LABELS`，这里只给样子，图例和线共用同一个 kind。 */
+/** 四种线各自的画法。名字在 `GRAPH_EDGE_LABELS`，这里只给样子，图例和线共用同一个 kind。 */
 const EDGE_STROKES: Record<GraphEdgeKind, string> = {
+  relation: '#a78bfa',
   update: '#e6edf6',
   sameChat: '#8fa3c0',
   coCitation: '#6b7f9c'
 };
 const EDGE_DASHES: Record<GraphEdgeKind, string> = {
+  relation: '1 3',
   update: '0',
   sameChat: '5 4',
   coCitation: '2 4'

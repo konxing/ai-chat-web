@@ -27,6 +27,8 @@ const db = vi.hoisted(() => ({
   listCalls: Array<{ userId: string; filters: unknown }>(),
   edgeCalls: [] as string[],
   citationCalls: [] as string[],
+  relationCalls: [] as Array<{ userId: string; memoryIds: string[] }>,
+  relations: [] as Array<Record<string, unknown>>,
   titleCalls: Array<{ userId: string; chatIds: Array<string | null> }>(),
   memories: [] as Array<Record<string, unknown>>,
   edges: [] as Array<Record<string, unknown>>,
@@ -82,6 +84,13 @@ vi.mock('@/lib/cognitive/memories', () => ({
   }
 }));
 
+vi.mock('@/lib/cognitive/relations', () => ({
+  listRelationsForGraph: (userId: string, memoryIds: string[]) => {
+    db.relationCalls.push({ userId, memoryIds });
+    return Promise.resolve(db.relations.filter((row) => row.userId === userId));
+  }
+}));
+
 vi.mock('@/lib/chats', () => ({
   listChatTitles: (userId: string, chatIds: Array<string | null>) => {
     db.titleCalls.push({ userId, chatIds });
@@ -133,6 +142,8 @@ beforeEach(() => {
   db.listCalls = [];
   db.edgeCalls = [];
   db.citationCalls = [];
+  db.relationCalls = [];
+  db.relations = [];
   db.titleCalls = [];
   db.memories = [];
   db.edges = [];
@@ -364,5 +375,18 @@ describe('回给浏览器的只有图', () => {
     expect(payload.data.edges).toEqual([]);
     expect(payload.data.groups).toEqual([]);
     expect(db.titleCalls).toEqual([]);
+  });
+});
+
+describe('库里的关系行也进图（片O）', () => {
+  it('按节点集合向 session 用户取关系，并画成 relation 线', async () => {
+    db.memories = [memoryRow({ id: 'a' }), memoryRow({ id: 'b', content: '爬山要带相机' })];
+    db.relations = [{ userId: 'user-a', sourceMemoryId: 'a', targetMemoryId: 'b', relationType: 'SAME_TOPIC' }];
+
+    const { response, payload } = await call();
+
+    expect(response.status).toBe(200);
+    expect(db.relationCalls).toEqual([{ userId: 'user-a', memoryIds: ['a', 'b'] }]);
+    expect(payload.data.edges).toEqual([{ from: 'a', to: 'b', kind: 'relation' }]);
   });
 });

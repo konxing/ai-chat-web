@@ -22,8 +22,8 @@ import type { EmotionTransparency } from '@/lib/cognitive/preferences';
  * 记忆策略那一屏（任务书 1.2 / 1.3 / 8.3）。
  *
  * 只渲染真有代码在消费的字段：是否持久化、允许的类型、是否先问、是否允许作为洞察的依据、
- * 是否允许整理进画像、是否允许拿去联想、保留期，再加上一个全局的「情绪标注」档位和
- * 一个全局的「自动收紧」开关。
+ * 是否允许整理进画像、是否允许拿去联想、保留期，再加三个全局项：
+ * 每轮注入条数（任务书 8.3 的「记忆检索设置」）、情绪标注档位、自动收紧开关。
  * 这张策略表里最后一个没有消费者的字段是 `emotionEnabled`，11-06 片U 给它接上了读者：
  * 抽取层（`memory-extractor.ts`，不开就一个情绪词都不比）和读侧候选池（`memory-module.ts`，不开就把
  * 已有的情绪行整个剔掉）。有了这两处读者，这一屏才摆出它的控件——顺序必须是先有读者再给控件，
@@ -120,6 +120,10 @@ export function MemoryPolicyPanel() {
   const [learning, setLearning] = useState<boolean | null>(null);
   const [learningBusy, setLearningBusy] = useState(false);
   const [learningError, setLearningError] = useState('');
+  // 任务书 8.3 的「记忆检索设置」：每轮最多注入几条。null = 没读到，界面不替你猜。
+  const [readLimit, setReadLimit] = useState<number | null>(null);
+  const [readLimitBusy, setReadLimitBusy] = useState(false);
+  const [readLimitError, setReadLimitError] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -223,16 +227,19 @@ export function MemoryPolicyPanel() {
           emotionTransparency: EmotionTransparency;
           adaptiveMemoryEnabled: boolean;
           emotionEnabled: boolean;
+          memoryReadLimit: number;
         };
       }>(PREFERENCES_URL);
       setEmotion(data.preferences.emotionTransparency);
       setLearning(data.preferences.adaptiveMemoryEnabled);
       setEmotionModule(data.preferences.emotionEnabled);
+      setReadLimit(data.preferences.memoryReadLimit);
     } catch {
       // 读失败留在 null：这几个值都会改变模型看到的东西或系统能替你做的事，猜一个默认值等于替用户决定。
       setEmotion(null);
       setLearning(null);
       setEmotionModule(null);
+      setReadLimit(null);
     }
   }
 
@@ -290,6 +297,25 @@ export function MemoryPolicyPanel() {
       setLearningError(errorMessage(err));
     } finally {
       setLearningBusy(false);
+    }
+  }
+
+  async function saveReadLimit(next: number) {
+    if (next === readLimit) return;
+    setReadLimitBusy(true);
+    setReadLimitError('');
+    try {
+      const data = await apiFetch<{ preferences: { memoryReadLimit: number } }>(PREFERENCES_URL, {
+        method: 'PATCH',
+        json: { memoryReadLimit: next }
+      });
+      // 以服务端回读的值为准：这一档直接决定每轮注入几条，界面和库不许分叉。
+      setReadLimit(data.preferences.memoryReadLimit);
+      push('检索条数已更新');
+    } catch (err) {
+      setReadLimitError(errorMessage(err));
+    } finally {
+      setReadLimitBusy(false);
     }
   }
 
@@ -475,6 +501,42 @@ export function MemoryPolicyPanel() {
         ) : loadError ? null : (
           <LoadingBlock label="加载策略" />
         )}
+      </div>
+
+      <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+        <h3 className="text-[13.5px] text-white/85">检索设置</h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
+          这一档决定每一轮最多把几条记忆带进对话。它只改条数，不改检索方式；
+          调低不会删除任何记忆，只是让回答少看几条。
+        </p>
+
+        <div className="mt-3">
+          <label htmlFor="memory-read-limit" className="text-[12px] text-white/55">
+            每轮最多注入
+          </label>
+          <select
+            id="memory-read-limit"
+            className="field mt-1.5"
+            value={readLimit ?? ''}
+            disabled={readLimit === null || readLimitBusy}
+            onChange={(e) => void saveReadLimit(Number(e.target.value))}
+          >
+            {readLimit === null ? <option value="">当前值未知</option> : null}
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
+              <option key={value} value={value}>
+                {value} 条
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
+            上限 8 条与任务书默认值一致；调高不会超过它。
+          </p>
+          {readLimitError ? (
+            <Alert tone="error" className="mt-2">
+              {readLimitError}
+            </Alert>
+          ) : null}
+        </div>
       </div>
 
       <div className="mt-5 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">

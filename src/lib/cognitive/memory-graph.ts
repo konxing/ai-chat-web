@@ -5,30 +5,24 @@ import type { TimelineEdge } from './timeline';
 /**
  * 记忆网络的派生逻辑（任务书 8.2）。
  *
- * 这一片**不建表**。库里已经存在三种关系——演化边（`MemoryRevision`）、同一轮对话（`MemoryItem.chatId`）、
- * 同一条洞察的引用（`ReflectionCitation`）——它们本来就在写、在读（时间线、记忆面板、洞察一屏各读各的），
- * 这一片只是把同一批行画第二次。所以：
+ * 11-06 起库里多了一张 `MemoryRelation`（任务书 2.3）：有证据的边由写侧落库，
+ * 记忆网络把**它**和三种既成关系画在同一张图上——演化边、同一轮对话、同一条洞察的引用。
+ * 顺序是有讲究的：**先画有证据的关系行，再画派生布局线**；同一对节点只留一条线，
+ * 所以一条真有关系的记忆不会因为恰好同场对话就被画成「只是同一场对话」。
  *
- * 一、**没有「关联」这回事，只有「已经存在的关系」**。任务书 2a 那次阈值校准的结论就是不建 `MemoryRelation`
- * （本文档 2a 那节，`cognitive-memory-graph.test.ts` 用一条静态用例钉住）：一旦为画图加一张边表，
- * 它就成了需要维护的第二真相，而它的维护者只能是猜。
+ * 两条边界没变：
  *
- * 二、**同主题不成边**。七个主题乘以两百行是一把糊在一起的毛线球，画出来好看、读出来没有信息量。
- * 主题只做分组，界面上以「主题」的颜色出现，不以线的形式出现。
+ * 一、**同主题默认只做分组、不做线**。七个主题乘以两百行是一把糊在一起的毛线球；
+ * 只有写侧明确落了 SAME_TOPIC 的那一对才画线（有来源消息做证据）。
  *
- * 三、**星形，不是两两全连**。同一场对话里的 50 条记忆，真实的关系是「它们都发生在那一场对话」，
- * 不是「两两之间各有一层关系」。全连给 1225 条边，星形给 49 条，而两种画法的可读性差别是零。
+ * 二、**星形，不是两两全连**。同一场对话里的 50 条记忆，真实的关系是「它们都发生在那一场对话」，
+ * 不是「两两之间各有一层关系」。全连给 1225 条边，星形给 49 条，两种画法的可读性差别是零。
  *
- * 四、**预算要说出来**。节点 ≤120、边 ≤240，超了就留最近那批并把 `capped` 交给界面。
+ * 三、**预算要说出来**。节点 ≤120、边 ≤240，超了就留最近那批并把 `capped` 交给界面。
  * 宁可明说「这里画不全」，也不把整库塞进一个 SVG 让浏览器转圈。
  *
- * 五、**这一列有人读了**：情境策略里的 `allowAssociation` 在这张图上是硬闸门。
- * 它是那张七情境策略表里最后一个没有运行时消费者的字段（`allowUserProfile` 归画像、
- * `allowReflection` 归洞察，各自有读者），而「这类东西不要拿去联想」这句话只有画布的
- * 入口拦得住。挡的只有**派生出来的两种线**（同一场对话、同一条洞察一起提到）——
- * 那两条是这一片造出来的说法。演化边不挡：那条线是库里 `MemoryRevision` 记着的既成事实，
- * 用户关的是「系统拿它去联想」，不是「他自己的改口历史」。
- * 点也不挡：把一条记忆从自己的网络视图里抹掉，比多画一个孤立的点更容易被读成「库里没有这条」。
+ * 四、**情境策略里的 `allowAssociation` 是硬闸门**：关联池外的点既不做锚点也不做成员，
+ * 库里已有的关系行也一样——用户关的是「系统拿它去联想」，不是「他自己的改口历史」。
  */
 
 /** 画布上限。两份读列表各自的硬上限是 200 行，这里留出的余量足够让图不吞掉整库。 */
@@ -46,11 +40,13 @@ export interface MemoryGraphSource {
   /** 演化边（复用时间线那份四列形状，不解密理由）。 */
   edges: TimelineEdge[];
   citations: GraphCitation[];
+  /** 库里有证据的关系行（任务书 2.3）。EVOLVES_FROM 不重复画：演化边已经画了。 */
+  relations?: readonly { sourceMemoryId: string; targetMemoryId: string; relationType: string }[];
   /** 七情境策略表。这里只读 `allowAssociation` 一列，别的列一个都不看。 */
   policies: Record<MemoryContext, MemoryPolicy>;
 }
 
-export type GraphEdgeKind = 'update' | 'sameChat' | 'coCitation';
+export type GraphEdgeKind = 'relation' | 'update' | 'sameChat' | 'coCitation';
 
 export interface GraphNode {
   id: string;
@@ -86,7 +82,13 @@ export interface MemoryGraph {
   associationGated: number;
 }
 
-export function deriveMemoryGraph({ memories, edges, citations, policies }: MemoryGraphSource): MemoryGraph {
+export function deriveMemoryGraph({
+  memories,
+  edges,
+  citations,
+  relations = [],
+  policies
+}: MemoryGraphSource): MemoryGraph {
   const ordered = orderNodes(memories);
   const retained = ordered.slice(-GRAPH_MAX_NODES);
   const present = new Set(retained.map((node) => node.id));
@@ -107,6 +109,14 @@ export function deriveMemoryGraph({ memories, edges, citations, policies }: Memo
     candidates.push({ from, to, kind });
   };
 
+  // ⓪ 库里记着的关系行：最先画，因为它是这一对节点唯一「有证据」的说法。
+  // 同一对节点只留一条线（push 的 seen 按无序对去重），后画的派生线不会覆盖它。
+  for (const relation of relations) {
+    if (relation.relationType === 'EVOLVES_FROM') continue;
+    if (!present.has(relation.sourceMemoryId) || !present.has(relation.targetMemoryId)) continue;
+    if (!associated.has(relation.sourceMemoryId) || !associated.has(relation.targetMemoryId)) continue;
+    push(relation.sourceMemoryId, relation.targetMemoryId, 'relation');
+  }
   // ① 演化边：先画。旧说法 → 新说法是这张图里唯一有方向的、也是唯一不需要解释的关系。
   for (const revision of [...edges].sort(compareRevisionEdges)) {
     if (!revision.previousId) continue;

@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/http';
 import type { CognitiveAadCoord } from './aad';
 import { decryptCognitiveString, encryptCognitiveString } from './aad';
 import { cognitiveColumnCoord } from './encrypted-columns';
+import { recordEvolutionRelation, recordTopicRelations } from './relations';
 import { recordEvidence } from './evidence';
 import {
   fromDbMemoryContext,
@@ -347,8 +348,31 @@ export async function createMemoryInTx(tx: Prisma.TransactionClient, input: Memo
   return toDto(row as unknown as MemoryRow, input.userId);
 }
 
-export async function createMemory(input: MemoryInput): Promise<MemoryDto> {
-  return prisma.$transaction((tx) => createMemoryInTx(tx, input));
+/**
+ * 写一条记忆（自带事务）。
+ *
+ * `related` 是调用方已经解密的「当前有效记忆」池：给了就在同一个事务里连同主题边。
+ * 边是派生记录，但它和记忆行同生共死——写失败留下一条孤立的新记忆，记忆网络会缺一块；
+ * 而先写记忆再补边，中间崩一次就永久缺那一块。
+ */
+export async function createMemory(
+  input: MemoryInput,
+  related?: readonly { id: string; content: string; context: MemoryContext }[]
+): Promise<MemoryDto> {
+  return prisma.$transaction(async (tx) => {
+    const row = await createMemoryInTx(tx, input);
+    if (related && related.length > 0) {
+      await recordTopicRelations(tx, {
+        userId: input.userId,
+        memoryId: row.id,
+        content: input.content,
+        context: input.context,
+        sourceMessageId: input.sourceMessageId ?? null,
+        existing: related
+      });
+    }
+    return row;
+  });
 }
 
 export async function listMemories(userId: string, filters: MemoryListFilters = {}): Promise<MemoryDto[]> {
@@ -434,6 +458,13 @@ export async function reviseMemory(input: MemoryReviseInput): Promise<MemoryDto>
         reasonCiphertext: encryptCognitiveString(reason, revisionReasonAad(input.userId, edgeId)),
         sourceMessageId: input.sourceMessageId ?? null
       }
+    });
+    // 演化边同时进关系表：读侧两跳扩展因此能走到旧版本，不必认识 MemoryRevision。
+    await recordEvolutionRelation(tx, {
+      userId: input.userId,
+      newMemoryId: next.id,
+      previousMemoryId: previous.id,
+      revisionId: edgeId
     });
     // 新说法同时是新版本的支持证据和旧版本的反对证据（任务书 2.2 的冲突记录）。
     // 这是事实不是猜测：用户确实对同一件事说了另一件。

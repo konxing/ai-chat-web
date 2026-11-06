@@ -231,3 +231,39 @@ describe('反思生成节奏（6.6 的可配置冷却）', () => {
     expect(COGNITIVE_FLAGS).not.toContain('reflectionCooldown');
   });
 });
+
+describe('记忆检索设置（任务书 8.3）', () => {
+  it('没有记录时默认 8 条，等于加这一列之前的行为', async () => {
+    const { getCognitivePreferences } = await prefs();
+
+    expect((await getCognitivePreferences(USER_A)).memoryReadLimit).toBe(8);
+  });
+
+  it('改了之后按 userId 落库，另一个用户不受影响', async () => {
+    const { getCognitivePreferences, updateCognitivePreferences } = await prefs();
+
+    await updateCognitivePreferences(USER_A, { memoryReadLimit: 3 });
+
+    expect((await getCognitivePreferences(USER_A)).memoryReadLimit).toBe(3);
+    expect((await getCognitivePreferences(USER_B)).memoryReadLimit).toBe(8);
+  });
+
+  it('库里出现越界值时读侧按 1..8 收，不把注入条数放大', async () => {
+    const { getCognitivePreferences } = await prefs();
+    db.rows.set(USER_A, { memoryReadLimit: 99 });
+    db.rows.set(USER_B, { memoryReadLimit: 0 });
+
+    expect((await getCognitivePreferences(USER_A)).memoryReadLimit).toBe(8);
+    expect((await getCognitivePreferences(USER_B)).memoryReadLimit).toBe(1);
+  });
+
+  it('PATCH 的白名单只收 1..8 的整数', async () => {
+    const { cognitivePreferencesPatchSchema } = await import('@/lib/validation');
+
+    expect(cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 1 })).toEqual({ memoryReadLimit: 1 });
+    expect(cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 8 })).toEqual({ memoryReadLimit: 8 });
+    expect(() => cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 0 })).toThrow();
+    expect(() => cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 9 })).toThrow();
+    expect(() => cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 3.5 })).toThrow();
+  });
+});

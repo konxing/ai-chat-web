@@ -13,7 +13,7 @@ import { createTable, type MockTable } from './prisma-mock';
  * | 是否出现了新的反例 | **行**有（reviseMemory 写 CONTRADICTS），**发现**没有 | 只报库里已有的行 |
  * | 是否已经过时 | 全有，读侧：validTo / supersededAt | 做 |
  * | 是否需要更新摘要 | 记忆摘要这个东西不存在（MemoryItem 没有摘要列） | 不做 |
- * | 是否需要修改关联关系 | 没有可写的关系表（2a 那次校准的结论），派生图是只读的 | 不做 |
+ * | 是否需要修改关联关系 | 关系表有了，但没有可自动判定的「该改哪条边」信号 | 不做 |
  *
  * 「词法反例发现」也不做，理由不是懒得做：docs/cognitive-acceptance.md:537-570 那次实测
  * 36 条候选 0 条真是反例，把那种匹配接进这一屏只会产出一排假警报。

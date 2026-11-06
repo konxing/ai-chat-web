@@ -301,13 +301,15 @@ gzip level 5/6 是 CPU 换带宽。静态 chunk 由 Nginx 压，应用进程几�
 ## 15. 个人认知层运维
 
 认知层没有新增环境变量，也没有新增服务进程；它复用现有 App、现有 PostgreSQL 与
-现有备份链路。新增的只有：十五张表、一个进程内 worker、一个可选的 embedding 模型配置。
+现有备份链路。新增的只有：十六张表、一个进程内 worker、一个可选的 embedding 模型配置。
 
 ### 默认状态
 
 八个用户级开关**默认全关**，库里没有 `CognitivePreference` 行时按 `OFF` 处理。
 关闭状态下：不召回记忆、不写记忆、不跑后台任务、对应 API 返回 409 `MODULE_DISABLED`。
 开启入口在设置页的「认知中心」与各分屏；每个开关都要用户自己点开，部署不会替任何人开。
+唯一一处非开关的运行时参数是「记忆检索设置」`memoryReadLimit`（1–8，默认 8）：它不新增列的默认语义，
+`CognitivePreference` 无行时应用层按 8 补，与内置上限 `MEMORY_READ_MAX_ITEMS` 取小，只影响每轮注入几条记忆。
 
 ### 数据库迁移
 
@@ -357,6 +359,7 @@ npm run rotate-keys -- --new-key-id k2             # 真正执行
 | `CognitiveTask` | 成功/作废即删；`DEAD` 行由 `npm run logs:prune` 按保留期清 |
 | `ReflectionRecord` | 有 TTL；过期的由读侧标成 `EXPIRED`，不参与主展示 |
 | `MemoryCandidate` | 每个用户最多 200 条待确认，超出淘汰最旧的 PENDING |
+| `MemoryRelation` | 无独立清理任务：两端都是 `(id, userId)` 复合外键 + `onDelete: Cascade`，删掉任一条记忆时边随行消失 |
 | 日志表 | 沿用现有 `logs:prune`，认知日志只含 id / 模块键 / 计数 |
 
 「清空全部长期记忆」只删记忆及其派生（版本链、证据、访问账本、候选、待执行任务），

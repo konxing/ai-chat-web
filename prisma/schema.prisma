@@ -123,6 +123,32 @@ enum MemoryRevisionAction {
   RETRACTED
 }
 
+/// 记忆之间关系的类型（任务书 2.3 的八种）。
+/// 只有「有证据」的类型才允许系统自动建立；CAUSES_WITH_EVIDENCE 不许按时间先后自动生成。
+enum MemoryRelationType {
+  RELATED_TO
+  SAME_TOPIC
+  SUPPORTS
+  CONTRADICTS
+  EVOLVES_FROM
+  PART_OF
+  OCCURRED_BEFORE
+  CAUSES_WITH_EVIDENCE
+}
+
+/// 这条关系是谁建的：系统按可复核的规则，还是用户自己连的。
+enum MemoryRelationOrigin {
+  SYSTEM
+  USER
+}
+
+/// 关系本身的状态。REJECTED 只用于「用户否掉」；来源或目标失效不删边，
+/// 由读侧按记忆行的 superseded/archived/validTo 过滤——删边会让「为什么曾经关联」消失。
+enum MemoryRelationStatus {
+  ACTIVE
+  REJECTED
+}
+
 /// 「先问再记」问出来的那句话处于哪一步（任务书 1.2 的 ASK_CONFIRM）。
 /// 只有三个值是有原因的：没有「过期」「忽略」「稍后再问」——用户不理它，它就一直是 PENDING，
 /// 顶多被新候选按数量挤掉；再加状态就是给同一件事发明第二种「不记」的说法。
@@ -225,6 +251,7 @@ model User {
   memoryPolicies      MemoryPolicy[]
   memories            MemoryItem[]
   memoryRevisions     MemoryRevision[]
+  memoryRelations     MemoryRelation[]
   memoryExclusions    MemoryExclusion[]
   memoryCandidates    MemoryCandidate[]
   policySignals       MemoryPolicySignal[]
@@ -486,6 +513,10 @@ model CognitivePreference {
   /// （关掉后读侧也不注入），这一列只管「还记不记新东西」——后台不再落库，已存的记忆照常带入对话。
   /// 「记住但不带入」和「暂停写入但继续带入」必须是两件事，所以闸门只放在写侧的最早一处。
   memoryWritePaused     Boolean             @default(false)
+  /// 任务书 8.3 的「记忆检索设置」：每一轮最多把几条记忆带进对话（1–8，默认 8）。
+  /// 读者是读侧 `selectMemoryCandidates`；上限 8 与任务书 3.2 的默认注入条数一致，
+  /// 放开到 8 以上等于让一次回答吃更多提示词预算，不是用户能单方面扩的。
+  memoryReadLimit       Int                 @default(8)
   /// 上一次跑反思规则的时刻。反思不能挂在每条消息上重算整个记忆池（任务书 6.6 的冷却），
   /// 所以这一列是后台那趟扫描的节流标记，不是用户设置项。
   reflectionSweptAt     DateTime?
@@ -573,6 +604,9 @@ model MemoryItem {
   revisions           MemoryRevision[]     @relation("MemoryRevisionNew")
   replacedByEdges     MemoryRevision[]     @relation("MemoryRevisionPrevious")
   evidences           MemoryEvidence[]
+  /// 这条行作为起点的关系，和作为终点的关系（任务书 2.3）。
+  relationsFrom       MemoryRelation[]     @relation("MemoryRelationSource")
+  relationsTo         MemoryRelation[]     @relation("MemoryRelationTarget")
   /// 反思对这条记忆的引用（Phase 6）。
   reflectionCitations ReflectionCitation[] @relation("ReflectionCitationMemory")
 
@@ -603,6 +637,39 @@ model MemoryRevision {
   @@index([memoryId])
   @@index([previousId])
   @@index([userId, createdAt])
+}
+
+/// 记忆之间的关系（任务书 2.3 / 3.1）。
+///
+/// 为什么现在建：2a 当时量的是「按相似度阈值自动连边值不值得」，结论是不值得；
+/// 任务书 2.3 要的是这张表本身（八种类型、来源、置信度、证据），两者不是同一件事。
+/// 系统今天只自动建两种有确定证据的边：EVOLVES_FROM（演化边）和 SAME_TOPIC（同主题词重合）。
+/// 其余类型只认显式写入，CAUSES_WITH_EVIDENCE 永远不按时间先后自动生成。
+///
+/// 两端都用 (id, userId) 复合外键：别人的记忆连不进来，跨用户边在库层就插不进去（5.1）。
+/// 删除任一端记忆时边随行级联消失——边是派生记录，不该比它的端点活得久。
+model MemoryRelation {
+  id             String                @id @default(uuid())
+  userId         String
+  sourceMemoryId String
+  targetMemoryId String
+  relationType   MemoryRelationType
+  /// 0..1。没有证据的系统边不许超过 0.5；读侧扩展只走 ACTIVE 且 >= 阈值。
+  confidence     Float                 @default(0.5)
+  origin         MemoryRelationOrigin   @default(SYSTEM)
+  status         MemoryRelationStatus   @default(ACTIVE)
+  /// 证据引用：来源消息 / 演化边 / 用户操作的 id。空数组不是错，但高置信度必须有。
+  evidenceIds    String[]              @default([])
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source MemoryItem @relation("MemoryRelationSource", fields: [sourceMemoryId, userId], references: [id, userId], onDelete: Cascade)
+  target MemoryItem @relation("MemoryRelationTarget", fields: [targetMemoryId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([userId, sourceMemoryId, targetMemoryId, relationType])
+  @@index([userId, sourceMemoryId, status])
+  @@index([userId, targetMemoryId, status])
 }
 
 /// 用户永久删除过的内容不再被自动记回来（任务书 7.3 的来源排除规则）。

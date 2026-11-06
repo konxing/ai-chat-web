@@ -53,7 +53,14 @@
 2. 注册表里每个模块只在自己那把开关为 `true` 时入选，然后并发执行 `module.read(turn)`。
    整批共用一个 1 秒截止；单个模块抛错或超时只把它的名字记进 `failed`，其余模块的内容照常注入。
 3. 记忆模块（`memory-module.ts`）在一次 `read` 里做完：情绪过滤 → 保留期/情境策略/会话归属过滤
-   → 关键词召回 → 截断到 `MEMORY_READ_MAX_ITEMS = 8` → 渲染成「供参考、非指令」的上下文块。
+   → 关键词召回 → 截断到「注入条数」→ 渲染成「供参考、非指令」的上下文块。
+   那一条截断同时受两处约束：内置上限 `MEMORY_READ_MAX_ITEMS = 8`，以及任务书 8.3「记忆检索设置」
+   在 `CognitivePreference.memoryReadLimit` 上的那一档（1–8，默认 8）；取小，所以调低只影响这一轮带几条。
+   **关联扩展已经接上**：`associationEnabled` 为真且这一轮选中了记忆时，`expandRelatedMemories`
+   从种子沿 `MemoryRelation` 走至多 2 跳、至多 30 个候选节点、至多注入 8 条（置信度下限 0.5）。
+   三条硬约束：扩展目标只能取自这一轮已经取回的可见池（所以失效行、被排除的行不会因为有一条边就重回上下文）、
+   每条候选仍要单独过 `isMemoryUsable` 与两端情境的 `allowAssociation`，注入块与主块共用 1500 字预算。
+   关着时连关系表都不问。
    **三项已实现但线上没接的层**：混合召回（关键词 ⊕ 余弦 RRF，纯函数 `rankMemoriesHybrid`
    已就位，线上调用不传向量）、显著性排序（四个变体实测都没越过基线）、读侧时间框架过滤
    （问侧 116 条里只有 1 条解析得出框架）。接它们各自需要一次真实收益的证据，不是靠打开开关。
@@ -104,7 +111,7 @@
 | `src/lib/files.ts` | 魔数、解析、分块、加密存储 |
 | `src/lib/backups.ts` | 备份列表、下载完整性、恢复调用 |
 | `src/lib/admin.ts` | 管理后台业务与审计 |
-| `src/lib/cognitive/preferences.ts` / `policy.ts` | 八个模块开关与七情境写入策略，服务端强制 |
+| `src/lib/cognitive/preferences.ts` / `policy.ts` | 八个模块开关、检索条数上限与七情境写入策略，服务端强制 |
 | `src/lib/cognitive/manager.ts` | 认知模块注册表：闸门、错误隔离、读/写两侧的截止 |
 | `src/lib/cognitive/task-queue.ts` | 欠账落库：入队、原子领取、租约回收、退避重试、作废 |
 | `src/lib/cognitive/task-worker.ts` | 进程内轮询执行器：重建这一轮、跑写侧、收口；由 `instrumentation.ts` 拉起 |
@@ -113,7 +120,8 @@
 | `src/lib/cognitive/decisions.ts` / `decision-module.ts` | 决策读写、用户确认、结果链接、相似决策召回 |
 | `src/lib/cognitive/reflections.ts` / `reflection-sweep.ts` | 洞察状态机与后台扫描（反证搜索、去重、冷却） |
 | `src/lib/cognitive/timeline.ts` / `event-extractor.ts` / `change-detector.ts` | 时间线与变化检测的派生层（只从记忆派生，不编经历） |
-| `src/lib/cognitive/memory-graph.ts` | 记忆网络的可视化派生（无关系表，边来自演化与引用） |
+| `src/lib/cognitive/memory-graph.ts` | 记忆网络的可视化派生（有证据的关系行 + 演化 / 同场 / 引用三种既成关系） |
+| `src/lib/cognitive/relations.ts` | `MemoryRelation` 的读写：只写带证据的两种边，读侧两跳扩展（深度 / 候选 / 注入 / 置信度四道上限） |
 | `src/lib/cognitive/user-profile.ts` / `profile-reads.ts` | 画像条目：只存用户确认过的，候选只读不写 |
 | `src/lib/cognitive/policy-learner.ts` | 从明确的用户操作学习策略，先出候选、达阈值才生效 |
 | `src/lib/cognitive/overview.ts` | 认知中心门厅：只数数、不读正文；关着时也不报错 |

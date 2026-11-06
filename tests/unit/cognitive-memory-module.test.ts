@@ -27,6 +27,10 @@ const db = vi.hoisted(() => ({
   band: 'medium' as 'low' | 'medium' | 'high',
   policies: null as unknown,
   emotionTransparency: 'implicit' as 'off' | 'implicit' | 'explicit',
+  memoryReadLimit: 8,
+  associationEnabled: false,
+  expandCalls: [] as unknown[],
+  expandHits: [] as Array<Record<string, unknown>>,
   policyCalls: 0
 }));
 
@@ -36,13 +40,14 @@ vi.mock('@/lib/cognitive/preferences', () => ({
       memoryEnabled: db.memoryEnabled,
       userModelEnabled: false,
       emotionEnabled: db.emotionEnabled,
-      associationEnabled: false,
+      associationEnabled: db.associationEnabled,
       timelineEnabled: false,
       reflectionEnabled: false,
       decisionMemoryEnabled: false,
       adaptiveMemoryEnabled: false,
       emotionTransparency: db.emotionTransparency,
-      memoryWritePaused: db.memoryWritePaused
+      memoryWritePaused: db.memoryWritePaused,
+      memoryReadLimit: db.memoryReadLimit
     })
 }));
 
@@ -81,6 +86,19 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
         .slice(0, filters?.take)
         .map((row) => ({ ...row, userId }));
       return Promise.resolve(rows);
+    }
+  };
+});
+
+vi.mock('@/lib/cognitive/relations', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/relations')>();
+  return {
+    ...actual,
+    // 扩展本身在 cognitive-relations 里逐条测过；这里只测串起来的那一段：
+    // associationEnabled 开着才问关系表，问回来的行确实进了同一个注入块。
+    expandRelatedMemories: (input: unknown) => {
+      db.expandCalls.push(input);
+      return Promise.resolve(db.expandHits as never);
     }
   };
 });
@@ -199,6 +217,10 @@ beforeEach(() => {
   db.policies = null;
   db.emotionTransparency = 'implicit';
   db.policyCalls = 0;
+  db.memoryReadLimit = 8;
+  db.associationEnabled = false;
+  db.expandCalls = [];
+  db.expandHits = [];
 });
 
 describe('写侧：策略在服务端真的生效', () => {
@@ -667,6 +689,62 @@ describe('读侧：记忆作为数据进提示词', () => {
 
     expect(lines.length).toBeLessThanOrEqual(MEMORY_READ_MAX_ITEMS);
     expect((block?.text ?? '').length).toBeLessThanOrEqual(MEMORY_READ_MAX_CHARS);
+  });
+
+  it('检索设置调低到 3 条时，读侧真的只注入 3 条（任务书 8.3）', async () => {
+    db.memoryEnabled = true;
+    db.memoryReadLimit = 3;
+    db.readRows = Array.from({ length: 20 }, (_, index) =>
+      memoryRow({ id: `mem-${index}`, content: `第 ${index} 条记忆，内容够短` })
+    );
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+    const lines = (block?.text ?? '').split('\n').filter((line) => line.startsWith('- '));
+
+    expect(lines).toHaveLength(3);
+  });
+
+  it('关联开关开着时才问关系表，扩展行进同一个注入块（任务书 3.2 的接线）', async () => {
+    db.memoryEnabled = true;
+    db.associationEnabled = true;
+    db.readRows = [memoryRow()];
+    db.expandHits = [
+      {
+        memory: memoryRow({ id: 'hop-1', content: '上次爬山也带了相机' }),
+        hop: 1,
+        relationType: 'SAME_TOPIC',
+        viaMemoryId: 'mem-1',
+        viaSnippet: '我在用 Prisma'
+      }
+    ];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(db.expandCalls).toHaveLength(1);
+    expect(block?.text).toContain('相关记忆');
+    expect(block?.text).toContain('上次爬山也带了相机');
+    expect(block?.memoryIds).toContain('hop-1');
+  });
+
+  it('关联开关关着时一次都不问关系表，注入块和加这一片之前一样', async () => {
+    db.memoryEnabled = true;
+    db.associationEnabled = false;
+    db.readRows = [memoryRow()];
+    db.expandHits = [
+      {
+        memory: memoryRow({ id: 'hop-1', content: '上次爬山也带了相机' }),
+        hop: 1,
+        relationType: 'SAME_TOPIC',
+        viaMemoryId: 'mem-1',
+        viaSnippet: '我在用 Prisma'
+      }
+    ];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    expect(db.expandCalls).toEqual([]);
+    expect(block?.text).not.toContain('相关记忆');
+    expect(block?.memoryIds).toEqual(['mem-1']);
   });
 
   it('重复注册不会让同一段记忆注入两次', async () => {

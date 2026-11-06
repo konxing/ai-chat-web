@@ -25,11 +25,21 @@ export interface CognitivePreferences {
    * 已存的记忆照常带入对话。两件事合成一件就没有「先别记、继续用旧的」这一档了。
    */
   memoryWritePaused: boolean;
+  /**
+   * 任务书 8.3 的「记忆检索设置」：每一轮最多注入几条记忆（1–8）。
+   * 它不是模块开关，也不是策略表的一列：七种情境共用同一个读取上限。
+   */
+  memoryReadLimit: number;
 }
+
+/** 读侧每轮注入条数的上下界，与 `MEMORY_READ_MAX_ITEMS` 一致；默认值就是加设置之前的行为。 */
+export const MEMORY_READ_LIMIT_MIN = 1;
+export const MEMORY_READ_LIMIT_MAX = 8;
+export const MEMORY_READ_LIMIT_DEFAULT = 8;
 
 type FlagKey = Exclude<
   keyof CognitivePreferences,
-  'emotionTransparency' | 'reflectionCooldown' | 'memoryWritePaused'
+  'emotionTransparency' | 'reflectionCooldown' | 'memoryWritePaused' | 'memoryReadLimit'
 >;
 
 /** 任务书 1.1 的八个开关：前七个各对一个模块，第八个管策略学习层。 */
@@ -61,7 +71,8 @@ const OFF: CognitivePreferences = {
   adaptiveMemoryEnabled: false,
   emotionTransparency: 'implicit',
   reflectionCooldown: 'daily',
-  memoryWritePaused: false
+  memoryWritePaused: false,
+  memoryReadLimit: MEMORY_READ_LIMIT_DEFAULT
 };
 
 const TO_STORED: Record<EmotionTransparency, StoredRow['emotionTransparency']> = {
@@ -98,7 +109,12 @@ function toPreferences(row: StoredRow): CognitivePreferences {
   const preferences = {
     emotionTransparency: FROM_STORED[row.emotionTransparency] ?? 'implicit',
     reflectionCooldown: COOLDOWN_FROM_STORED[row.reflectionCooldown] ?? 'daily',
-    memoryWritePaused: row.memoryWritePaused
+    memoryWritePaused: row.memoryWritePaused,
+    // 库里万一出现越界值（人工改库/旧版本），读侧按边界收，不让它把注入条数放大。
+    memoryReadLimit: Math.min(
+      MEMORY_READ_LIMIT_MAX,
+      Math.max(MEMORY_READ_LIMIT_MIN, row.memoryReadLimit ?? MEMORY_READ_LIMIT_DEFAULT)
+    )
   } as CognitivePreferences;
   for (const flag of COGNITIVE_FLAGS) preferences[flag] = row[flag];
   return preferences;
@@ -116,6 +132,7 @@ function toStored(patch: CognitivePreferencesPatch): Partial<StoredRow> {
     stored.reflectionCooldown = COOLDOWN_TO_STORED[patch.reflectionCooldown];
   }
   if (patch.memoryWritePaused !== undefined) stored.memoryWritePaused = patch.memoryWritePaused;
+  if (patch.memoryReadLimit !== undefined) stored.memoryReadLimit = patch.memoryReadLimit;
   return stored;
 }
 

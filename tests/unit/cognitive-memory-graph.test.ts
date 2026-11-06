@@ -8,8 +8,9 @@ import type { MemoryDto } from '@/lib/cognitive/memories';
 /**
  * 记忆网络的派生逻辑（任务书 8.2）。
  *
- * 这一片的命门是「网络不是一张新图，是老关系换个画法」：边只能从库里**已经存在**的关系推，
- * 不建 `MemoryRelation`、不做相似度、不猜「大概有关」。所以这里的用例分成两层——
+ * 这一片的命门是「网络不是一张新图，是已有的关系换个画法」：边只能从库里**已经存在**的东西推——
+ * 有证据的 `MemoryRelation` 行（11-06 起有表，只由写侧落）加上三种既成关系（演化边、同场对话、洞察引用），
+ * 不做相似度、不猜「大概有关」。所以这里的用例分成两层——
  * 一层钉「四种来源各自只产出它该产出的边」，一层钉「不该产出的东西一条都不产出」
  * （同主题不成边、空库不编节点、预算截断要说话）。
  */
@@ -481,20 +482,76 @@ describe('deriveMemoryGraph — ⑤ 情境策略的「参与关联」这一列�
   });
 });
 
-describe('不建 MemoryRelation（钉住「零迁移派生」这个决定）', () => {
-  it('schema 里没有 MemoryRelation 这张表：这张图靠派生，加表就是把它变成一份要维护的第二真相', () => {
-    expect(readFileSync('prisma/schema.prisma', 'utf8')).not.toMatch(/model\s+MemoryRelation\b/);
+describe('MemoryRelation 落地后仍然只有一个访问口', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8');
+
+  it('schema 有这张表，八种关系类型一个不少', () => {
+    // 11-06 的裁决：按任务书 2.3 建表。旧的那条「不建表」用例随裁决一起退役。
+    expect(schema).toMatch(/model\s+MemoryRelation\b/);
+    for (const type of [
+      'RELATED_TO',
+      'SAME_TOPIC',
+      'SUPPORTS',
+      'CONTRADICTS',
+      'EVOLVES_FROM',
+      'PART_OF',
+      'OCCURRED_BEFORE',
+      'CAUSES_WITH_EVIDENCE'
+    ]) {
+      expect(schema, type).toContain(type);
+    }
   });
 
-  it('src 里没有任何一处真的去访问 memoryRelation 这张表：一旦有人为了画得好看去加表或加读，这条先红', () => {
-    // 只咬 `prisma.memoryRelation` / `tx.memoryRelation` 这种属性访问的形状。
-    // 光看「文档里出现这个词」会咬到本文自己那句「不建 MemoryRelation」的判词——那是注释，不是读库。
+  it('只允许 relations.ts 碰这张表：别处绕过 userId/status 条件就是第二真相', () => {
     const offenders: string[] = [];
     for (const entry of readdirSync('src', { recursive: true, encoding: 'utf8' }) as string[]) {
       if (!entry.endsWith('.ts') && !entry.endsWith('.tsx')) continue;
       const path = join('src', entry);
-      if (/\b(?:prisma|tx|db)\.memoryRelation\b/.test(readFileSync(path, 'utf8'))) offenders.push(path);
+      if (/\b(?:prisma|tx|db)\.memoryRelation\b/.test(readFileSync(path, 'utf8'))) {
+        offenders.push(path.replace(/\\/g, '/'));
+      }
     }
-    expect(offenders).toEqual([]);
+    // relations.ts 是唯一入口：写侧、读侧扩展、记忆网络都从这里过。
+    expect(offenders).toEqual(['src/lib/cognitive/relations.ts']);
+  });
+});
+
+describe('deriveMemoryGraph — 库里记着的关系行', () => {
+  const a = memory({ id: 'a', content: '周末去爬山', chatId: 'chat-1' });
+  const b = memory({ id: 'b', content: '爬山要带相机', chatId: 'chat-1' });
+
+  it('SAME_TOPIC 行画成 relation，且不会被同场对话的派生线覆盖', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: [a, b],
+        relations: [{ sourceMemoryId: 'a', targetMemoryId: 'b', relationType: 'SAME_TOPIC' }]
+      })
+    );
+
+    expect(graph.edges).toEqual([{ from: 'a', to: 'b', kind: 'relation' }]);
+  });
+
+  it('EVOLVES_FROM 不重复画：那条线由演化边负责', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: [a, b],
+        relations: [{ sourceMemoryId: 'a', targetMemoryId: 'b', relationType: 'EVOLVES_FROM' }]
+      })
+    );
+
+    expect(graph.edges.some((edge) => edge.kind === 'relation')).toBe(false);
+    expect(graph.edges).toEqual([{ from: 'a', to: 'b', kind: 'sameChat' }]);
+  });
+
+  it('任一端关掉「参与关联」时，这条关系行不画', () => {
+    const graph = deriveMemoryGraph(
+      source({
+        memories: [a, b],
+        relations: [{ sourceMemoryId: 'a', targetMemoryId: 'b', relationType: 'SAME_TOPIC' }],
+        policies: policiesWith({ general: false })
+      })
+    );
+
+    expect(graph.edges).toEqual([]);
   });
 });

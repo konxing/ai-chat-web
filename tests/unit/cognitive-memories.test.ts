@@ -18,6 +18,7 @@ type Row = Record<string, unknown>;
 const db = vi.hoisted(() => ({
   rows: new Map<string, Row>(),
   edges: [] as Row[],
+  relations: [] as Row[],
   citations: [] as Row[],
   evidence: [] as Row[],
   creates: [] as Row[],
@@ -139,6 +140,27 @@ function fakeTransaction(pending: Array<() => void>) {
         pending.push(() => db.evidence.push(row));
         return Promise.resolve(row);
       }
+    },
+    memoryRelation: {
+      upsert: ({
+        where,
+        create,
+        update
+      }: {
+        where: { userId_sourceMemoryId_targetMemoryId_relationType: unknown };
+        create: Row;
+        update: Row;
+      }) => {
+        const key = where.userId_sourceMemoryId_targetMemoryId_relationType;
+        const existing = db.relations.find((row) => matches(row, key));
+        if (existing) {
+          pending.push(() => Object.assign(existing, update));
+          return Promise.resolve(existing);
+        }
+        const row: Row = { id: `rel-${db.relations.length + 1}`, ...create };
+        pending.push(() => db.relations.push(row));
+        return Promise.resolve(row);
+      }
     }
   };
 }
@@ -233,6 +255,7 @@ function baseInput(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   db.rows.clear();
   db.edges = [];
+  db.relations = [];
   db.citations = [];
   db.evidence = [];
   db.creates = [];
@@ -521,6 +544,49 @@ describe('记忆演化：更新是写新行，不是覆盖', () => {
     });
     // 理由里常会复述用户那句话，所以它和正文一样只能以密文躺在库里。
     expect(JSON.stringify(db.edges[0])).not.toContain('用户说了新的版本号');
+  });
+
+  it('改口同时把 EVOLVES_FROM 写进关系表，证据就是那条 revision', async () => {
+    const { createMemory, reviseMemory } = await memories();
+    const previous = await createMemory(baseInput());
+
+    const next = await reviseMemory({ ...REVISE, previousId: previous.id });
+
+    expect(db.relations).toHaveLength(1);
+    expect(db.relations[0]).toMatchObject({
+      userId: USER,
+      sourceMemoryId: next.id,
+      targetMemoryId: previous.id,
+      relationType: 'EVOLVES_FROM',
+      confidence: 1,
+      origin: 'SYSTEM',
+      status: 'ACTIVE'
+    });
+    expect(db.relations[0]!.evidenceIds).toEqual([db.edges[0]!.id]);
+  });
+
+  it('新建时给了同主题的旧行才连同主题边；没给就一条边都不写', async () => {
+    const { createMemory } = await memories();
+
+    const created = await createMemory(
+      baseInput({ content: '周末去爬山', sourceMessageId: 'msg-7' }),
+      [
+        { id: 'old-1', content: '下周末还想去爬山', context: 'technicalProject' as const },
+        { id: 'old-2', content: '周末去爬山', context: 'general' as const }
+      ]
+    );
+
+    expect(db.relations.map((row) => [row.relationType, row.targetMemoryId])).toEqual([['SAME_TOPIC', 'old-1']]);
+    expect(db.relations[0]).toMatchObject({
+      userId: USER,
+      sourceMemoryId: created.id,
+      origin: 'SYSTEM',
+      status: 'ACTIVE'
+    });
+
+    db.relations = [];
+    await createMemory(baseInput({ content: '周末去爬山' }));
+    expect(db.relations).toEqual([]);
   });
 
   it('类型和情境不传就沿用旧行，传了才换', async () => {

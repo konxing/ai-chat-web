@@ -1344,7 +1344,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 新的反例 | **行**有（`reviseMemory` 写 CONTRADICTS，`memories.ts:455`），**发现**没有 | **只报库里已有的行**。词法反例发现不接进来，见 `docs/cognitive-acceptance.md:537-570` 那次实测 36 条候选 0 条真是反例 |
 | 已经过时 | 全有，读侧：`validTo` / `supersededAt` | **做**，且与 `confidence.ts:72` 用同一个 `<=`，不留两处口径 |
 | 需要更新摘要 | **「记忆摘要」这个东西不存在**：`MemoryItem` 没有摘要列 | **不做**。不发明一个没有库存的对象来凑一项 |
-| 需要修改关联关系 | **没有可写的关系表**（2a 那次校准的结论，`cognitive-relations-calibration.test.ts:7-29`），派生图是只读的 | **不做**。检查将来能从只读派生邻居回答，动作没有可写的地方 |
+| 需要修改关联关系 | **没有可写的关系表**（2a 那次校准的结论，`cognitive-relations-calibration.test.ts:7-29`），派生图是只读的 | **不做**。检查将来能从只读派生邻居回答，动作没有可写的地方。**〔11-06 片O2：可写的表已经有了（`MemoryRelation`），但这一行仍然不做——检查器没有去改边：边只由「改口」和「新记忆落库」两个带证据的事件自己写，推断出来的「这两条该连」仍然没有生产者。表落地没有把这行变成可做的事〕** |
 
 ### 代码事实（一张新表、一个纯函数、两个旁表字段、一屏标记）
 
@@ -1476,7 +1476,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 
 | 决定 | 理由 | 挡掉的后果 |
 |---|---|---|
-| **不建 `MemoryRelation`** | 2a 那次阈值校准的结论就是不建表：一旦为画图加一张边表，它的维护者只能是猜 | 「第二真相」。这条由两条静态用例钉着（`cognitive-memory-graph.test.ts:484-500`：`schema.prisma` 里不许出现 `model MemoryRelation`，`src/` 里不许出现 `prisma.memoryRelation` 这种属性访问）——哪天有人为了画得好看去加表，这两条先红 |
+| **不建 `MemoryRelation`** | 2a 那次阈值校准的结论就是不建表：一旦为画图加一张边表，它的维护者只能是猜 | 「第二真相」。这条由两条静态用例钉着（`cognitive-memory-graph.test.ts:484-500`：`schema.prisma` 里不许出现 `model MemoryRelation`，`src/` 里不许出现 `prisma.memoryRelation` 这种属性访问）——哪天有人为了画得好看去加表，这两条先红。**〔11-06 片O2 更新：这条「不建」已被撤销，理由不是当年的判断错了，而是 2a 的实测否掉的只是「用词法分给任意两条记忆打 RELATED_TO 分」那一种生产者。表按任务书 2.3 建了，但只由两个带确定证据的生产者写；那两条静态守卫没有删，换成了「只允许 `relations.ts` 碰这张表」（现位置 `cognitive-memory-graph.test.ts:505`），仍然钉住「别处绕开 userId/status 自己拼一张图」〕** |
 | **同 `context` 只做分组，不成边** | 七个主题乘两百行是一把毛线球：画出来好看，读出来信息量为零 | 主题在界面上以**点的颜色**出现（`GRAPH_CONTEXT_COLORS`），不以线的形式出现。图例里没有「同一主题」这一种线，display 用例专门钉这一点 |
 | **星形，不是两两全连** | 同一场对话里 50 条记忆，真实关系是「都发生在那一场对话」，不是「两两各有一层关系」 | 全连给 1225 条边，星形给 49 条，而两种画法的可读性差别是零。锚点取这段对话里**最早**记下的那条（按 `recordedAt`，不是数组第一条） |
 | **闸门是两道：`associationEnabled` 且 `memoryEnabled`** | 前者管这一屏开不开，后者管「能不能读 `MemoryItem` 的正文」 | 只查前者的话，关掉长期记忆后这里照常返回记忆内容——等于给它自己开了个后门。`graphGates`（`route.ts:53`）一次读一遍偏好，两道闸共用，读不出来按**关闭**处理 |
@@ -1773,7 +1773,7 @@ P16 / P17 是同一个红利的两端：入参没有这个旋钮（编译期）�
 - **A1**（只有近期上下文）不可建：harness 离线不调模型，也没有标准答案之外的判分人。
 - **A2** = 现有旧基线，跑了。
 - **B**（+ 向量）不可建：就是上面那两次探针 + 库里 0 / 2 行向量。
-- **C**（+ 图关联）不可建：2a 那次阈值校准的结论是不建关系表；记忆网络是从三种**已经存在**的关系读时派生的（演化边 / 同场对话 / 洞察引用，`src/lib/cognitive/memory-graph.ts:1-20`），里面没有「相关度」也没有多跳——「图关联命中率」没有可测对象。
+- **C**（+ 图关联）不可建：2a 那次阈值校准的结论是不建关系表；记忆网络是从三种**已经存在**的关系读时派生的（演化边 / 同场对话 / 洞察引用，`src/lib/cognitive/memory-graph.ts:1-20`），里面没有「相关度」也没有多跳——「图关联命中率」没有可测对象。**〔11-06 片O2 更新：这一臂现在「代码可建、数据不可建」——`MemoryRelation` 与两跳扩展都落地了，但本机库里关系 0 行、30 个故事的 gold 也没标多跳，所以仍然没有数字。报告里的 C 行已按这个口径改写（`scripts/cognitive-eval/report.ts:193`）〕**
 - **D**（+ 反思与决策经验）**按数据**不可建：代码和确认界面都在（`src/components/settings/decision-panel.tsx:236` 那个「确认」按钮），库里 `DecisionRecord` / `ReflectionRecord` **各 0 行**（今天实测）。旧表里那句「Phase 5/6 未开始、确认界面还没做，今天一条决策记忆都落不进库」是过期陈述，这一片改成按数据说。
 - 改完重跑 `npm run eval:cognitive` 重生 `report.md`（`cognitive-eval-snapshot.test.ts` 逐字节比对）。**A2 和现状的数字一个没动**：Recall@8 仍是 0.0374 → 0.7274、MRR 0.0154 → 0.5828、违禁注入 1 → 0，动的只有那两张表的措辞和新加的那一列。
 
@@ -2253,7 +2253,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 
 | 表面上缺的 | 今天的事实 |
 |---|---|
-| LINK（建立关联） | 2a 那次阈值校准判的是**不建关系表**，实测数据钉在 `tests/unit/cognitive-memory-graph.test.ts` 的静态用例里；`memory-graph.ts:10-15` 与 `reconsolidation.ts:15` 都写明了「没有可写的关系表，派生图是只读的」。一个不存在的表没有「写入它」这个动作 |
+| LINK（建立关联） | 2a 那次阈值校准判的是**不建关系表**，实测数据钉在 `tests/unit/cognitive-memory-graph.test.ts` 的静态用例里；`memory-graph.ts:10-15` 与 `reconsolidation.ts:15` 都写明了「没有可写的关系表，派生图是只读的」。一个不存在的表没有「写入它」这个动作。**〔11-06 片O2：表建了，`memory-graph.ts` / `reconsolidation.ts` 那两处注释也改成读真表；LINK 仍然不做，理由换成「边只由带证据的生产者写，词法分类器不是生产者」〕** |
 | DELETE（遗忘） | 已经上线，而且不 in 写入决策层：纠正 / 归档（7.2）/ 永久删除（含按主题、按来源会话）各自有入口、路由和服务（`forgetting.ts`）。它是用户点出来的，不该由词法猜 |
 
 剩下真正没人读的只有那一列。所以这一片做的是**权限落地**，不是补动作。
@@ -2320,7 +2320,7 @@ route 签名 `learned: readonly string[]`），这一条是读源码定的，因
 
 | 位置 | 原来写的 | 为什么错 |
 |---|---|---|
-| `write-decision.ts:19-21` | LINK 「要的是 Phase 2 片C/片D 的图」 | 那张图今天不建表，2a 已经判过；照旧写「待建」会让人去建 `MemoryRelation` |
+| `write-decision.ts:19-21` | LINK 「要的是 Phase 2 片C/片D 的图」 | 那张图今天不建表，2a 已经判过；照旧写「待建」会让人去建 `MemoryRelation`。**〔11-06 片O2：表按 2.3 建了，这段注释随之改成「表有了，但边只由带证据的生产者写」；LINK 仍然不在动作联合里，判断没变〕** |
 | `memory-module.ts:41-43` | DELETE 「要的是用户点下那个按钮（Phase 6 界面）」 | 三种忘记（含 7.2 归档、7.3 按主题）早已上线，这一句把已交付的东西写成待办 |
 | `docs/cognitive-acceptance.md:905-907`（6-F 那节）与本文开头 | 「画像与关联两列至今没有任何运行时读取方，所以不给控件」 | 画像列片 d 起有读者、关联列本片有读者；两处都按日期改写成「那天如此，后来各自补上」 |
 
@@ -2694,6 +2694,28 @@ LINK 今天完全同一个形状：`RELATED_TO` 边没有可写的表（2a 判�
 **这条边界是「缺证据」，不是「已验收」。** DELETE 那一半不需要证据：任务书 7.2/7.3 把它写成用户点出来的动作，
 词法猜出来的「这句推翻了那条」若直接变成永久删除，就是把系统的推断放到用户的表达之上——
 这一条按裁决不做，不列进解锁条件。
+
+### 四、〔同日更新：片O2 建了表，但这四条解锁条件一条都没被满足〕
+
+同一天稍后的 片O2 按任务书 2.3 建了 `MemoryRelation`，两跳扩展也进了上下文。这不是「条件齐了」，
+是把这一节的问题**换了形状**，所以那一节的话留着不改写，只在下面把实际发生的差别写清楚：
+
+| 本节解锁条件 | 片O2 之后 |
+|---|---|
+| 1. 打分器换成语义那一种 | **没做。** 仍然没有一个给两条记忆打 `RELATED_TO` 分的东西；`SAME_TOPIC` 用的还是 `topicSignature` 的词法重合，只是它连的边有确定证据（新记忆和它自己的来源消息），不需要阈值去「判像不像」 |
+| 2. 有可测的语料 | **没变。** 本机 `MemoryItem` 仍是 2 行，`MemoryRelation` 落地当天 **0 行** |
+| 3. 有标注的对照 | **没变。** 30 个故事标的是「该召回哪条记忆」，没有一条标「这两条该是哪类关系」 |
+| 4. 三条齐了才动表和多跳，且默认关 | **被越过的正是这一条**，越过的理由是：这一片要的两类边根本不需要那三条。改口和同主题落库是**已经发生的事实**，写成边的证据就是那条 revision / 那条消息；需要打分器的是 `RELATED_TO`，而它今天**仍然没有生产者**，表里那个枚举值至今只能由人工或将来某个带证据的写入方产生 |
+
+**所以这一节的判断标准仍然有效**：0.262～0.481 和 0.192～0.412 那两个互相盖住的区间，
+挡住的仍然是「自动给任意两条记忆连 `RELATED_TO`」——那件事片O2 也没做，而且片O2 之后仍然不该做。
+`write-decision.ts:19-24` 里 LINK 依旧不在动作联合中，理由从「没有可写的表」换成了
+「表有了，但没有带证据的生产者」——结论一样，理由更准了。
+
+那两条静态守卫（`schema.prisma` 里不许出现 `model MemoryRelation`、`src/` 里不许出现 `prisma.memoryRelation`）
+在片O2 被**替换**而不是删除：现在钉的是「全仓只有 `src/lib/cognitive/relations.ts` 能碰这张表」
+（`cognitive-memory-graph.test.ts:505`）。守卫要挡的东西从来没变——别处绕开 `userId` 与 `status`
+自己拼一张图，就是第二真相。
 
 ## 片S：AAD 补上第四个坐标——以及「不能破坏旧密文」这条红线怎么被真库量了一次（11-06）
 
@@ -4739,3 +4761,250 @@ B5 用的是 6 字节假向量，不是真库向量（本地那两行向量的�
 图关联 4、认知时间线 4、主动反思 5、决策记忆 4、系统 5。以本账本为准。
 
 六、这一片没改任何召回参数、没动 fixture、没碰数据库；`report.md` 的召回数字与上一版逐字相同。
+
+## 片O2：MemoryRelation 建表 + 两跳关联扩展（11-06）
+
+### 一、为什么这一次推翻片N/片O 的「不建表」
+
+片N/片O 的结论是「不建 MemoryRelation」，理由是当时的四个解锁条件一条都没满足：没有语义相似度
+打分器、库里只有 2 行记忆、没有人工标注的关系对、关系表 0 行。这个结论在它自己的前提下是对的，
+但它把**所有**边都一起挡了——而其中两种边的证据不需要打分器：
+
+一、`EVOLVES_FROM`。`reviseMemory` 已经把「同一件事的新说法」这件事记在 `MemoryRevision` 上了，
+演化边不是推断，是已经落库的事实抄一份到图上。置信度 1，证据就是那条 revision 的 id。
+
+二、`SAME_TOPIC`。`createMemory` 拿得到同一情境下已有的行，词面重合是确定性计算，
+不需要模型。重合不到 2 个词就不建边，边数封顶 3 条，没有来源消息时置信度封顶 0.5 且证据为空。
+
+所以这片的裁决口径是：**建表只为了这两条有确定证据的边**；`RELATED_TO` 仍然没有任何生产者，
+需要打分器这条前置条件一分没降。片N/片O 那四条解锁条件到今天仍然全部未满足，
+本文件在片N/片O 那节后面另起了「同日更新」小节逐条记下这件事，别让读者以为建表就是解锁了。
+
+另有一条不变：写动作联合里仍然没有 `LINK`（`write-decision.ts:17-24`）。关系边只在**已经决定
+写入或演化**的事务里顺带产生，不会因为「这两句像」就凭空多写一行记忆。
+
+### 二、落地形状
+
+| 位置 | 做了什么 |
+|---|---|
+| `src/lib/cognitive/relations.ts`（新，233 行） | 本片唯一的表访问者。常量 6 个：`GRAPH_MAX_DEPTH = 2` `:19`、`GRAPH_MAX_NODES = 30` `:20`、`GRAPH_MAX_INJECTED = 8` `:21`、`GRAPH_MIN_CONFIDENCE = 0.5` `:22`、`TOPIC_RELATIONS_PER_MEMORY = 3` `:23`、`TOPIC_OVERLAP_MIN = 2` `:25` |
+| 同文件 `:38` / `:60` / `:108` / `:142` / `:178` | `recordEvolutionRelation`、`recordTopicRelations`（重合过滤 `:82`、条数封顶 `:84`）、`listRelationsForGraph`、`RELATION_TYPE_LABELS`、`expandRelatedMemories` |
+| 同文件 `:189`–`:233` | 两跳循环 `:189`；节点预算在两处检查（`candidates >= GRAPH_MAX_NODES` `:190`、循环内 `:203`）；边查询固定带 `userId` + `status: 'ACTIVE'` + `confidence: { gte: GRAPH_MIN_CONFIDENCE }` `:195`；注入封顶 `:233` |
+| `prisma/schema.prisma:128` `:140` `:147` `:651`–`:673` | `MemoryRelationType`（八种）、`MemoryRelationOrigin`（SYSTEM/USER）、`MemoryRelationStatus`（ACTIVE/REJECTED）；表体两个复合外键都带 `userId`，`@@unique([userId, sourceMemoryId, targetMemoryId, relationType])`，两条 `(userId, *, status)` 索引 |
+| `prisma/migrations/20261110000000_memory_relation/migration.sql`（65 行） | 三个 `CREATE TYPE` `:5` `:17` `:20`、`CREATE TABLE` `:23`、唯一索引 `:40`、两条索引 `:44` `:48`、三个外键 `:53` `:58` `:64`。**已落库**：`npx prisma migrate status` → 22 migrations / up to date |
+| `src/lib/cognitive/memories.ts:364`–`:365` `:463` | 两个调用点，都已经在 `createMemory` / `reviseMemory` 的 `$transaction` 里面——边和行同生共死，不存在「行写成功了边写失败了」 |
+| `src/lib/cognitive/memory-module.ts:12` `:74` `:109`–`:110` | 读侧接线：`memories.length > 0 && preference.associationEnabled` 才问关系表；`RELATED_BLOCK_HEADER` `:74` |
+| 同文件 `:237` `:245` `:260` | 关联行**共用种子块那 1500 字符预算**：外层先量标题放不放得下 `:237`，逐行再量 `:245`；引用清单 `memoryIds` 用 `[...used, ...relatedUsed]` `:260`，写进文字的行和报出去的行是同一批 |
+| 同文件 `:362`–`:364` | 写侧把同情境已有行的 `id/content/context` 交给 `createMemory`，`SAME_TOPIC` 的输入就是这份 |
+| `src/app/api/account/cognitive/graph/route.ts:7` `:52` `:56` + `memory-graph.ts:44` `:89` `:114` | 图形一屏读到真边：`relations` 参数默认空数组，派生时**证据线先画、推导布局线后画** |
+| `src/lib/cognitive/preferences.ts:67` + `schema.prisma:502` | `associationEnabled` 默认 **false**（`@default(false)`）。这片的运行时读者有，但模块出厂是关着的 |
+| `write-decision.ts:17-24`、`reconsolidation.ts`「是否需要修改关联关系」行 | 两处过期口径同步：表已存在，但边只来自有证据的生产者；「该不该改一条边」仍然没有可自动检测的信号，仍判不做 |
+
+### 三、先红
+
+`Failed to load url @/lib/cognitive/relations`——模块不存在，`Tests no tests`。
+建表、建服务、两处调用点接线后：`cognitive-relations.test.ts` 11 条全绿。
+
+### 四、用例
+
+`tests/unit/cognitive-relations.test.ts`（新，335 行 / 11 条），三个 describe：
+
+写侧「只建两种有确定证据的边」`:133`：
+1. 演化边写成 EVOLVES_FROM，证据就是那条 revision，置信度 1 `:134`
+2. 同主题边最多连三条，只连同情境且重合至少两个词的行 `:151`
+3. 没有来源消息时，同主题边的置信度封顶 0.5、证据为空 `:182`
+
+读侧「两跳扩展的四道限制」`:199`：
+4. 只走两跳：第三跳上的行不会被注入 `:220`
+5. 情境策略关掉关联时，那个情境的种子不扩、目标也不进 `:233`
+6. 目标不在可见池、或已被保留期挡掉时一条都不给 `:243`
+7. 情绪总开关关着时，情绪类目标不进上下文 `:270`
+8. 最多注入 8 条，且查询永远带着 userId 与 ACTIVE `:280`
+9. 低置信度的边不参与扩展 `:298`
+
+渲染「关联行和种子共用同一个字符预算」`:304`：
+10. 关联行写进同一个块，并进引用清单 `:316`
+11. 预算放不下时一条关联行都不写，也不谎报引用 `:324`
+
+改的测试文件：
+
+- `cognitive-memories.test.ts:549`「改口同时把 EVOLVES_FROM 写进关系表，证据就是那条 revision」
+  ——断言到 `evidenceIds` 逐字等于演化边 id；`:568`「新建时给了同主题的旧行才连同主题边；没给就一条边都不写」。
+- `cognitive-memory-module.test.ts:707`「关联开关开着时才问关系表，扩展行进同一个注入块（任务书 3.2 的接线）」、
+  `:729`「关联开关关着时一次都不问关系表，注入块和加这一片之前一样」。
+  这两条是 P10 探针逼出来的：11 条 relations 用例全绿时，读侧其实根本没调 `expandRelatedMemories`。
+- `cognitive-memory-graph.test.ts:488`「schema 有这张表，八种关系类型一个不少」、
+  `:505`「只允许 relations.ts 碰这张表：别处绕过 userId/status 条件就是第二真相」——
+  静态守卫用 `/\b(?:prisma|tx|db)\.memoryRelation\b/` 扫全仓，除 `relations.ts` 外任何文件出现即红。
+  同文件 `:519` 起的 `describe('deriveMemoryGraph — 库里记着的关系行')` 两条：
+  `:523`「SAME_TOPIC 行画成 relation，且不会被同场对话的派生线覆盖」、
+  `:546`「任一端关掉「参与关联」时，这条关系行不画」。
+- `cognitive-memory-graph-route.test.ts:381`「库里的关系行也进图（片O）」`:382`
+  「按节点集合向 session 用户取关系，并画成 relation 线」。
+
+两片合计新增 25 条：片O2 19 条（relations 11 + memories 2 + module 2 + memory-graph 3 + route 1）、
+片V2 6 条（preferences 4 + module 1 + panel 1），文件数 +1。
+
+### 五、变异探针（本会话在当前树上逐条重跑，每条当场字面回滚）
+
+| 探针 | 变异 | 结果 |
+|---|---|---|
+| P1 | 删 `memories.ts:463` 的演化边调用 | 1 红（关系表用例；`memories.ts:364` 同主题调用点单独变异也是 1 红） |
+| P2 | `GRAPH_MAX_NODES` 预算判定去掉 | **逃逸**：30 节点上限在 fixture 规模下永远碰不到，只有代码意义没有证据意义 |
+| P3 | `GRAPH_MAX_DEPTH` 改成 3 | 2 红（两跳用例 + 注入条数） |
+| P4a | 只关种子侧的 `allowAssociation` | **逃逸** |
+| P4b | 只关目标侧的 `allowAssociation` | **逃逸** |
+| P4c | 两侧一起关 | 1 红——情境闸门只有「两端都拦」这一种可证形状 |
+| P5 | 保留期过滤移除 | 1 红 |
+| P6 | `confidence: { gte: GRAPH_MIN_CONFIDENCE }` 整个条件删掉 | 2 红 |
+| P7a | `GRAPH_MAX_INJECTED` 的 `slice` 去掉 | 1 红 |
+| P8a | 只去掉外层标题预算检查 `:238` | **逃逸** |
+| P8b | 只去掉逐行预算检查 `:245` | **逃逸** |
+| P8c | 两处一起去掉 | 1 红——同一个「不越 1500 字符」的不变量由两处共同守，单拆任一处仍有另一处兜住 |
+| P9 | 引用清单改用「候选全集」而不是「真正写进文字的那批」 | 2 红 |
+| P10 | 只跑 relations 文件时读侧接线缺失 | 1 红，且暴露接线洞——补了 `:707` / `:729` 两条模块用例关掉 |
+
+逃逸四条（P2 / P4a / P4b / P8a / P8b 中的四条同类）如实记下，不粉饰成「测试够了」：
+P2 是规模不足（本机库里 0 条边、fixture 最多三跳六个节点），要真数据才有意义；
+P4a/P4b 和 P8a/P8b 是**防御性冗余**——一道拦不住是因为还有另一道，两道同时拆才红。
+这类「单点拆不红、合拆才红」的口径，本身就是这片的边界，不是漏测。
+
+### 六、门禁
+
+- `npx tsc --noEmit`：干净。
+- `npx vitest run tests/unit`：**119 文件 / 1969 条全绿**（片W 时 118 / 1944；两片合计 +1 文件、+25 条）。
+- `npx prisma migrate status`：22 migrations，Database schema is up to date。
+- 真库实测（只读计数，未写入）：`MemoryRelation` **0 行**、`MemoryItem` **2 行**。
+- `npm run eval:cognitive` 与片W 基线逐字相同：故事 30、提问 116、可见记忆 186 行；
+  Recall@8 `0.0374 → 0.7274`、Precision@8 `0.0043 → 0.097`、MRR `0.0154 → 0.5828`、
+  违禁注入 `1 → 0`、低可信漏标 `0 → 0`、平均注入字符 `301 → 315.5862`；
+  检索纯函数延迟本机 261 µs（上一版 262 µs，属噪声），不入基线。
+  **召回数字没动**，因为 `associationEnabled` 默认关着，评测四臂走的仍是原路径。
+
+### 七、行号复核
+
+新文件 `relations.ts` 实测 233 行、测试 335 行、迁移 SQL 65 行；上表 24 处引用（6 个常量、5 个函数、
+4 处读侧、2 处写侧调用、3 处图形/路由、3 处 schema、2 处口径修正）全部在写完后重新 grep 复核过，
+与当前树一致。`memory-module.ts` 的 `MEMORY_READ_MAX_ITEMS = 8` 在 `:56`、`MEMORY_READ_MAX_CHARS = 1500`
+在 `:57`。结论：无需改号。
+
+### 八、边界（含无法验收项）
+
+一、**关系表在他库里是 0 行。** 这片证明的是「代码会写哪两种边、读侧会怎么扩」，
+不是「这台机器的关联召回变好了」。库里既没有边，也没有一条真数据的扩展结果可看。
+
+二、`associationEnabled` 默认 false，所以这片**没有任何运行时影响**——不是缺陷，是规矩：
+无实测收益不得默认开启。要让它开着，得先有真边、再有两臂对照，那需要他的数据和他的决定。
+
+三、`RELATED_TO` 至今没有生产者。八种关系类型里今天只有两种能被代码写出来；
+剩下六种（含 `CONFLICTS_WITH`、`PART_OF`、`CAUSES`、`LINK`）在写侧是空位，
+只有 `listRelationsForGraph` / 图形一屏会显示它们——**表能装不等于有人在装**。
+
+四、四臂的 C 臂（图关联）仍然不可建，原因从「没有表」改成更准的一句：
+「代码可建、数据不可建」——库里关系 0 行，拿不出两臂差异。`metric-coverage.ts` 的四条图关联
+blocked 原因同步改掉，仍然 blocked。
+
+五、两跳扩展的正确率类指标（关系分类准确率、高置信度精确率、图扩展召回、无关关联率）
+一条都没解锁：需要人工标注的关系对，本机 2 行记忆连标注的原料都不够。
+
+六、`LINK` 仍不在写动作联合里。`write-decision.ts:17-24` 的注释已经改成「表已存在，
+但边只来自有证据的生产者」，动作枚举一个没加——不会因为建了表就多写一行记忆。
+
+七、真库上没跑过带边的扩展。`expandRelatedMemories` 的证据全部来自替身层（prisma-mock），
+PostgreSQL 的 `IN` + 复合外键 + `@@unique` 冲突上去重，只用过 `migrate status` 和行数统计核对。
+
+## 片V2：记忆检索设置做成真旋钮（任务书 8.3，11-06）
+
+### 一、为什么做
+
+任务书 8.3 列了「记忆检索设置」这一屏，片V 的聚合屏（认知中心门厅）已经把别的都收进去了，
+只剩这一档：`memoryReadLimit` 从来没有存过，读侧写死 8 条（`MEMORY_READ_MAX_ITEMS`），
+所以屏上没有控件——因为**根本没有这个值**。
+
+规矩是「不摆没人读的旋钮」，反过来也一样：要给用户一个旋钮，就得先让读侧真的按它办事。
+这片的顺序就是这个意思：先让 `selectMemoryCandidates` 的 `limit` 能被外部影响，再落列、再上界面。
+
+### 二、落地形状
+
+| 位置 | 做了什么 |
+|---|---|
+| `prisma/schema.prisma:519` | `memoryReadLimit Int @default(8)`——默认值就是加这列之前读侧写死的那个数，**没有记录时行为不变** |
+| `prisma/migrations/20261110000001_memory_read_limit/migration.sql`（5 行） | `ADD COLUMN ... INTEGER NOT NULL DEFAULT 8`。已落库 |
+| `src/lib/cognitive/preferences.ts:36-38` `:75` `:114-117` `:135` | `MEMORY_READ_LIMIT_MIN/MAX/DEFAULT = 1/8/8`；默认档 `:75`；读侧钳制 `:114-117`；PATCH 白名单 `:135`；字段声明 `:32`，而 `:42` 的 `FlagKey` 排除列表把它挡在「八个布尔开关」之外——它是一档数字，不是一个开关 |
+| `src/lib/validation.ts:137` | `z.number().int().min(1).max(8).optional()`——小数、负数、9 一律拒 |
+| `src/lib/cognitive/memory-module.ts:102` `:178` | `limit: preference.memoryReadLimit` 传给纯函数；`:178` 再钳一次 `Math.min(MEMORY_READ_MAX_ITEMS, Math.max(1, input.limit ?? MEMORY_READ_MAX_ITEMS))` |
+| `src/components/settings/memory-policy-panel.tsx:507`–`:536` | 「检索设置」小节：说明「这一档决定每一轮最多把几条记忆带进对话。它只改条数，不改检索方式；调低不会删除任何记忆，只是让回答少看几条。」；label「每轮最多注入」；`<select id="memory-read-limit">` 只列 1..8；尾句「上限 8 条与任务书默认值一致；调高不会超过它。」 |
+| 同文件 `:123-126` `:303`–`:318` | `readLimit` 初值 `null` = 没读到，界面显示「当前值未知」而不是替他猜；`saveReadLimit` 只 PATCH `memoryReadLimit` 一个字段，**以服务端回读值为准**，成功提示「检索条数已更新」 |
+
+### 三、先红
+
+这片的三条红分别落在三个文件（用例名见下一节）：`cognitive-preferences.test.ts:235` 那组在没有
+`memoryReadLimit` 键时拿不到默认 8；`cognitive-policy-panel.test.ts:110` 在源码里搜不到
+`memory-read-limit`；`cognitive-memory-module.test.ts:694` 在设置改成 3 之后仍然注入 8 条。
+
+一句实话：**原始失败输出没有逐字留档**（那三次红发生在本会话压缩之前，我只保留了结论与用例名）。
+所以这一节可复现的证据是下面两条，不是当时的报错文本：一是这 6 条用例在当前树上全绿且各钉一处，
+二是第五节 V1–V5 变异探针在当前树上逐条重跑过——把 `limit` 传给纯函数的那行一改，`:694` 立刻红。
+
+### 四、用例
+
+`cognitive-preferences.test.ts:235` 起的 4 条：
+1. 没有记录时默认 8 条，等于加这一列之前的行为
+2. 改了之后按 userId 落库，另一个用户不受影响
+3. 库里出现越界值时读侧按 1..8 收，不把注入条数放大
+4. PATCH 的白名单只收 1..8 的整数
+
+`cognitive-memory-module.test.ts:694`「检索设置调低到 3 条时，读侧真的只注入 3 条（任务书 8.3）」——
+这条是这片的真正接缝：不看这一条，无法区分「列存上了」和「列有人读」。
+
+`cognitive-policy-panel.test.ts:110`「面板有真控件，且只提交 memoryReadLimit 这一个字段」——
+静态断言：源码里必须同时出现「检索设置」「每轮最多注入」和 `memory-read-limit`，且 PATCH 载荷只有这一个键。
+
+### 五、变异探针（当前树逐条重跑、当场字面回滚）
+
+| 探针 | 变异 | 结果 |
+|---|---|---|
+| V1 | `validation.ts:137` 去掉 `.max(8)` | 1 红（`memoryReadLimit: 9` 不再被拒） |
+| V2 | `preferences.ts:114-117` 钳制整段删掉 | 1 红（「库里出现越界值时读侧按 1..8 收」） |
+| V3 | 只删上界、留下界 | 1 红，同一用例——两个方向各自被钉住 |
+| V4 | `memory-module.ts:178` 改成 `const limit = MEMORY_READ_MAX_ITEMS;`（忽略 `input.limit`） | 1 红 / 118 绿（跨 module、seam、情绪闸门三处重跑）——读侧不按设置办事立刻可见 |
+| V5 | `:178` 只去掉 `Math.min(MEMORY_READ_MAX_ITEMS, …)` | **逃逸，119 全绿**：这条是纵深防御，`validation` 与 `preferences` 已经各收一次，第三层拆掉不会造成任何可观测越界。**记为冗余，不当作漏测去补用例**——为它编一条「绕过前两层」的测试，等于用假数据证明第三层有用 |
+
+### 六、门禁
+
+- `npx tsc --noEmit`：干净。
+- `npx vitest run tests/unit`：**119 文件 / 1969 条全绿**（与片O2 同批提交，合计 +1 文件 / +25 条；本片自己 6 条 = 偏好 4 + 读侧接缝 1 + 面板静态断言 1，其余 19 条属片O2）。
+- 真库核对：`memoryReadLimit` 列存在、类型 integer、`column_default` = 8。
+  （第一次查询误用 `"columnDefault"`，PostgreSQL 报 42703；改用 `column_default` 后取到值。）
+- `npm run eval:cognitive`：数字与片W 基线逐字相同——默认 8 就是原来的写死值，
+  所以「平均注入字符 315.5862」这类口径**没有**因为这列而漂移，这是这片最重要的负向证据。
+
+### 七、行号复核
+
+`preferences.ts` 的三处（常量 `:36-38`、默认 `:75`、钳制 `:114-117`、PATCH `:135`）、
+`validation.ts:137`、`memory-module.ts:102` 与 `:178`、面板小节 `:507`–`:536` 与
+`saveReadLimit :303`–`:318`、测试 `:694` / `:110` / `:235`，写完重新 grep 复核。
+唯一需要说明的是面板：`readLimit` 的 state 声明在 `:123-126`，`saveReadLimit` 从 `:303` 开始——
+两者之间隔着情绪档位与自动收紧的既有代码，这片的改动没有重排它们。结论：无需改号。
+
+### 八、边界（含无法验收项）
+
+一、**8 是上限，不是建议。** 任务书 8.3 只说「可配置」，没说可超过当前实现。
+现在 1..8 是三层同口径（`validation` / `preferences` / `memory-module`），三层各写一遍这个数字；
+`validation.ts:136` 的注释已经把「改一边忘改另一边时严格的一边先报错」这件事说明白了。
+真要放开上界，得先有「注入 12 条会不会把回答拖坏」的实测。
+
+二、**这档只改条数，不改检索方式。** 面板文案写了这句，代码也确实如此：
+`selectMemoryCandidates` 的排序、闸门、保留期过滤一个都没动。没有「检索模式」下拉，
+因为站内今天只有一个检索模式，摆第二个选项就是摆一个没人读的旋钮。
+
+三、**界面只做过静态断言，没起服务真渲染。** 单测在 node 环境跑，没有 jsdom，
+所以对面板的证据是「源码里有这些字符串和这个 id、PATCH 载荷只有这一个键」，
+不是「浏览器里点了一下确实变成 3 条」。真渲染需要他起服务。
+
+四、**没替他改过任何人的这一档。** 迁移只加列和默认值；`MemoryPolicy` / `CognitivePreference`
+里他现有的开关与档位一个没动，`memoryReadLimit` 在他库里今天仍是默认的 8。
+
+五、片V（#226）到此只剩「要不要再给检索设置单独一屏」这个问题。现在它长在策略面板里
+（和情绪档位、自动收紧同一屏），聚合屏有入口。**按「不摆没人读的旋钮」这条规矩，
+不再单独起一屏**；#226 的剩余部分记为已按此口径关闭。

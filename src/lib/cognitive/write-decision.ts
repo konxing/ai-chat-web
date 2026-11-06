@@ -17,9 +17,11 @@ import {
  * 测试：tests/unit/cognitive-write-decision.test.ts
  *
  * LINK 和 DELETE 都没有分支，而且这两个缺口是**关掉的**，不是待建：
- * 关系全部从库里已经存在的行推导（2a 那次阈值校准判的就是不建关系表），所以「建立关联」永远不会
- * 成为一个由词法猜出来的写入动作；DELETE 是用户点出来的动作，三种忘记（纠正/归档/永久删除）各有自己的
- * 入口和路由，不在这一层。这一层只决定「这条候选要不要落库、以什么身份落库」。
+ * `MemoryRelation` 表已经有了（11-06 按 2.3 建），但边只由带证据的生产者写——演化时一条 `EVOLVES_FROM`、
+ * 落库时至多三条 `SAME_TOPIC`，都在 `memories.ts` / `relations.ts` 里，不在这一层。2a 那次阈值校准的结论
+ * 仍然成立：词法分不出「同一件事」和「同一个句式」，所以「建立关联」永远不会成为一个由词法猜出来的写入动作；
+ * DELETE 是用户点出来的动作，三种忘记（纠正/归档/永久删除）各有自己的入口和路由，不在这一层。
+ * 这一层只决定「这条候选要不要落库、以什么身份落库」。
  */
 export type MemoryWriteAction = 'WRITE' | 'UPDATE' | 'EPHEMERAL' | 'ASK_CONFIRM' | 'IGNORE';
 

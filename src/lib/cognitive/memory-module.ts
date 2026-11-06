@@ -9,6 +9,7 @@ import { decisionModule } from './decision-module';
 import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
+import { expandRelatedMemories, RELATION_TYPE_LABELS, type RelatedMemoryHit } from './relations';
 import { embedMemoryText } from './embedding';
 import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
 import { excludedHashes, exclusionHash } from './exclusions';
@@ -45,8 +46,10 @@ import type { MemoryDto, MemoryOrigin } from './memories';
  * 为什么不是「一个」纯函数：那样得把整池 200 行的证据计数一次查出来，
  * 而今天只查选中的 8 条——一次 IN (200) 换不来任何东西。
  *
- * LINK 和 DELETE 这里没有分支，而且这两个缺口是关掉的：关系全部从库里已有的行派生（2a 判的是不建关系表），
- * 「建立关联」因此永远不会是一次写入动作；删除走的是用户点出来的三种忘记，各有自己的服务与路由。
+ * LINK 与 DELETE 在写入决策里仍然没有分支，但「建立关联」已经有真实生产者：
+ * 同主题边由这一片的写侧在同一个事务里落库（relations.ts），演化边由 reviseMemory 落库；
+ * 读侧的两跳扩展受 associationEnabled 控制。DELETE 仍然只走用户点出来的三种忘记——
+ * 让模型自己决定「永久删除」不在这一版的授权范围内。
  * ASK_CONFIRM 有分支（片M）：它写进待确认候选表，用户点「记住」之后才成为记忆——
  * 在此之前这句话在任何读路径上都看不见，所以它既不是「记住了」也不是「问过了」，它是「在等用户回答」。
  */
@@ -67,6 +70,8 @@ export const MEMORY_RETRIEVAL_POOL = 200;
 const SUPERSEDE_REASON = '用户在后续对话中再次提到这件事，按新版本处理';
 
 const MEMORY_TEXT_HEADER = renderFramingHeader(MEMORY_FRAMING);
+/** 关联扩展那几行的抬头。它和种子正文共用字符预算，抬头本身也占位。 */
+const RELATED_BLOCK_HEADER = '相关记忆（由已选记忆的关系扩展而来，仍只是参考资料）：';
 
 /** 忽略空白和大小写后相同，就认为是同一句话——重复陈述不该变成第二条记忆。 */
 function dedupeKey(text: string): string {
@@ -82,6 +87,9 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
   // 读不到保留期就注入，等于把用户设成「30 天」的记忆又端回模型面前，宁可这一轮不带记忆。
   const policies = await getMemoryPolicies(turn.userId);
+  // 偏好读一次，两个值一起用：检索条数上限管选几条，associationEnabled 管要不要扩关联。
+  // 读失败就让模块失败（manager 隔离），而不是退回默认值替用户改设置。
+  const preference = await getCognitivePreferences(turn.userId);
   const emotionTransparency = turn.emotionTransparency ?? 'implicit';
   const memories = selectMemoryCandidates({
     query: turn.content,
@@ -90,11 +98,27 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     chatId: turn.chatId,
     now,
     emotionTransparency,
-    emotionEnabled: turn.emotionEnabled
+    emotionEnabled: turn.emotionEnabled,
+    limit: preference.memoryReadLimit
   });
   // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
   const confidence = await assessMemories(turn.userId, memories, now);
-  return renderMemoryBlock(memories, confidence, emotionTransparency);
+  // 关联扩展是 associationEnabled 的运行时读者：关着时连关系表都不问。
+  // 扩展目标只从这一轮已经取回的可见池里出，所以不会把失效行捞回上下文。
+  let related: RelatedMemoryHit[] = [];
+  if (memories.length > 0 && preference.associationEnabled) {
+    related = await expandRelatedMemories({
+      userId: turn.userId,
+      seeds: memories,
+      rows,
+      policies,
+      chatId: turn.chatId,
+      now,
+      emotionEnabled: turn.emotionEnabled,
+      emotionTransparency
+    });
+  }
+  return renderMemoryBlock(memories, confidence, emotionTransparency, related);
 }
 
 export interface MemorySelectionInput {
@@ -127,6 +151,11 @@ export interface MemorySelectionInput {
    * 拿到的该是今天的形状，而不是一路都带着偏好行的那个值。
    */
   emotionEnabled?: boolean;
+  /**
+   * 这一轮最多选几条（任务书 8.3 的「记忆检索设置」）。缺省 8；
+   * 越界值按边界收，不让一个坏值把提示词预算放大。
+   */
+  limit?: number;
 }
 
 /**
@@ -144,18 +173,21 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
   // 排在前面才同时保证两件事——情绪行不进排序，也就拿不到名额、进不了 memoryIds。
   const dropEmotion = input.emotionEnabled === false || input.emotionTransparency === 'off';
   const pool = dropEmotion ? input.rows.filter((memory) => memory.type !== 'emotion') : input.rows;
+  // 任务书 8.3 的检索设置：用户可以把每轮注入条数调低。上界仍是 8——
+  // 那是提示词预算的一部分，不是「想要更多就更多」。
+  const limit = Math.min(MEMORY_READ_MAX_ITEMS, Math.max(1, input.limit ?? MEMORY_READ_MAX_ITEMS));
   const usable = pool.filter((memory) =>
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
   if (input.queryVector == null) {
-    return rankMemories(input.query, usable, { limit: MEMORY_READ_MAX_ITEMS });
+    return rankMemories(input.query, usable, { limit });
   }
 
   // 排序用的是带了 vector 字段的临时对象，返回的必须还是调用方给的那几行：
   // 向量流进渲染和置信度那段，等于把 3072 个浮点数挂在每条记忆上一路带着走。
   const originals = new Map(usable.map((memory) => [memory.id, memory]));
   const candidates = usable.map((memory) => ({ ...memory, vector: input.vectors?.get(memory.id) ?? null }));
-  const ranked = rankMemoriesHybrid(input.query, input.queryVector, candidates, { limit: MEMORY_READ_MAX_ITEMS });
+  const ranked = rankMemoriesHybrid(input.query, input.queryVector, candidates, { limit });
 
   return ranked.map((candidate) => originals.get(candidate.id)!);
 }
@@ -169,7 +201,8 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
 export function renderMemoryBlock(
   memories: readonly MemoryDto[],
   confidence: ReadonlyMap<string, Confidence>,
-  emotionTransparency: EmotionTransparency = 'implicit'
+  emotionTransparency: EmotionTransparency = 'implicit',
+  related: readonly RelatedMemoryHit[] = []
 ): CognitiveBlock[] {
   const lines: string[] = [];
   // 进了 text 的那几条才算引用（任务书 8.2）：报一条模型没读到的记忆，比少报一条更糟。
@@ -197,6 +230,26 @@ export function renderMemoryBlock(
     size += line.length;
   }
   if (lines.length === 0) return [];
+  // 关联扩展的条目和正文共用同一个字符预算：任务书 3.2 的 1500 是整块上下文，
+  // 不是「种子 1500 + 关联 1500」。放不下就一条都不放，并在引用清单里如实缺席。
+  const relatedUsed: string[] = [];
+  if (related.length > 0) {
+    const header = RELATED_BLOCK_HEADER;
+    if (size + header.length + 1 <= MEMORY_READ_MAX_CHARS) {
+      const relatedLines: string[] = [];
+      let relatedSize = size + header.length + 1;
+      for (const hit of related) {
+        const line =
+          `- [相关｜${RELATION_TYPE_LABELS[hit.relationType]}｜${hit.hop} 跳] ` +
+          `${hit.memory.content}（由「${hit.viaSnippet}」关联）`;
+        if (relatedSize + line.length > MEMORY_READ_MAX_CHARS) break;
+        relatedLines.push(line);
+        relatedSize += line.length;
+        relatedUsed.push(hit.memory.id);
+      }
+      if (relatedLines.length > 0) lines.push(header, ...relatedLines);
+    }
+  }
   const note =
     emotionTransparency === 'explicit' && emotionUsed > 0 ? [emotionTransparencyNote(emotionUsed)] : [];
   return [
@@ -204,7 +257,7 @@ export function renderMemoryBlock(
       module: 'memory',
       label: MEMORY_FRAMING.bracket,
       text: [MEMORY_TEXT_HEADER, ...lines, ...note].join('\n'),
-      memoryIds: used
+      memoryIds: [...used, ...relatedUsed]
     }
   ];
 }
@@ -304,7 +357,12 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       validFrom: frame?.validFrom ?? null
     };
     if (plan.decision === 'WRITE') {
-      const created = await createMemory({ ...entry, context: plan.context });
+      // 记忆行和它的同主题边同生共死：边只是派生，但一条刚落库的记忆在记忆网络里孤立着，
+      // 用户看到的就是「系统又没把它和以前的事连起来」。关系写入放在 createMemory 的事务里。
+      const created = await createMemory(
+        { ...entry, context: plan.context },
+        existing.map((memory) => ({ id: memory.id, content: memory.content, context: memory.context }))
+      );
       known.set(key, { id: created.id, chatId: turn.chatId });
       vectors.push({ id: created.id, text: candidate.text });
     } else if (previousId) {

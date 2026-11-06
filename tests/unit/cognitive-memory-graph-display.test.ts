@@ -175,13 +175,14 @@ describe('图例：线的种类和点的颜色', () => {
    * 键集正好是这三种。「同一主题」不能出现在这里：派生层判过同主题不成边
    * （七个主题乘两百行是一把毛线球），图例要是留着它，界面就在承诺一张画不出来的线。
    */
-  it('线只有三种，且没有「同主题」这一种', () => {
-    expect(Object.keys(GRAPH_EDGE_LABELS).sort()).toEqual(['coCitation', 'sameChat', 'update']);
+  it('线只有四种：三种派生线 + 库里记着的关系行', () => {
+    expect(Object.keys(GRAPH_EDGE_LABELS).sort()).toEqual(['coCitation', 'relation', 'sameChat', 'update']);
   });
 
-  it('三种线各有说法，互不相同', () => {
+  it('四种线各有说法，互不相同', () => {
     const labels = Object.values(GRAPH_EDGE_LABELS);
-    expect(new Set(labels).size).toBe(3);
+    expect(new Set(labels).size).toBe(4);
+    expect(GRAPH_EDGE_LABELS.relation).toBe('有证据的关联');
     expect(GRAPH_EDGE_LABELS.update).toBe('更新为');
     expect(GRAPH_EDGE_LABELS.sameChat).toBe('同一场对话里说过');
     expect(GRAPH_EDGE_LABELS.coCitation).toBe('同一条洞察里一起提到');

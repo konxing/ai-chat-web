@@ -27,10 +27,12 @@ export const GRAPH_MAX_EDGES = 240;
 const LABEL_MAX = 24;
 
 /**
- * 三种线的说法。键集里没有「同一主题」：同主题只分组、不成边（派生层的第二条判词），
- * 图例要是列了它，界面就在承诺一根永远画不出来的线。
+ * 四种线的说法。`relation` 是 11-06 起库里有证据的关系行（同主题等）；
+ * 其余三种是从已有行派生出来的布局线。键集里没有「同一主题」这一项：
+ * 同主题只分组；要画线，得是写侧真的落了一条 SAME_TOPIC 的边（带来源消息做证据）。
  */
 export const GRAPH_EDGE_LABELS: Record<GraphEdgeKind, string> = {
+  relation: '有证据的关联',
   update: '更新为',
   sameChat: '同一场对话里说过',
   coCitation: '同一条洞察里一起提到'

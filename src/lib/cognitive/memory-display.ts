@@ -119,8 +119,9 @@ export function describeConfidenceFactor(factor: ConfidenceFactor): string {
 
 /**
  * 再巩固标记（任务书 7.1）的中文。三项，不是五项——
- * 「需要更新摘要」「需要修改关联关系」今天没有可检查的东西（记忆没有摘要列，
- * 也没有可写的关系表），所以不摆一个永远不亮的芯片，也不摆一个永远亮着的。
+ * 「需要更新摘要」没有可检查的东西（MemoryItem 没有摘要列），「需要修改关联关系」有表但没有
+ * 可自动判定的「该改哪条边」信号（`MemoryRelation` 只由带证据的写侧自动生成），
+ * 所以不摆一个永远不亮的芯片，也不摆一个永远亮着的。
  * 措辞说凭据不说结论：标记只回答「这条值得回看一眼」，它不改置信度。
  */
 export const RECONSOLIDATION_LABELS: Record<ReconsolidationFlag, string> = {

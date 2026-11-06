@@ -4,6 +4,7 @@ import { getCognitivePreferences } from '@/lib/cognitive/preferences';
 import { listCitationEdges, listMemories, listRevisionEdges } from '@/lib/cognitive/memories';
 import { getMemoryPolicies } from '@/lib/cognitive/policy';
 import { deriveMemoryGraph } from '@/lib/cognitive/memory-graph';
+import { listRelationsForGraph } from '@/lib/cognitive/relations';
 import { listChatTitles } from '@/lib/chats';
 
 export const runtime = 'nodejs';
@@ -47,7 +48,12 @@ export async function GET(req: Request) {
       listCitationEdges(user.id),
       getMemoryPolicies(user.id)
     ]);
-    const graph = deriveMemoryGraph({ memories, edges, citations, policies });
+    // 关系行只在节点集合确定之后取：一屏只画这些点之间的边，不把全库的边都捞回来。
+    const relations = await listRelationsForGraph(
+      user.id,
+      memories.map((memory) => memory.id)
+    );
+    const graph = deriveMemoryGraph({ memories, edges, citations, relations, policies });
     const chatIds = [...new Set(graph.nodes.map((node) => node.chatId))].filter((id): id is string => id !== null);
     const chats = chatIds.length === 0 ? {} : await listChatTitles(user.id, chatIds);
     return { ...graph, chats };

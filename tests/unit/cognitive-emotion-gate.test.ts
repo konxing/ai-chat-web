@@ -159,7 +159,9 @@ describe('单一出处：这个开关真被运行时代码读', () => {
       (name) => !declared.has(name) && sourceOf(name).includes('emotionEnabled')
     );
 
-    expect(readers).toEqual(['memory-extractor.ts', 'memory-module.ts']);
+    // relations.ts 是 11-06 片O 加进来的第三处：两跳扩展的目标池同样要把情绪行滤掉，
+// 否则「关掉情绪」只关了种子、关联扩展又把情绪行端回来。
+    expect(readers).toEqual(['memory-extractor.ts', 'memory-module.ts', 'relations.ts']);
   });
 });
 

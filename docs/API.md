@@ -136,7 +136,7 @@
 
 | 方法 | 路径 | 读 / 写 | 说明 |
 |---|---|---|---|
-| GET | `/api/account/cognitive` | 读 | `{ preferences }`：八个开关 + `emotionTransparency` + `reflectionCooldown` + `memoryWritePaused` |
+| GET | `/api/account/cognitive` | 读 | `{ preferences }`：八个开关 + `emotionTransparency` + `reflectionCooldown` + `memoryWritePaused` + `memoryReadLimit` |
 | PATCH | `/api/account/cognitive` | 写 | 请求体为 `cognitivePreferencesPatchSchema` 的任意子集（见下），返回 `{ preferences }` |
 | GET | `/api/account/cognitive/policies` | 读 | `{ policies, learning, learningThreshold, learningWindowDays }` |
 | PATCH | `/api/account/cognitive/policies` | 写 | `{ context, patch }`；`patch` 全字段可选，未提交的保持原值 |
@@ -148,7 +148,7 @@
 memoryEnabled, userModelEnabled, emotionEnabled, associationEnabled,
 timelineEnabled, reflectionEnabled, decisionMemoryEnabled, adaptiveMemoryEnabled,
 emotionTransparency(off|implicit|explicit), reflectionCooldown(daily|weekly|monthly),
-memoryWritePaused
+memoryWritePaused, memoryReadLimit(1..8，默认 8)
 ```
 
 `context` 词表：`general`、`technicalProject`、`learning`、`personalGoal`、
@@ -186,7 +186,7 @@ project / decision / emotion，最多 6 个）、`requireConfirmation`、
 |---|---|---|---|
 | GET | `/api/account/cognitive/timeline` | `timelineEnabled` + `memoryEnabled` | `{ events, chats, capped }`；关着返回 409 `MODULE_DISABLED` |
 | GET | `/api/account/cognitive/changes` | 同上 | `{ observations, insufficient, sources, capped }` |
-| GET | `/api/account/cognitive/graph` | `associationEnabled` + `memoryEnabled` | 图节点/边 + `chats`；任一关着返回 409 |
+| GET | `/api/account/cognitive/graph` | `associationEnabled` + `memoryEnabled` | 图节点/边 + `chats`；边含 `MemoryRelation` 的关系边（`kind: 'relation'`）与三种派生边；任一关着返回 409 |
 
 ### 洞察
 
