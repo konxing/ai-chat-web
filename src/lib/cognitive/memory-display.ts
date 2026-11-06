@@ -2,6 +2,7 @@ import type { MemoryDto, MemoryOrigin, MemoryRevisionAction, TimePrecision } fro
 import type { MemoryContext, MemoryRetention, MemoryType } from './policy';
 import type { ConfidenceBand, ConfidenceFactor } from './confidence';
 import type { ReconsolidationFlag } from './reconsolidation';
+import type { FailedTaskReason } from './failed-tasks';
 
 /**
  * 记忆的前端展示词汇：枚举的中文标签 + 有效区间回显。
@@ -156,6 +157,42 @@ export function describeArchivedListCap(capped: boolean, shownCount: number): st
 export function describeCandidateListCap(capped: boolean, shownCount: number): string {
   if (!capped) return '';
   return `等你回答的话比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
+}
+
+/**
+ * 判死（不再重试）那五种情况的中文（任务书 §6 要求④）。
+ *
+ * 这五句是这一屏里唯一解释「系统为什么漏了」的文字，所以三句是硬要求：
+ * 一、`timeout` 那一档不许说成「这句一定没记上」。服务端判它死恰恰是因为**不知道**写没写进去
+ *    （`task-worker.ts`：超时之后重跑就是「同一句话记两条」的来源，所以宁可留下可查的 DEAD），
+ *    句子必须把这份不知道留在原地。
+ * 二、`preferences_unavailable` 那一档反过来：读不到开关发生在写之前（`settleTask` 第一道门），
+ *    那一轮一个字都没动过库，所以「这句没记上」是确定的，不是猜的。
+ * 三、`other` 那一档不猜原因。认不出来的错误码只可能是以后新增的，猜错的那句解释会被当成事实。
+ *
+ * 都不报次数：次数是 `attempts` 那一列自己说的（`describeFailedTaskAttempt`），
+ * 写进标签里就等于把同一个数在两处各自过期。
+ */
+export const FAILED_TASK_REASON_LABELS: Record<FailedTaskReason, string> = {
+  timeout: '写到一半超时：这句可能记上了，也可能没有',
+  retry_exhausted: '重试过，每一次都失败',
+  lease_expired: '负责它的服务中途断了',
+  preferences_unavailable: '读不到你的记忆开关：这句没记上',
+  other: '原因没有记下来'
+};
+
+/** 试过几次原样说，不写成「试过好几次」：那个数是这一行唯一的努力证据，含糊了就等于没有。 */
+export function describeFailedTaskAttempt(attempts: number): string {
+  return `试过 ${attempts} 次`;
+}
+
+/**
+ * 判死列表的截断说明，口径和上面三份一样：报服务端实际列出的条数。
+ * 这一句更要紧：被挤掉的是最旧的那些欠账，不报出来「就这几句没记上」会被读成「只漏了这几句」。
+ */
+export function describeFailedTaskListCap(capped: boolean, shownCount: number): string {
+  if (!capped) return '';
+  return `没记上的句子比这一屏多：这里只列出最近 ${shownCount} 条，更早的没有读进来。`;
 }
 
 /**

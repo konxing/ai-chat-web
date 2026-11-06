@@ -377,7 +377,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    （`cognitive-reflection-sweep.test.ts:311`）——当天把记忆开关再打开，可能要等到下一轮才有新洞察；
    换来的是到期/稍后到点那两件事不会因为记忆关着就没人处理（`:320`）。
 
-界面暴露四个模块开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:121-138`）、
+界面暴露四个模块开关：`memoryEnabled`（`src/components/settings/memory-panel.tsx:160-190`，控件在 `:514-523`）、
 `timelineEnabled`（`timeline-panel.tsx:84-115`，控件在 `:199`）、`decisionMemoryEnabled`
 （`decision-panel.tsx:87-110`，控件在 `:177`）、`reflectionEnabled`（`reflection-panel.tsx:114-126`，控件在 `:243-252`，
 闸门在 `:129`——关着时这一屏连列表请求都不发）——后两个是 5-F / 6-F 才补的，
@@ -554,19 +554,19 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
    `ALTER TYPE "EmailTokenPurpose" ADD VALUE 'EMAIL_CHANGE'`，PG17 允许，Prisma 不重建类型。
    真正的成本是两处**语义决定**：
    - `src/lib/cognitive/memories.ts:226-233` 那道 `validateMoment` 要加 `week` 分支，就得先定「周从周一算还是周日算」——这个约定是我们替用户定的；
-   - `src/lib/cognitive/memory-display.ts:133-142` 的 `formatDate` 要能回显「周」。ISO 周号（`2026年第44周`）几乎不可读，
+   - `src/lib/cognitive/memory-display.ts:231-240` 的 `formatDate` 要能回显「周」。ISO 周号（`2026年第44周`）几乎不可读，
      要显示成「11月2日那一周」就得把跨度算出来。两处都不是加一个 `if` 了事的。
 
    买到的实测只有 **3 句**：`上周` 1 + `这周` 2；`下周` 那 2 句按选定的 (a) 方案仍然是 unknown；
    而 `每周` 9 + `周X` 13 那 22 句（占含时间句的六成）**一条也不靠这个字段解决**。
    所以换来的只是时间线上少挂 3 句「发生时间未知」，而那 3 句现在挂的标签本来就是真话。
-   **再评估的触发条件**：`precision` 真的被拿来筛选或分组（今天没有，只有排序 `timeline.ts:107` 和回显 `memory-display.ts:148` 两处）。
+   **再评估的触发条件**：`precision` 真的被拿来筛选或分组（今天没有，只有排序 `timeline.ts:107` 和回显 `memory-display.ts:236` 两处）。
    那时把枚举值、`validateMoment` 的周起点、界面措辞一次定完，别拆开做。
 
 2. **循环事件（`frequency` 那一类新字段）——不做，而且这一片现有的形状就是对的。**
    - 「每周三打球」不是一件有起止区间的事。加 recurrence 等于把双时间模型换成两套时间语义，
      而**区间那一半在生产里从来没被写过**：`validTo` 有四个读取点（`memories.ts:336` 的 asOf 过滤、
-     `confidence.ts:72` 的 expired 因子、`memory-display.ts:150` 的区间回显、`timeline.ts:119` 的透传），
+     `confidence.ts:72` 的 expired 因子、`memory-display.ts:243` 的区间回显、`timeline.ts:119` 的透传），
      但三个写入调用点（`memory-module.ts:204`、`memory-module.ts:209`、
      `src/app/api/account/cognitive/memories/[id]/route.ts:50`）**没有一个传它**，`src/app` 下 `validTo` 零命中
      ——也就是 expired 那个置信度因子在真实数据上永不触发。
@@ -696,7 +696,7 @@ Phase 6 在 11-04 落地到 6-E：`reflection-planner.ts`（出题，纯）→ `
 **同一动作两处入口是你批准的取舍**，代价记在这儿：这两句文案以后要改口径得同时改两个文件（`timeline-panel.tsx` 和 `memory-panel.tsx`），
 它不像「版本浏览」那样只有一处。4-T1 那条「同一个动作不做两个入口」的规则，这是唯一一处经你点头开的口子。
 
-**顺带转正一句假话**：`memory-panel.tsx:633` 从写下那天就承诺「这条记忆和它的历史版本会一起从数据库里删掉」，
+**顺带转正一句假话**：`memory-panel.tsx:887` 从写下那天就承诺「这条记忆和它的历史版本会一起从数据库里删掉」，
 `53f6967` 之前它**不是真的**——`purgeMemory` 只删传进来的那一行。这片让它第一次对上代码。
 
 **证据**：
@@ -976,7 +976,7 @@ Prisma 因此按模型**整行**发 `SELECT`，列里带着 `reflectionSweptAt`�
 ### 6-G：日期口径统一 + 补上的两句话 + 第一次真渲染（11-04 他判的三个「1 统一 / 2 按你说的做 / 3 你能起就起」）
 
 - **日期统一到时间线那一屏的「年月日」**：`reflection-display.ts` 的 `formatAt` 原来输出 `2026-11-04`，
-  和 `memory-display.ts:133-142` 那套 `2026年11月4日` 是同一个项目里同一精度的两种写法。现在按 `YEAR → 2026年`、
+  和 `memory-display.ts:231-240` 那套 `2026年11月4日` 是同一个项目里同一精度的两种写法。现在按 `YEAR → 2026年`、
   `MONTH → 2026年11月`、其余到日、`TIMESTAMP` 才带时分，降级台阶一个字没动（门槛 6 的「不许说得比记录的更精确」照旧）。
   「已推迟到」那行的日期跟着换成同一套。跨文件的口径由一条断言钉住：
   `tests/unit/cognitive-reflection-display.test.ts` 直接读 `memory-display.ts` 的源码，要求两边都是「年＋月＋日」，
@@ -1191,8 +1191,8 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 读侧漏在漏斗外的第五处 | `src/lib/cognitive/reflection-sweep.ts:381-382` | 反思池自己 `findMany`，不读 `listMemories`——得自己带上同一口径，否则用户收起来了，洞察还在正文里复述它 |
 | API | `.../memories/[id]/archive/route.ts`、`.../restore/route.ts`（两个新文件） | POST：鉴权 → 分桶限流（各 60 次/小时）→ 服务函数 → 0 行即 404 → 审计只带 id。**不要求理由** |
 | GET | `.../memories/route.ts:47-49,63-64` | 同一份响应多带一个 `archived`（`archivedOnly: true`，与当前那一份**并行**发出），不喂 chats、不参与置信度；两份列表各带自己的截断标志 `capped` / `archivedCapped` |
-| 界面（截断提示） | `src/lib/cognitive/memory-display.ts:127`/`:132` + `src/components/settings/memory-panel.tsx:404,405,435,755` | 两个纯函数只产出句子，面板负责把两句各挂在自己的列表上方；没到上限返回空串，界面一个字都不摆 |
-| 界面 | `src/components/settings/memory-panel.tsx:268`（归档调用）/ `:286`（恢复调用）/ `:525`（行上按钮）/ `:751`（已归档区块） | 行上按钮换成归档、归档展开区里给撤回留一句、已归档区块 + 恢复 |
+| 界面（截断提示） | `src/lib/cognitive/memory-display.ts:141`/`:146` + `src/components/settings/memory-panel.tsx:500,501,565,918` | 两个纯函数只产出句子，面板负责把两句各挂在自己的列表上方；没到上限返回空串，界面一个字都不摆 |
+| 界面 | `src/components/settings/memory-panel.tsx:318`（归档调用）/ `:335`（恢复调用）/ `:688`（行上按钮）/ `:914`（已归档区块） | 行上按钮换成归档、归档展开区里给撤回留一句、已归档区块 + 恢复 |
 | 8.2 那句话 | `src/lib/cognitive/citation-display.ts:23` | 「（可能已被更新或删除）」→「（可能已被更新、删除或归档）」 |
 
 两个形状上的选择值得记下来：
@@ -1346,8 +1346,8 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 检查 | `src/lib/cognitive/reconsolidation.ts:54`（`reviewMemory`）/ `:79`（`reviewMemories`） | **纯函数**：输入是已经查回来的列和证据条，输出标记数组，不算分、不排序、不碰库。三种终态（被取代 / 归档 / 撤回）不产标记 |
 | 证据的批量读 | `src/lib/cognitive/evidence.ts:166`（`listEvidenceRows`） | 一屏一次查完，只取 `memoryId / kind / createdAt`，说明文字的密文不经过这条路。方向映射仍只有 `fromDbKind` 一份，所以这个读留在证据账本里，不搬进 `reconsolidation.ts` |
 | API | `src/app/api/account/cognitive/memories/route.ts:69-76,105-108` | GET 多带 `reviews` / `access` / `accessWindow` / `accessCapped` 四个字段，与置信度、标题**并行**发出。`reviews` 对每条记忆都有一项（空数组 ≠ 缺席）；`accessWindow` 报**实际扫过的轮数**，不把 `MEMORY_ACCESS_MAX_ROWS` 抄给界面 |
-| 文案 | `src/lib/cognitive/memory-display.ts:125`（`RECONSOLIDATION_LABELS`）/ `:157`（`describeAccessCount`）/ `:162`（`describeAccessCap`） | 三个纯函数/常量，只产出句子 |
-| 界面 | `src/components/settings/memory-panel.tsx:613`（标记芯片）/ `:621`（「最近 N 轮里被带到 M 次」）/ `:552`（截断提示） | 芯片用中性 `chip`，不用琥珀色——琥珀色那一档已经是「可信度低」，「值得回看一眼」不是「不可信」 |
+| 文案 | `src/lib/cognitive/memory-display.ts:126`（`RECONSOLIDATION_LABELS`）/ `:205`（`describeAccessCount`）/ `:210`（`describeAccessCap`） | 三个纯函数/常量，只产出句子 |
+| 界面 | `src/components/settings/memory-panel.tsx:627`（标记芯片）/ `:635`（「最近 N 轮里被带到 M 次」）/ `:566`（截断提示） | 芯片用中性 `chip`，不用琥珀色——琥珀色那一档已经是「可信度低」，「值得回看一眼」不是「不可信」 |
 | 忘记连带清理 | `src/lib/cognitive/forgetting.ts:198`（单条）/ `:231`（按来源会话）/ `:282`（按主题，7.3 片 b 补的第四臂）/ `:317`（清空全部） | 派生数据从五种变第六种。删的口径是**被删的那批记忆 id**，整行删（不是把 id 从数组里挑出来——一个已删记忆的 id 本身就是被删内容的痕迹，而残缺的组合比没有组合更误导）；只有清空全部走 `deleteAllAccess`（`:327`），因为「全部」没有子集可挑 |
 
 ### 「检索次数不能提高可信度」这一条怎么证（不靠注释）
@@ -1416,7 +1416,7 @@ EXPIRE 是 `retention.ts` 的读侧窗口，DELETE 是 `forgetting.ts` 的链式
 | 读侧不动 | `memory-module.ts:76-89` | `readMemory` 一次都不看这张偏好。「记住但先别带入」是关模块，「先别记、带着已有的接着用」是暂停，两件事必须分得开 |
 | 服务函数 | `forgetting.ts:282-304`（`purgeMemoriesByContext`） | 照 `purgeMemoriesByChat`（`:231`）抄，三处差异：where 换成 context；**不**扫决策；**不**撤别的主题的欠账。同一事务里顺手建原句排除、清版本链指针、清访问痕迹 |
 | API | `memories/route.ts:140-147` + `:24` | 新分支 `scope=context`，独立限流桶 `memory-purge-context:{userId}`（20/小时，和另外两臂同宽），审计 `user.memory_purge_by_context`，`targetType='context'`、`after.purged` **只带条数和主题名，不带正文** |
-| 界面 | `memory-panel.tsx:431`（`purgeByContext`）/ `:645-658`（行内按钮）/ `:523-542`（暂停三态控件） | 「忘记这个主题」和「忘记这次对话」两个入口都摆着，因为它们不是一件事。暂停控件在总开关打开时才摆——总开关关着时暂停是句废话 |
+| 界面 | `memory-panel.tsx:433`（`purgeByContext`）/ `:675-711`（行内按钮）/ `:525-544`（暂停三态控件） | 「忘记这个主题」和「忘记这次对话」两个入口都摆着，因为它们不是一件事。暂停控件在总开关打开时才摆——总开关关着时暂停是句废话 |
 
 ### 文案（他批的姿势：确认框里就把边界说完）
 
@@ -1888,7 +1888,7 @@ G-P3 值得单独记一句：接线断了的时候，逐字用例只会说「拿
 
 ### 四、口径核实（计划给的两句，一句改文档、一句本来就没写歪）
 
-- **`memory-display.ts:82-84` 是「可信度高/中/低」，没有冒号**——今天真渲染量到过：那一行界面上摆的就是无冒号那一套。
+- **`memory-display.ts:83-85` 是「可信度高/中/低」，没有冒号**——今天真渲染量到过：那一行界面上摆的就是无冒号那一套。
   文档里唯一的「可信度：中」在「8.2」那一节的**偏差一**（`:1059`，实测过），那一行本来就是**标注偏差**（批准表 vs 实现），不是把带冒号那套当成实现字面，所以不改。
   要回到批准表原字面，动的是 `memory-display.ts` 那份标签，全项目一起变——**11-05 他一句「你说的文案都通过了」，无冒号那套就是终稿**。
 - **顺手抓到一处真错**：「8.2」那一节文案表里「那条已经不在了」那行还抄着 11-04 那批的字面「（可能已被更新或删除）」，
@@ -1912,13 +1912,13 @@ G-P3 值得单独记一句：接线断了的时候，逐字用例只会说「拿
 
 | 路径 | 界面量到的 | HTTP | 库 |
 |---|---|---|---|
-| 归档 → 已归档 → 恢复 | 行上「归档」→ 展开区「确认归档」→ 提示 `已归档，这条不再进入对话`（`memory-panel.tsx:674,759,322`）；该行从有效列表挪进「已归档」区块（`:900`，标题就是这三个字），恢复后区块整块不渲染 | `POST …/archive` 与 `POST …/restore` 各 200 | `archivedAt` 写上又清空；收尾 `archived: 0`；审计两条 `user.memory_archive.after.archived` / `user.memory_restore.after.restored` |
+| 归档 → 已归档 → 恢复 | 行上「归档」→ 展开区「确认归档」→ 提示 `已归档，这条不再进入对话`（`memory-panel.tsx:688,773,324`）；该行从有效列表挪进「已归档」区块（`:914`，标题就是这三个字），恢复后区块整块不渲染 | `POST …/archive` 与 `POST …/restore` 各 200 | `archivedAt` 写上又清空；收尾 `archived: 0`；审计两条 `user.memory_archive.after.archived` / `user.memory_restore.after.restored` |
 | 记忆网络 | 关着时那一屏只说开关没开；`associationEnabled` 打开后真的摆出派生句 `2 个点、1 根线连不成一张图：这两个点之间确实有关系，可三个点以上的连线才叫网络。`（`memory-graph-display.ts:74`，数字是真库里的 2 行 / 1 条边） | `GET …/memory-graph` 200 | 零迁移派生，没写任何行 |
 | 画像：候选 → 收进 → 改 → 删 | 关闭态说清没开；开着时**两个候选**（服务端现算，库里 0 行）→ 点「收进画像」出 `已收进画像。`（`profile-panel.tsx:129`）；改正文走行内 textarea + 保存；删的时候弹窗 `删除这条画像？`，确认钮是「删除」（`:171-190`）→ `已删除这条画像。`（`:183`） | `POST` / `PATCH` / `DELETE` 打在 `/api/account/cognitive/profile[/{id}]`（`profile-panel.tsx:33`）各 200 | `PATCH` 后该行 `content` 长度 11、与我键入的那串逐字相等、`editedAt` 写上、`confirmedAt` 保留（`user-profile.ts:128-141` 的语义第一次被真机验到）；删完 `UserProfileEntry` 回到 0 行 |
-| 忘记这个主题 | 弹窗标题 `忘记「学习」这个主题的全部记忆？`，确认钮字面「删除记忆」（`memory-panel.tsx:435,396`） | `DELETE …/memories?scope=context&context=learning` 200 | **为了让这条可验，先造了一行只属于 `LEARNING` 的一次性记忆**（内容我自己写的），删的就是它；他那两行 `GENERAL` 的 `recordedAt` 仍是 `.646` / `.661`，`archivedAt` / `supersededAt` 都没被碰 |
+| 忘记这个主题 | 弹窗标题 `忘记「学习」这个主题的全部记忆？`，确认钮字面「删除记忆」（`memory-panel.tsx:437,440`） | `DELETE …/memories?scope=context&context=learning` 200 | **为了让这条可验，先造了一行只属于 `LEARNING` 的一次性记忆**（内容我自己写的），删的就是它；他那两行 `GENERAL` 的 `recordedAt` 仍是 `.646` / `.661`，`archivedAt` / `supersededAt` 都没被碰 |
 
 另外两件一起量了：
-- **暂停长期记忆写入**：开 → `已暂停新的记忆写入，已记住的内容照常带入对话`，关 → `已恢复新的记忆写入`（`memory-panel.tsx:210`），库里 `memoryWritePaused` 跟着 true/false 各读回一次。
+- **暂停长期记忆写入**：开 → `已暂停新的记忆写入，已记住的内容照常带入对话`，关 → `已恢复新的记忆写入`（`memory-panel.tsx:212`），库里 `memoryWritePaused` 跟着 true/false 各读回一次。
 - **聊天里那句引用提示（负例）**：`/chat` 发一轮，气泡正文完整、footer 摆出 `100 tokens 输入 · 52 tokens 输出`，**没有引用控件**——
   这正是 `citationHint(0) === ''` 那一支该有的样子，也对应库里 `MemoryAccessTurn` 仍 0 行。
 
@@ -2590,10 +2590,10 @@ M-真2 为什么必要：单测跑的是内存替身，`(userId, contentHash)` �
 
 ### 六、界面：记忆屏列表上方那两块 tab
 
-`memory-panel.tsx:554` 把 `<MemoryCandidatesPanel onConfirmed={…} />` 放在记忆列表**上面**，且不跟着总开关消失。
+`memory-panel.tsx:555` 把 `<MemoryCandidatesPanel onConfirmed={…} />` 放在记忆列表**上面**，且不跟着总开关消失。
 两个动作只有「记住」和「不要记」，没有第三档「先放着」——那等于给同一个「不记」再发明一种说法。
 两档过滤走同一条 GET 的查询串（`?status=rejected`），不开新端点。
-截断那句走纯函数 `describeCandidateListCap`（`memory-display.ts:156`），数字是服务端 `capped` 带回来的实际条数，
+截断那句走纯函数 `describeCandidateListCap`（`memory-display.ts:157`），数字是服务端 `capped` 带回来的实际条数，
 界面不许自己写死 200（`MAX_PENDING_CANDIDATES` 和服务端列表上限是两个不同的数，写死迟早漂）。
 加载完才渲染；两份列表都空时整块 `return null`；一次只许一个动作在飞（同一条双击会撞 409）。
 
@@ -3684,5 +3684,157 @@ O(n²) 实现上没有额外产出，只有风险。真要把下限挪动，得�
 `reflection-display.ts` +29 行、`reflection-panel.tsx` +79 行）。改掉的有 6-E/6-F/片Q-2/片Q-3/片Q-4/7.2
 那几节里指进这三个文件的十处，另外 `schema.prisma` 的 ReflectionRecord／ReflectionCitation 两处也顺手按实测
 （`:817` `:877`）更正。这类更正不改变任何结论，但行号错了的验收文档等于没有验收文档。
+
+## 片R：§6 八条要求里唯一没有读取方的那一条——「没记上的句子」终于有了一屏（11-06）
+
+任务书 §6（`:931-970`）在 4a 那片落地时是按**调度协议的形状**建的：`CognitiveTask` 一张表、
+`task-queue.ts` 一层协议、`task-worker.ts` 一个轮询者。八条要求当时都写着，但没有一处逐条对过
+「今天这条被哪一段代码、哪一个用例守着」。这片做两件事：**把八条逐条钉到行号**，并补上其中唯一
+到今天没有任何读取方的那条——要求 ④「支持查看失败任务」。
+
+### 一、八条要求逐条对照（承载者 + 用例）
+
+| §6 要求 | 今天的承载者 | 钉住它的用例 |
+|---|---|---|
+| ① 重复投递保护 | `task-queue.ts:37-58` 入队：`P2002` 直接返回 `false`（`:48`），底下是库层 `@@unique([sourceMessageId, kind])`（`prisma/schema.prisma:734`） | `cognitive-task-queue.test.ts`「同一句话重复入队只欠一次：库层唯一约束挡住，返回 false 而不是抛错」 |
+| ② 超时回收 | 两层：租约 60 秒（`task-queue.ts:26`）+ 每次领取前先回收（`:75` → `:101 reclaimExpiredLeases`）；单轮写侧 20 秒截止（`task-worker.ts:42`） | 「租约过年且还有次数：回到 PENDING 等下一轮，次数不再重复加」「租约过年且次数用完：判 DEAD，标 LEASE_EXPIRED」「租约还没到期的 RUNNING 不回收」+ `cognitive-task-worker.test.ts`「写超时 ⇒ 判 DEAD 不重试」「多个模块里只要有一个超时，这一轮就按超时处理」 |
+| ③ 有限次重试 | `attempts` 在**领取时** `+1`（`schema.prisma:715-717`、`task-queue.ts:91`），上限 3（`:28`），退避 30/60 秒翻倍（`:142`），用完即 `DEAD`（`:134-135`） | 「抢到之后行变成 RUNNING，带上 owner、租约和一个尝试次数」「退避按次数翻倍：第一次失败 30 秒后，第二次 60 秒后」「次数用完的失败直接判 DEAD，不再排下一次」 |
+| ④ 失败任务查看 | **本片新增**：`failed-tasks.ts:60` 只读调度列 + `GET /api/account/cognitive/failed-tasks`（`route.ts:25`）+ 设置页那块（`failed-tasks-panel.tsx`，挂在 `memory-panel.tsx:561`） | `cognitive-failed-tasks.test.ts` 9 条 / `cognitive-failed-tasks-route.test.ts` 8 条 / `cognitive-failed-task-panel.test.ts` 13 条 |
+| ⑤ 用户删除数据后取消相关任务 | `cancelCognitiveTasks`（`task-queue.ts:168`）在三种忘记里各调一次（`forgetting.ts:240` 按会话、`:254` 按主题、`:345` 清空全部）；行上另有三条 `onDelete: Cascade`（`schema.prisma:730-732`） | 「按会话取消同时带 userId 和 chatId，别人的同会话行一条不碰」「不带 chatId 就是按用户全撤（清空全部长期记忆走这条）」「RUNNING 的行也一起撤：遗忘不该等这一轮做完」 |
+| ⑥ 并发执行 | 领取 = 候选 id → 条件 UPDATE 抢行（`:85-94`）→ 按 owner 读回（`:95-97`）；`leaseOwner` 同时是 fencing token（`schema.prisma:721-723`），完结写入一律带 `status:'RUNNING', leaseOwner: workerId`（`:121`/`:139`/`:157`） | 「连着领两次，第二次拿到空：同一行不能被两个执行同时握着」「行已经被别人领走时，上一任的完结写入命中 0 行、什么也不改」+ worker「一次 tick 把领到的任务一个个跑完，绝不重叠」「上一轮还没跑完时，下一个 tick 不重入」「start 两次只有一个定时器」 |
+| ⑦ 相同任务合并 | 与 ① 同一个复合唯一键：同一条消息的同一类任务在库里只能有一行，「合并」= 后一次入队不再插入。`DEAD` 行**不复活**（下面第二节末的裁决） | 「同一句话重复入队只欠一次」「DEAD 的行不再被领：次数用完的活要留在库里可查，但不能无限重跑」 |
+| ⑧ 任务日志不允许暴露明文 | 靠结构不靠纪律：`CognitiveTask` 没有任何正文列（`schema.prisma:700-705`；`:726` 只有错误码，注释写着「永远没有报错原文」）。正文要重建，从 `sourceMessageId` 回 Message 行解密（`task-worker.ts:160-183`） | 「写进去的行只有 id 和调度列，没有任何正文列」「入队失败的日志里只有 id，没有报错原文」+ worker「作废的日志里只有 id，没有那句话」 |
+
+`:970` 那句「优先复用当前 Node Gateway 的后台执行能力，避免为了认知系统额外部署复杂的消息队列」照旧成立：
+worker 是同进程里的轮询（`task-worker.ts:58 pollOnce` / `:103 runCognitiveWorkerTick`），没有 Redis、
+没有 Sidekiq、没有第二个部署单元。
+
+### 二、§6 点名的十二列：九列有直接对应、一列由复合键承载、两列刻意不建
+
+| §6 的列 | 落地 | 位置 / 不建的原因 |
+|---|---|---|
+| `taskId` | `id`（uuid） | `schema.prisma:707` |
+| `userId` | `userId` | `:708`。② ⑤ ⑥ 和这片新加的那道 `where` 都靠它 |
+| `type` | `kind`（`CognitiveTaskKind`，今天只有 `MEMORY`） | `:713`、枚举 `:138-140` |
+| `status` | `status`（`PENDING` / `RUNNING` / `DEAD`） | `:714`、枚举 `:145-149` |
+| `priority` | **不建** | 今天只有一个 `kind`、一个入队点（`src/app/api/chats/[id]/messages/route.ts:162`），领取是「最旧的先」（`task-queue.ts:78` 的 `orderBy: { createdAt: 'asc' }`）。一列既没有生产者又没有消费者的优先级，等于一个假装存在的调度策略；要它得先有第二个 kind 和一个愿意被插队的理由 |
+| `idempotencyKey` | 由 `@@unique([sourceMessageId, kind])` 承载 | `:734`。这一列要防的正是「同一句话被投递两次」，复合键把它防死在库层；再单建一列只会是同一个值的第二种写法，两处约束迟早漂移 |
+| `payloadCiphertext` | **不建** | ⑧ 要的「日志与任务里没有明文」在这里是结构性的：欠账表不存正文，重建那一轮靠 `sourceMessageId`。给同一句话在密文里造第二个家，第一个问题是删原会话时它归谁，第二个问题是这一片读侧于是多一条能解密的路 |
+| `retryCount` | `attempts` | `:717`（「在领取时 +1，不是失败时 +1」的理由写在 `:715-716`） |
+| `runAfter` | `availableAt` | `:720`。「PENDING 且 `availableAt` 在未来」就是正在退避，所以 §6 的 `FAILED` 态不需要单独存在 |
+| `lockedAt` | `leaseUntil` + `leaseOwner` | `:724` / `:723`。「什么时候被谁锁的」要同时支撑回收和 fencing，一个时间戳做不到这两件 |
+| `completedAt` | **不建** | 跑完即删行（`task-queue.ts:119-121`），作废同样是删行，这张表只装「还欠着的活」；完成的痕迹只在日志（`cognitive.task_done`）。§6 的 `COMPLETED` / `CANCELLED` 两个终态由「行不在了」表达。要留历史就得先回答留多久、谁清——那是新建一张历史表，不是给欠账表加一列 |
+| `createdAt` | `createdAt`（+ `updatedAt`） | `:727` / `:728`。`updatedAt` 被这片用作「判死的那一刻」：`DEAD` 之后没有任何代码路径再写这一行，这个隐式依赖由「判死时间新的在前」那条用例连着 `orderBy` 一起守着 |
+
+顺带把 `DEAD_LETTER` 说明白：§6 的六个状态里，`DEAD_LETTER` 就是这里的 `DEAD`（同一个意思的第二种拼法，
+不另造词表），`FAILED` 由退避中的 `PENDING` 表达，`COMPLETED` / `CANCELLED` 由删行表达。
+
+**「相同任务合并」里唯一一处不是白给的裁决**：`DEAD` 行不因为同一句话再次入队而复活。理由是复活等于
+把「三次都失败」那句判决撤回，而判 DEAD 的原因（超时那次不知道写没写进去）不会因为没有新投递而消失。
+今天的实际行为是：同一句**新**话（新 `sourceMessageId`）欠一条新账，判死的那条留在库里。
+
+### 三、要求④那一屏的形状：三个决定，各有一句原因
+
+一、**只读三个调度列，一个正文字段都不碰**（`failed-tasks.ts:67-73` 的 `select`）。这张表本来就没有正文，
+查看这一屏如果拿 `sourceMessageId` 去解密那句话，等于在欠账表上新凿一条读明文的路。那句要看，走已有的会话页。
+
+二、**只回 `DEAD`**。`PENDING`（含正在退避）和 `RUNNING` 都不是失败；把它们端上来，这一屏就成了队列仪表盘，
+而 §6 要的是失败任务查看（`:63-66` 的 `where` / `orderBy` / `take`）。
+
+三、**DTO 只有五个键，每个键都有具名消费者**（`failed-tasks.ts:36-45`）：`id` 是行的身份，`chatId` 是
+「去看那次对话」的落点，`attempts` 与 `failedAt` 是行上的两个数，`reason` 是那句解释。`sourceMessageId` 和
+`createdAt` 不端出去——会话页没有「滚到某一句」的锚点，给了坐标也点不动，而一个点不动的坐标迟早会被当成
+「界面漏了这个功能」。这是「每一个 DTO 字段都要有读者」这条规矩的又一次应用，不是省事。
+
+界面那一块的位置与持久性：`memory-panel.tsx:561`，排在待确认候选下面、记忆列表上面，
+**不跟着总开关消失**。理由和片L-1 同一套，写在 `route.ts:14-19`，并且这一屏连偏好都不读（比记忆屏更进一步：
+它读的是调度行，一行记忆都不解密）；钉它的是 `cognitive-failed-tasks-route.test.ts:150`
+「八个开关全关：照样 200，一次偏好都不读」。探针 P1 量的就是这条边的牙齿。
+
+### 四、一处事实错误：判死的原因不是三种，是四种（连 `other` 五档）
+
+发现方式不是测试红了，是写上面那张对照表时给「为什么判死」找全生产者：逐个 grep
+`killCognitiveTask(` / `retryCognitiveTask(`，撞上 `task-worker.ts:142`——闸门读不出偏好时走
+`retryCognitiveTask(..., 'PREFERENCES_UNAVAILABLE')`，而 `retryCognitiveTask` 在次数用完时正是把行判成
+`DEAD` 的那一段（`task-queue.ts:134-135`）。所以 `DEAD` 行上的 `lastErrorCode` 有**四个**来源，
+而注释和文案都写着三个。
+
+后果不是「少显示一档」这么轻：那一档会被 `?? 'other'` 兜住，于是界面对一句其实记了原因的话说
+「原因没有记下来」。这句话在这一屏里是唯一负责解释的文字，用户会把它当成事实。
+
+处理方式按既有规矩「事实优先于已批准的文案」：先补红用例（三条红——映射用例、
+`五种原因都有中文` 那条在 `undefined.length` 上 `TypeError`、`expected undefined to be
+'读不到你的记忆开关：这句没记上'`），再改类型联合、映射表、标签表和三处注释。新那一档的句子说
+「这句没记上」而不是「可能记上了」：那次失败发生在 `settleTask` 的第一道门（`task-worker.ts:139-143`），
+写库一个字都还没开始，所以这里是确定的。
+
+| `lastErrorCode` | 写进 `DEAD` 的位置 | 界面那一档（`memory-display.ts:176`） |
+|---|---|---|
+| `MODULE_TIMEOUT` | `task-worker.ts:200` | 写到一半超时：这句可能记上了，也可能没有 |
+| `MODULE_WRITE_FAILED` | `task-worker.ts:204` → `task-queue.ts:134` | 重试过，每一次都失败 |
+| `LEASE_EXPIRED` | `task-queue.ts:106` | 负责它的服务中途断了 |
+| `PREFERENCES_UNAVAILABLE` | `task-worker.ts:142` → `task-queue.ts:134` | 读不到你的记忆开关：这句没记上 |
+| 以后新增的码 | — | 原因没有记下来 |
+
+`LEASE_EXPIRED` 在回收的「还有次数」那一支也会写（`task-queue.ts:110`，行仍是 `PENDING`）。这一屏只回
+`DEAD`，所以那个码在界面上永远和「服务中途断了」一起出现，不会跑到退避中的行上。
+
+### 五、用例与探针（本片净增 3 个文件 / 38 条）
+
+| 文件 | 新增 | 钉住什么 |
+|---|---|---|
+| `cognitive-failed-tasks.test.ts` | 9 | 只回 `DEAD`；只回自己名下；DTO 恒为五个键；四种来自代码的码各归一档 + 认不出的码不猜；`updatedAt` 新的在前；`attempts` 原样带出；读满 50 条 ⇒ `capped` 真且只回 50；没读满 ⇒ 那句话一个字不出；没有判死行 ⇒ 空列表不抛错 |
+| `cognitive-failed-tasks-route.test.ts` | 8 | 未登录 401 且一次服务层都不发；只把 session 里的 `userId` 交下去；返回就是服务层那一份（`capped` 不重算）；空列表是 200 不是 404；每行键集恒为五个（没有正文没有会话标题）；带查询参数不改变范围；八个开关全关照样 200 且不读偏好；只有 GET |
+| `cognitive-failed-task-panel.test.ts` | 13 | 标题与说明逐字；唯一动作是「去看那次对话」（没有重跑／删除／「知道了」）；读失败那句单独一句且不承诺后续；不谎称「一定没记上」也不谎称会补记；只读那一个端点、不带参数；三个数都来自服务端或纯函数；落点走 `encodeURIComponent`；截断提示不许在界面写死 50；整块代码里不许出现任何开关的名字；判死为空时整块不渲染；正文不出现在这一屏；非类型 import 只有 `memory-display` 一份；块的位置与不跟开关消失 |
+| `memory-display.test.ts` | +8（并入原有 26 条 ⇒ 34） | 五句话逐字 + 都有中文、`retry_exhausted` 那档不含数字（次数由 `attempts` 自己报）、次数句子、截断句子、以及「纯模块边界」那条对新增 `import type` 仍然通过 |
+
+| 探针 | 改动 | 红了谁（实测条数） |
+|---|---|---|
+| P1 | 在路由里补一道 `memoryEnabled` 闸门（假装片L-1 的裁决不适用于调度行） | 6 条：route 的「开关全关照样 200／不读偏好」+ panel 里三处「不许出现开关名／不跟开关消失」相关断言 |
+| P2 | `where` 去掉 `userId` | 1 条：「只回自己名下的 DEAD：别人的判死行一条都不露」 |
+| P3 | `take: FAILED_TASK_LIST_MAX_ROWS`（去掉 `+1`） | 1 条：「读满 50 条 ⇒ `capped` 为真」变成永远 `false` |
+| P4 | 认不出的码兜到 `retry_exhausted`（替用户猜一个原因） | 1 条：映射用例里那一行被判成「重试过，每一次都失败」 |
+| P5 | `orderBy` 的 `desc` → `asc` | 1 条：「判死时间新的在前」（`expected [ 'old', 'new' ] to deeply equal [ 'new', 'old' ]`） |
+
+第五档那次修正不需要额外探针：它的形状就是「映射缺一行」，红用例已经在场（三条红 ⇒ 补完 ⇒ 全绿）。
+五支探针全部当场按字面回滚，没有用过 `git checkout` / `git stash`。
+
+门禁：`npx tsc --noEmit` 无输出；全量单测 `111 files / 1860 tests` 全绿（片Q-5 收尾时 `108 / 1822`，本片 +38）。
+
+### 六、行号复核（本片两次）
+
+`memory-display.ts`（片R-3 时 +34 行，第五档修正再 +3 ⇒ 现 250 行）和 `memory-panel.tsx`（+7 行）都变过长度，
+所以全文指进这两个文件的引用重跑了一遍对账，第一次改掉 17 处（`formatDate` 的 `:228-237`／`:233`／`:240`、
+`describeAccessCount`/`Cap` 的 `:202`/`:207`、`describeCandidateListCap :157`、`memory-panel.tsx` 的
+`500,501,565,918`、`318,335,688,914`、`627,635,566`、`433,675-711,525-544`、`688,773,324`、`437,440`、`:212`、
+`:555`）；第五档之后 `memory-display.ts` 又长 3 行，于是其中 6 处第二次按实测更正为
+`:231-240`（两处）、`:236`、`:243`、`:205`、`:210`。两处都不是结论的变化，但行号错了的验收文档等于没有验收文档。
+
+### 七、这一片的边界（含无法验收项）
+
+一、**真 JSX 渲染仍未验收**。那 13 条是 `readFileSync` + 去注释的源码断言：块能不能在浏览器里点、
+`timeAgo` 那一档多久翻一次、`Alert` 的琥珀色在暗底上对比度够不够，仍然只有起服务真看一眼才算数
+（沿用 6-G-c 之后一直没补上的那一项）。
+
+二、**这一屏说得出「哪次对话」，说不出「哪一句」**。要精确到句，得先给会话页加一个消息锚点——那是会话页
+的功能。在欠账表上现解密一句话，是把 ⑧ 那条结构性红线换成一次性便利，不做。
+
+三、**`DEAD` 行今天没有保留期**。判死的行会一直留在这张表里，唯一的清法是用户删那次会话（`schema.prisma:731`
+级联）或删账号（`:730`）。列表有 50 条封顶加一句截断说明，所以这一屏不会无声变长，但它**会**变长。
+「N 天前的 DEAD 行要不要自动清」是一个真实的问题：清了就没有「系统漏过什么」的历史，不清就等于承认这张
+表只装欠着的活、而 `DEAD` 其实已经是历史。这一条留给他判，不替他定。
+
+四、**没有「重试」按钮**，这是刻意的。④ 要的是查看；而重跑一次超时判死的那一轮，正是「同一句话记两条」
+的来源（`task-worker.ts:197-199` 那段注释就是这条判决的理由）。要给用户一个能点的重跑，得先有「这一轮
+确定没写进去」的判定能力——那需要写入幂等键，不是界面上多一个按钮。
+
+五、`priority` / `payloadCiphertext` / `completedAt` 三列的不建是本片的裁决，不是待办。如果 §6 那份列表
+将来被读成「必须逐列同名」，需要的是重开这片并重新给理由，而不是偷偷加三列把表变成一个名字对得上、
+语义对不上的东西。
+
+六、这一屏只是「欠账的账本」，不是可观测性面板：没有队列深度、没有 worker 心跳、没有按模块的失败率。
+那些是运维视角的数，任务书 ④ 的原文是「查看失败任务」，而界面上唯一真正的用户是想知道「我哪些话没被记住」
+的那个人。要做运维面板得另开一片，并且要先把 `DEAD` 的保留期定下来。
+
 
 

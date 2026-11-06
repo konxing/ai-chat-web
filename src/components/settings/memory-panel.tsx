@@ -6,6 +6,7 @@ import { Archive, ArchiveRestore, Brain, History, Pencil, Scale, Trash2, X } fro
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
 import { MemoryCandidatesPanel } from './memory-candidates-panel';
+import { FailedTasksPanel } from './failed-tasks-panel';
 import {
   CONFIDENCE_BAND_LABELS,
   CONTEXT_LABELS,
@@ -552,6 +553,12 @@ export function MemoryPanel() {
         关掉长期记忆之后用户更需要一个地方把它们答掉（口径同 `candidates/route.ts` 头上的裁决）。
       */}
       <MemoryCandidatesPanel onConfirmed={() => void load()} />
+
+      {/*
+        「没记上的句子」排在待确认下面、记忆列表上面，同样不跟着总开关消失（任务书 §6 要求④）。
+        它读的是后台欠账表的调度列，一行记忆都不解密，所以这一屏没有闸门可问。
+      */}
+      <FailedTasksPanel />
 
       <div className="mt-5 space-y-2.5">
         {loadError ? <Alert tone="error">{loadError}</Alert> : null}

@@ -26,12 +26,16 @@ import {
   describeConfidenceFactor,
   describeAccessCap,
   describeAccessCount,
+  describeFailedTaskAttempt,
+  describeFailedTaskListCap,
   describeMemoryListCap,
   describeArchivedListCap,
   describeCandidateListCap,
   describePolicySummary,
-  describeValidRange
+  describeValidRange,
+  FAILED_TASK_REASON_LABELS
 } from '@/lib/cognitive/memory-display';
+import type { FailedTaskReason } from '@/lib/cognitive/failed-tasks';
 
 const TYPES: MemoryType[] = ['fact', 'preference', 'goal', 'project', 'decision', 'emotion'];
 const CONTEXTS: MemoryContext[] = [
@@ -46,6 +50,13 @@ const CONTEXTS: MemoryContext[] = [
 const ORIGINS: MemoryOrigin[] = ['explicit', 'userConfirmed', 'observed', 'inferred', 'hypothesis', 'retracted'];
 const ACTIONS: MemoryRevisionAction[] = ['superseded', 'retracted'];
 const RETENTIONS: MemoryRetention[] = ['forever', 'untilSuperseded', 'days90', 'days30', 'sessionOnly'];
+const REASON_KEYS: FailedTaskReason[] = [
+  'timeout',
+  'retry_exhausted',
+  'lease_expired',
+  'preferences_unavailable',
+  'other'
+];
 
 function range(precision: TimePrecision, validFrom: string | null, validTo: string | null = null) {
   return describeValidRange({ precision, validFrom, validTo });
@@ -223,6 +234,56 @@ describe('再巩固的访问说法（任务书 7.1）', () => {
     expect(describeAccessCap(false, 120)).toBe('');
     expect(describeAccessCap(true, 200)).toBe(
       '访问记录比这一屏多：这里只统计最近 200 轮对话，更早的轮次没有算进来。'
+    );
+  });
+});
+
+describe('判死原因的五句话与次数句子（任务书 §6 要求④）', () => {
+  /**
+   * 这五句是这一屏里唯一会「解释系统为什么漏了」的文字，所以每一句都得说出机制，
+   * 而且不许把不确定说成确定：`timeout` 那一档真的不知道写没写进去（task-worker.ts
+   * 就是因为不知道才不敢重跑），句子必须把这份不知道留在原地。
+   */
+  it('五种原因都有中文，界面不会渲染出 undefined', () => {
+    expect(REASON_KEYS.map((key) => FAILED_TASK_REASON_LABELS[key].length > 0)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true
+    ]);
+  });
+
+  it('超时那一档不谎称「一定没记上」：判死恰恰因为我们不知道', () => {
+    expect(FAILED_TASK_REASON_LABELS.timeout).toBe('写到一半超时：这句可能记上了，也可能没有');
+  });
+
+  it('重试耗尽那一档不说「重试了三次」：次数由 attempts 那一列自己报', () => {
+    expect(FAILED_TASK_REASON_LABELS.retry_exhausted).toBe('重试过，每一次都失败');
+    expect(FAILED_TASK_REASON_LABELS.retry_exhausted).not.toMatch(/[0-9]/);
+  });
+
+  it('租约过期那一档说的是负责它的进程断了，不是「你的话丢了」', () => {
+    expect(FAILED_TASK_REASON_LABELS.lease_expired).toBe('负责它的服务中途断了');
+  });
+
+  it('读不到开关那一档写的是没记上：那一次连写都没开始', () => {
+    expect(FAILED_TASK_REASON_LABELS.preferences_unavailable).toBe('读不到你的记忆开关：这句没记上');
+  });
+
+  it('认不出来的错误码只说「原因没有记下来」，不猜一个解释', () => {
+    expect(FAILED_TASK_REASON_LABELS.other).toBe('原因没有记下来');
+  });
+
+  it('次数句子把实际次数带出来：不写成「试过好几次」', () => {
+    expect(describeFailedTaskAttempt(1)).toBe('试过 1 次');
+    expect(describeFailedTaskAttempt(3)).toBe('试过 3 次');
+  });
+
+  it('判死列表到上限时单独一句，没到上限一个字都不出', () => {
+    expect(describeFailedTaskListCap(false, 3)).toBe('');
+    expect(describeFailedTaskListCap(true, 50)).toBe(
+      '没记上的句子比这一屏多：这里只列出最近 50 条，更早的没有读进来。'
     );
   });
 });
