@@ -2681,6 +2681,8 @@ LINK 今天完全同一个形状：`RELATED_TO` 边没有可写的表（2a 判�
 
 那两条静态守卫照旧留着，不许为了本片把它们改松：`schema.prisma` 里不许出现 `model MemoryRelation`、
 `src/` 里不许出现 `prisma.memoryRelation`（`cognitive-memory-graph.test.ts:484-500`）。
+〔**这句在写成的当天就过期了**：同日的 片O2 建了表，两条守卫被替换成「只允许 `relations.ts` 碰这张表」——
+原文留着是因为它记录的是本片当时的判断，实际现状见本节第四小节的对照表。〕
 
 ### 三、解锁条件（写在纸面上，不是待办里的模糊一句）
 
