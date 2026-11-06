@@ -202,10 +202,18 @@ export async function proposeCandidate(input: MemoryCandidateInput): Promise<{ i
   return { id, created: true };
 }
 
+/**
+ * 待确认那一池现在有几条。状态的拼写只在 `STATUS_PAIRS` 一处，所以淘汰和认知中心门厅共用这一个读法：
+ * 门厅上那个「等你确认 N 条」和候选列表里的条数，必须是同一个 where 数出来的。
+ */
+export async function countPendingCandidates(userId: string): Promise<number> {
+  return prisma.memoryCandidate.count({ where: { userId, status: toStoredStatus('pending') } });
+}
+
 /** 只淘汰还没被回答的：已确认/已拒绝的行是用户答案的记录，留着才解释得清「为什么这句不再问了」。 */
 async function evictOldestPending(userId: string): Promise<void> {
   const pendingStatus = toStoredStatus('pending');
-  const total = await prisma.memoryCandidate.count({ where: { userId, status: pendingStatus } });
+  const total = await countPendingCandidates(userId);
   const excess = total - MAX_PENDING_CANDIDATES;
   if (excess <= 0) return;
   const oldest = await prisma.memoryCandidate.findMany({

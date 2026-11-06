@@ -8,6 +8,7 @@ import {
   Bot,
   Brain,
   Check,
+  Compass,
   Fingerprint,
   History,
   KeyRound,
@@ -48,6 +49,7 @@ import { TimelinePanel } from './timeline-panel';
 import { MemoryGraphPanel } from './memory-graph-panel';
 import { ReflectionPanel } from './reflection-panel';
 import { ProfilePanel } from './profile-panel';
+import { CognitiveOverviewPanel, type OverviewTarget } from './cognitive-overview-panel';
 
 interface AccountUser {
   id: string;
@@ -83,6 +85,7 @@ type Tab =
   | 'profile'
   | 'security'
   | 'models'
+  | 'overview'
   | 'memory'
   | 'policy'
   | 'timeline'
@@ -348,6 +351,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['profile', '个人资料', UserRound],
               ['security', '安全与登录', ShieldCheck],
               ['models', '我的模型', Bot],
+              ['overview', '认知中心', Compass],
               ['memory', '记忆', Brain],
               ['policy', '记忆策略', SlidersHorizontal],
               ['timeline', '认知时间线', History],
@@ -752,6 +756,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               </div>
             </section>
           ) : null}
+
+          {tab === 'overview' ? <CognitiveOverviewPanel onOpen={setTab} /> : null}
 
           {tab === 'memory' ? <MemoryPanel /> : null}
 
