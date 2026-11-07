@@ -90,12 +90,14 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   // 挂 15 张和发得出去 4 张是两个数：超出的部分这轮不进模型，不说明用户只会觉得模型没看图。
   const imageSummary = imageSendSummary(attachments);
 
-  const abort = new AbortController();
-  const onAbort = () => abort.abort();
-  req.signal.addEventListener('abort', onAbort);
-  // 客户端可能在挂监听之前就已经断开，那种情况下 abort 事件永远不会再来：
-  // 不补这一刀，这一轮会冲着一条不存在的连接把模型调用跑完。
-  if (req.signal.aborted) abort.abort();
+  // 客户端切走（去后台、关页面）不再中断这一轮：模型照常生成、落库、积记忆，用户回来能看到
+  // 完整回答。断开只是「不再往这条连接写字节」，不是「这轮不该发生」。模型调用自身有 120s
+  // 超时兜底（ai.ts），不会因为没人看就无限跑。
+  let clientGone = req.signal.aborted;
+  const markGone = () => {
+    clientGone = true;
+  };
+  req.signal.addEventListener('abort', markGone);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -105,17 +107,29 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       let outputTokens: number | undefined;
       // 审计问的是「这一轮发生过什么」，不是「模型有没有自己说 done」：
       // 以 done 事件为闸门时，失败、取消、以及没发 done 就结束的轮次在审计里完全不存在。
-      let outcome: 'SUCCESS' | 'FAILURE' | 'ABORTED' = 'SUCCESS';
+      let outcome: 'SUCCESS' | 'FAILURE' = 'SUCCESS';
       let failureCode: string | undefined;
       const send = (payload: unknown) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        if (clientGone) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+        } catch {
+          // 连接已取消：剩下的字节无处可去，但生成和落库照常走完。
+          clientGone = true;
+        }
+      };
+      const close = () => {
+        try {
+          controller.close();
+        } catch {
+          /* 已关闭或已取消 */
+        }
       };
 
       try {
         for await (const event of streamChatCompletion({
           provider,
-          messages,
-          signal: abort.signal
+          messages
         })) {
           if (event.type === 'delta' && event.text) {
             content += event.text;
@@ -151,7 +165,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           // 只在成功帧里给——失败和中断的那一帧用户看到的是错误文案，不是一句「引用了什么」。
           memoryIds: citedMemoryIds
         });
-        controller.close();
+        close();
         // 字节已经全部交给客户端，才欠下这一轮的记忆：认知模块不在关键路径上，
         // 慢或者坏都不影响这轮回答。只有成功回答的轮次才欠账，失败和取消的轮次不留记忆。
         //
@@ -182,12 +196,6 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           code,
           error: err instanceof Error ? err.message : String(err)
         });
-        if (abort.signal.aborted && !content) {
-          outcome = 'ABORTED';
-          failureCode = 'ABORTED';
-          controller.close();
-          return;
-        }
         outcome = 'FAILURE';
         failureCode = code;
         try {
@@ -223,9 +231,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           log.error('chat.partial_save_failed', { error: String(saveErr) });
           send({ type: 'error', error: { code, message } });
         }
-        controller.close();
+        close();
       } finally {
-        req.signal.removeEventListener('abort', onAbort);
+        req.signal.removeEventListener('abort', markGone);
         writeAudit({
           actorId: user.id,
           actorLabel: user.username,
@@ -247,7 +255,8 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       }
     },
     cancel() {
-      abort.abort();
+      // 客户端取消只停写字节，生成照常走完（见 start 里的 clientGone）。
+      markGone();
     }
   });
 

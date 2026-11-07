@@ -250,7 +250,7 @@ vi.mock('@/lib/prisma', async () => {
 vi.mock('@/lib/ai', async () => {
   const { ApiError } = await import('@/lib/http');
 
-  async function* events(signal: AbortSignal) {
+  async function* events(signal?: AbortSignal) {
     if (ctx.behavior === 'throw') {
       throw new ApiError(502, 'AI_PROVIDER_ERROR', '模型服务暂时不可用');
     }
@@ -262,19 +262,13 @@ vi.mock('@/lib/ai', async () => {
       yield { type: 'delta', text: '没有 done 事件' };
       return;
     }
-    if (ctx.behavior === 'abort') {
-      // 由测试在这一刻把客户端连接掐断，路由的 abort 监听器此时必定已经挂上；
-      // 等一个宏任务让 onAbort 落地，再模拟 fetch 在取消时抛 AbortError。
+    if (ctx.behavior === 'abort' || ctx.behavior === 'already-aborted') {
+      // 客户端在这一刻断开（切去后台 / 关页面 / 挂监听前就断）。新契约：断开不中断生成——
+      // 路由不再把客户端 signal 传给模型，这里照常把整轮答完，回答落库、记忆欠账。
       ctx.abortRequest?.();
       await new Promise((resolve) => setTimeout(resolve, 20));
-      ctx.sawAbortedSignal = signal.aborted;
-      throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
-    }
-    if (ctx.behavior === 'already-aborted') {
-      // 客户端在路由挂监听之前就已经断开：内部 signal 必须已经被带上，否则这次
-      // 模型调用会冲着一条已经不存在的连接跑完整轮。
-      ctx.sawAbortedSignal = signal.aborted;
-      throw Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+      // 模型收到的 signal 必须是「没被中止」（路由压根没传）：这正是「切走也继续」的证据。
+      ctx.sawAbortedSignal = signal ? signal.aborted : false;
     }
     yield { type: 'delta', text: '正常回答' };
     yield { type: 'usage', inputTokens: 11, outputTokens: 7 };
@@ -282,7 +276,7 @@ vi.mock('@/lib/ai', async () => {
   }
 
   return {
-    streamChatCompletion: (input: { messages: AiMessage[]; signal: AbortSignal }) => {
+    streamChatCompletion: (input: { messages: AiMessage[]; signal?: AbortSignal }) => {
       ctx.modelCalls += 1;
       // 这一份 messages 就是路由交给模型的完整上下文：它在 src/lib/ai.ts:126 被塞进请求体之前
       // 就被留在这里。证明的是「出站上下文数组」，不是「HTTP 请求体的字节」——
@@ -380,31 +374,38 @@ describe('本轮失败时的落库与审计', () => {
     expect((ctx.audit[0].after as Record<string, unknown>).providerId).toBe(PROVIDER.id);
   });
 
-  it('用户取消：不写助手消息，但审计记下这一轮被取消', async () => {
+  it('用户切走（去后台/关页面）：生成不中断，回答照常落库、审计 SUCCESS、记忆照常欠账', async () => {
     ctx.behavior = 'abort';
     const controller = new AbortController();
     ctx.abortRequest = () => controller.abort();
 
     await post(controller.signal);
 
-    expect(ctx.sawAbortedSignal).toBe(true);
-    expect(assistantRows()).toHaveLength(0);
+    // 模型没收到中止信号——断开只是不再往连接写字节，不是停掉这一轮。
+    expect(ctx.sawAbortedSignal).toBe(false);
+    const rows = assistantRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('COMPLETE');
     expect(ctx.rows.filter((row) => row.role === 'USER')).toHaveLength(1);
     expect(ctx.audit).toHaveLength(1);
-    expect(ctx.audit[0]).toMatchObject({ action: 'chat.message', status: 'FAILURE', error: 'ABORTED' });
+    expect(ctx.audit[0]).toMatchObject({ action: 'chat.message', status: 'SUCCESS' });
+    // 答完的轮次照常欠下记忆账，用户回来认知层也积累了这一轮。
+    expect(ctx.taskRows).toHaveLength(1);
   });
 
-  it('连接在路由挂监听之前就断了：内部 signal 也必须已经中止', async () => {
+  it('连接在路由挂监听之前就断了：这一轮也照常生成并落库', async () => {
     ctx.behavior = 'already-aborted';
     const controller = new AbortController();
     ctx.abortRequest = () => controller.abort();
 
     await post(controller.signal);
 
-    expect(ctx.sawAbortedSignal).toBe(true);
-    expect(assistantRows()).toHaveLength(0);
+    expect(ctx.sawAbortedSignal).toBe(false);
+    const rows = assistantRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe('COMPLETE');
     expect(ctx.audit).toHaveLength(1);
-    expect(ctx.audit[0]).toMatchObject({ status: 'FAILURE', error: 'ABORTED' });
+    expect(ctx.audit[0]).toMatchObject({ status: 'SUCCESS' });
   });
 
   it('成功轮次照旧一条 COMPLETE + 一条 SUCCESS 审计', async () => {

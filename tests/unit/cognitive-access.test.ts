@@ -385,7 +385,8 @@ describe('写入点的位置（不阻塞主回复）', () => {
     const done = route.indexOf("type: 'done'");
     expect(done, '找不到 done 帧').toBeGreaterThanOrEqual(0);
     const body = route.slice(done);
-    const closed = body.indexOf('controller.close()');
+    // 成功分支现在调的是包了一层 try/catch 的 close()（客户端切走时 controller 可能已取消）。
+    const closed = body.indexOf('close();');
     const written = body.indexOf('await recordMemoryAccess({');
     expect(closed, '成功分支里没有 close()').toBeGreaterThanOrEqual(0);
     expect(written, '成功分支里没有写访问记录').toBeGreaterThanOrEqual(0);

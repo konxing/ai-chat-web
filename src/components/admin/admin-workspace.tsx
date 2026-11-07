@@ -94,7 +94,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(55%_45%_at_15%_0%,rgba(245,158,11,0.07),transparent_60%),radial-gradient(45%_40%_at_90%_10%,rgba(99,102,241,0.10),transparent_60%)]" />
       <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#07090f]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 sm:px-6">
-          <Link href="/chat" className="btn-icon" aria-label="返回对话">
+          <Link href="/chat?resume=1" className="btn-icon" aria-label="返回对话">
             <ArrowLeft className="h-4 w-4" />
           </Link>
           <BrandMark className="h-8 w-8" />
@@ -109,7 +109,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
             <Link href="/settings" className="btn-ghost">
               <Settings2 className="h-4 w-4" /> 设置
             </Link>
-            <Link href="/chat" className="btn-ghost">
+            <Link href="/chat?resume=1" className="btn-ghost">
               返回对话
             </Link>
           </div>
