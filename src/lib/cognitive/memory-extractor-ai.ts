@@ -1,6 +1,7 @@
 import type { AiProvider } from '@prisma/client';
 import { streamChatCompletion } from '@/lib/ai';
 import { log } from '@/lib/logger';
+import { getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { MEMORY_CANDIDATE_MAX_CHARS, MEMORY_CANDIDATE_MIN_CHARS, type MemoryCandidate } from './memory-extractor';
 import type { MemoryType } from './policy';
 
@@ -58,6 +59,26 @@ export function aiExtractionCallCountValue(): number {
 /** 测试用：把计数归零。 */
 export function resetAiExtractionCallCount(): void {
   aiExtractionCallCount = 0;
+}
+
+/**
+ * 解析「记忆审核用的模型」。默认回落到该用户的默认聊天模型；设了 env
+ * `COGNITIVE_AI_MEMORY_PROVIDER=<providerId>` 就改用那个指定的 provider——记忆审核可以和
+ * 聊天用不同的模型（比如审核用更便宜/更稳的），这是这个接口的意义。
+ *
+ * 指定的 provider 取不到（id 写错、被删、该用户无权用）时不报错，记一条日志回退默认模型：
+ * 审核模型是增益，配错不该把这一轮记忆清零。
+ */
+export async function resolveMemoryExtractionProvider(userId: string): Promise<AiProvider> {
+  const configured = process.env.COGNITIVE_AI_MEMORY_PROVIDER;
+  if (configured) {
+    try {
+      return await getProviderForUser(configured, userId);
+    } catch {
+      log.warn('cognitive.ai_extraction_provider_fallback', { userId, providerId: configured });
+    }
+  }
+  return resolveDefaultProvider(userId);
 }
 
 /**

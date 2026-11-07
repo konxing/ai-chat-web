@@ -5,8 +5,7 @@ import {
   type CognitiveTurn
 } from './manager';
 import { extractMemoryCandidates, MEMORY_CANDIDATES_PER_TURN } from './memory-extractor';
-import { aiMemoryExtractionEnabled, refineCandidatesWithAI } from './memory-extractor-ai';
-import { resolveDefaultProvider } from '@/lib/providers';
+import { aiMemoryExtractionEnabled, refineCandidatesWithAI, resolveMemoryExtractionProvider } from './memory-extractor-ai';
 import { decisionModule } from './decision-module';
 import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
@@ -305,7 +304,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 空数组也不清空规则候选。最终落不落库、要不要先问，仍由下方 write-decision 按用户策略裁决。
   if (aiMemoryExtractionEnabled()) {
     try {
-      const provider = await resolveDefaultProvider(turn.userId);
+      const provider = await resolveMemoryExtractionProvider(turn.userId);
       const refined = await refineCandidatesWithAI(turn.userId, turn.content, candidates, provider);
       if (refined !== null && refined.length > 0) {
         const merged = [...candidates];

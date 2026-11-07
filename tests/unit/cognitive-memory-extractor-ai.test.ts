@@ -8,7 +8,8 @@ import type { AiProvider } from '@prisma/client';
 const ctx = vi.hoisted(() => ({
   chunks: [] as string[],
   throws: false,
-  calls: 0
+  calls: 0,
+  providerThrows: false
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -23,6 +24,12 @@ vi.mock('@/lib/logger', () => ({
   log: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined }
 }));
 
+vi.mock('@/lib/providers', () => ({
+  getProviderForUser: (providerId: string) =>
+    ctx.providerThrows ? Promise.reject(new Error('provider not found')) : Promise.resolve({ id: providerId }),
+  resolveDefaultProvider: () => Promise.resolve({ id: 'default-provider' })
+}));
+
 const PROVIDER = { id: 'p-1', modelId: 'test' } as AiProvider;
 
 async function mod() {
@@ -33,7 +40,9 @@ afterEach(() => {
   ctx.chunks = [];
   ctx.throws = false;
   ctx.calls = 0;
+  ctx.providerThrows = false;
   delete process.env.COGNITIVE_AI_MEMORY;
+  delete process.env.COGNITIVE_AI_MEMORY_PROVIDER;
   void mod().then((m) => m.resetAiExtractionCallCount());
 });
 
@@ -121,5 +130,25 @@ describe('成本计数（§9.6 每轮额外模型调用数）', () => {
     ctx.throws = true;
     await m.refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
     expect(m.aiExtractionCallCountValue()).toBe(2);
+  });
+});
+
+describe('resolveMemoryExtractionProvider：指定独立审核模型', () => {
+  it('没配 COGNITIVE_AI_MEMORY_PROVIDER 时用默认聊天模型', async () => {
+    const { resolveMemoryExtractionProvider } = await mod();
+    expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'default-provider' });
+  });
+
+  it('配了就用指定的 provider', async () => {
+    process.env.COGNITIVE_AI_MEMORY_PROVIDER = 'p-review';
+    const { resolveMemoryExtractionProvider } = await mod();
+    expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'p-review' });
+  });
+
+  it('指定的取不到（写错/无权）回退默认模型，不抛错', async () => {
+    process.env.COGNITIVE_AI_MEMORY_PROVIDER = 'p-gone';
+    ctx.providerThrows = true;
+    const { resolveMemoryExtractionProvider } = await mod();
+    expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'default-provider' });
   });
 });

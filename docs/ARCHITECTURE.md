@@ -81,7 +81,7 @@
 
 后台任务永不阻塞对话：它跑在 HTTP 请求之外的独立轮询里，写侧失败只进日志和退避，读侧（构建上下文时召回记忆）另有 1 秒截止，超时就当没有。
 
-**AI 二级抽取（Phase 2，默认关）**：env `COGNITIVE_AI_MEMORY=1` 开启后，规则预筛抽出候选的轮次会再调一次默认模型（`memory-extractor-ai.ts`，30s 截止）补充规则漏抓的用户陈述、修正类型，与规则候选取并集。普通闲聊（规则零候选）不触发模型；模型不可用/解析失败回退规则候选。最终保存决策仍由 `write-decision` 按用户策略裁决，AI 不凌驾用户策略。
+**AI 二级抽取（Phase 2，默认关）**：env `COGNITIVE_AI_MEMORY=1` 开启后，规则预筛抽出候选的轮次会再调一次模型（`memory-extractor-ai.ts`，30s 截止）补充规则漏抓的用户陈述、修正类型，与规则候选取并集。普通闲聊（规则零候选）不触发模型；模型不可用/解析失败回退规则候选。最终保存决策仍由 `write-decision` 按用户策略裁决，AI 不凌驾用户策略。审核模型默认用该用户的默认聊天模型；另设 `COGNITIVE_AI_MEMORY_PROVIDER=<providerId>` 可指定一个独立的审核模型（id 取不到/无权用时回退默认）。
 
 **AI 提取成本计数（Phase 7，§9.6）**：`memory-extractor-ai.ts` 暴露 `aiExtractionCallCountValue()`，数「真的发起了模型调用」的轮次（含失败，成本已发生）；默认关恒为 0。召回/精确率/MRR/事实更新等基线与阈值由既有评测账本（cognitive-eval-snapshot / -thresholds / -salience / -temporal-calibration）守护，A–E 基线对照复用这套 fixture。
 
