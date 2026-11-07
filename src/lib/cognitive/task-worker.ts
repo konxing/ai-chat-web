@@ -8,6 +8,7 @@ import { MODULE_SWITCH, runCognitiveWrites, type CognitiveTurn } from './manager
 import { ensureCognitiveModules } from './memory-module';
 import { getCognitivePreferences } from './preferences';
 import { runReflectionSweep } from './reflection-sweep';
+import { runMemoryConsolidation } from './memory-consolidator';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -111,6 +112,8 @@ export async function runCognitiveWorkerTick(): Promise<number> {
     // 由扫描自己那 15 秒截止兜住。
     for (const userId of new Set(tasks.map((task) => task.userId))) {
       await runReflectionSweep(userId, { now: new Date() });
+      // 巩固（Phase 3，env 默认关）：幂等——冗余条归档后下一轮就聚不出簇，不会反复动库。
+      await runMemoryConsolidation(userId);
     }
     return tasks.length;
   } catch {

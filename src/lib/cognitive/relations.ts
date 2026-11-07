@@ -53,6 +53,23 @@ export async function recordEvolutionRelation(
 }
 
 /**
+ * 巩固边（混合式记忆升级 Phase 3）：被归档的冗余旧记忆 PART_OF 保留下来的那条主记忆。
+ * 方向是「旧 → 主」，表示旧条是这一主题簇的一部分、作为证据保留。置信度封顶 0.5——
+ * 这是系统按主题重合做的聚类判断，不是用户亲口确认的因果，不该拿高置信度。
+ */
+export async function recordConsolidationRelation(
+  tx: RelationWriter,
+  input: { userId: string; primaryMemoryId: string; memberMemoryId: string }
+): Promise<void> {
+  const where = relationKey(input.userId, input.memberMemoryId, input.primaryMemoryId, 'PART_OF');
+  await tx.memoryRelation.upsert({
+    where: { userId_sourceMemoryId_targetMemoryId_relationType: where },
+    create: { ...where, confidence: 0.5, origin: 'SYSTEM', status: 'ACTIVE', evidenceIds: [] },
+    update: { status: 'ACTIVE', confidence: 0.5, origin: 'SYSTEM' }
+  });
+}
+
+/**
  * 同主题边：新记忆和同一情境里已有的行做词重合。只连最像的三条，方向是「新 → 旧」。
  * 置信度 0.5 + 0.1×重合词数（上限 0.9）；没有来源消息时封顶 0.5——
  * 没有证据的边可以存在，但不该拿到高置信度。
