@@ -86,6 +86,29 @@ const VERBS: readonly string[] = [
   '我选择'
 ];
 
+/**
+ * 明确决策动词的兜底：「我决定了，接受杭州那份工作 offer」这种「动词 + 逗号 + 选择」的自然说法，
+ * 领域标记（我接受 offer / 我决定离职）接不住，但「我决定了」本身就是一个拍板信号。
+ * 只收带「了」的完成态——「我决定今天吃什么」这种随口选择不算重要决策（5.1 的红线）。
+ * 命中后按句子里的领域关键词归类，归不出来落到 PERSONAL_GOAL。
+ */
+const GENERIC_DECISION_VERB = '我决定了';
+
+const DOMAIN_KEYWORDS: ReadonlyArray<{ category: DecisionCategory; keywords: readonly string[] }> = [
+  { category: 'CAREER', keywords: ['offer', '工作', '跳槽', '离职', '辞职', '入职', '转岗', '加入'] },
+  { category: 'PURCHASE', keywords: ['买', '入手', '下单', '购买', '预算'] },
+  { category: 'LEARNING', keywords: ['学', '考', '课程', '报班', '考研'] },
+  { category: 'TECH_CHOICE', keywords: ['框架', '技术', '数据库', '语言', '栈', '改用'] },
+  { category: 'PROJECT_PLANNING', keywords: ['项目', '立项', '启动', '排期'] }
+];
+
+function categoryOfSentence(sentence: string): DecisionCategory {
+  for (const { category, keywords } of DOMAIN_KEYWORDS) {
+    if (keywords.some((keyword) => sentence.includes(keyword))) return category;
+  }
+  return 'PERSONAL_GOAL';
+}
+
 /** 保留句尾标点地切句；问句整句不算决策候选。 */
 export function splitSentences(text: string): string[] {
   return text
@@ -112,7 +135,12 @@ export function extractDecisionCandidates(text: string): DecisionCandidate[] {
         }
       }
     }
-    if (hit === null) continue;
+    if (hit === null) {
+      // 领域标记没命中，但句子里有明确决策动词：按领域关键词归类后照常取选择内容。
+      const index = sentence.indexOf(GENERIC_DECISION_VERB);
+      if (index === -1) continue;
+      hit = { category: categoryOfSentence(sentence), index, verb: GENERIC_DECISION_VERB };
+    }
     const remainder = sentence.slice(hit.index + hit.verb.length);
     const clauses = remainder
       .split(CLAUSE_SPLIT_RE)

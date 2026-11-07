@@ -35,6 +35,11 @@ describe('候选抽取的命中', () => {
     expect(one('我打算先观察，我决定周末去杭州待两天。')[0]?.type).toBe('decision');
   });
 
+  it('养宠物的亲口陈述抽成 fact，日常习惯抽成 preference', () => {
+    expect(one('我养了一只叫年糕的布偶猫。')).toEqual([{ text: '我养了一只叫年糕的布偶猫', type: 'fact' }]);
+    expect(one('我现在每天早上跑步三公里。')[0]?.type).toBe('preference');
+  });
+
   it('一条消息里的多个句子各出一条候选，顺序按原文', () => {
     const candidates = one('我在用 Prisma。我喜欢喝温水。');
     expect(candidates).toEqual([

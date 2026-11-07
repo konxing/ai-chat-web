@@ -99,3 +99,21 @@ describe('预期结果与复盘时间：只认同一句里的原话', () => {
     expect(extractDecisionCandidates('我希望能早点下班。')).toHaveLength(0);
   });
 });
+
+describe('明确决策动词的兜底（我决定了 + 领域关键词）', () => {
+  it('「我决定了，接受…offer」按领域关键词归到 CAREER，选择内容取动词之后', () => {
+    const [candidate] = extractDecisionCandidates('我决定了，接受杭州那份工作 offer，因为薪资高了 40%。');
+    expect(candidate).toBeDefined();
+    expect(candidate!.category).toBe('CAREER');
+    expect(candidate!.choice).toContain('接受杭州那份工作 offer');
+  });
+
+  it('领域关键词归不出来时落到 PERSONAL_GOAL，不硬塞一个错领域', () => {
+    const [candidate] = extractDecisionCandidates('我决定了，以后每周留一天给自己。');
+    expect(candidate!.category).toBe('PERSONAL_GOAL');
+  });
+
+  it('不带「了」的随口选择不算重要决策：我决定今天吃什么 不抽', () => {
+    expect(extractDecisionCandidates('我决定今天吃什么。')).toHaveLength(0);
+  });
+});
