@@ -28,6 +28,7 @@ const db = vi.hoisted(() => ({
   policies: null as unknown,
   emotionTransparency: 'implicit' as 'off' | 'implicit' | 'explicit',
   memoryReadLimit: 8,
+  timezoneOffsetMinutes: null as number | null,
   associationEnabled: false,
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
@@ -47,7 +48,8 @@ vi.mock('@/lib/cognitive/preferences', () => ({
       adaptiveMemoryEnabled: false,
       emotionTransparency: db.emotionTransparency,
       memoryWritePaused: db.memoryWritePaused,
-      memoryReadLimit: db.memoryReadLimit
+      memoryReadLimit: db.memoryReadLimit,
+      timezoneOffsetMinutes: db.timezoneOffsetMinutes
     })
 }));
 
@@ -220,6 +222,7 @@ beforeEach(() => {
   db.emotionTransparency = 'implicit';
   db.policyCalls = 0;
   db.memoryReadLimit = 8;
+  db.timezoneOffsetMinutes = null;
   db.associationEnabled = false;
   db.expandCalls = [];
   db.expandHits = [];
@@ -456,6 +459,21 @@ describe('写侧：先问再记真的去问（ASK_CONFIRM → 待确认候选）
 
     expect(db.creates).toHaveLength(1);
     expect(db.proposals).toEqual([]);
+  });
+
+  it('相对时间按偏好里的用户时区锚墙钟：UTC+8 本地清晨的「昨天」不多退一天', async () => {
+    db.memoryEnabled = true;
+    db.timezoneOffsetMinutes = 480;
+
+    // 说话时刻 = UTC 2026-11-06 16:30 = 本地 11-07 00:30；「昨天」是本地 11-06。
+    await memoryModule.write!({
+      ...TURN,
+      content: '我在做昨天的复盘。',
+      occurredAt: new Date('2026-11-06T16:30:00.000Z')
+    });
+
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]).toMatchObject({ precision: 'day', validFrom: new Date('2026-11-06T00:00:00.000Z') });
   });
 });
 

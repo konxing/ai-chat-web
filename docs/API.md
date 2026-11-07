@@ -136,7 +136,7 @@
 
 | 方法 | 路径 | 读 / 写 | 说明 |
 |---|---|---|---|
-| GET | `/api/account/cognitive` | 读 | `{ preferences }`：八个开关 + `emotionTransparency` + `reflectionCooldown` + `memoryWritePaused` + `memoryReadLimit` |
+| GET | `/api/account/cognitive` | 读 | `{ preferences }`：八个开关 + `emotionTransparency` + `reflectionCooldown` + `memoryWritePaused` + `memoryReadLimit` + `timezoneOffsetMinutes` |
 | PATCH | `/api/account/cognitive` | 写 | 请求体为 `cognitivePreferencesPatchSchema` 的任意子集（见下），返回 `{ preferences }` |
 | GET | `/api/account/cognitive/policies` | 读 | `{ policies, learning, learningThreshold, learningWindowDays }` |
 | PATCH | `/api/account/cognitive/policies` | 写 | `{ context, patch }`；`patch` 全字段可选，未提交的保持原值 |
@@ -148,7 +148,7 @@
 memoryEnabled, userModelEnabled, emotionEnabled, associationEnabled,
 timelineEnabled, reflectionEnabled, decisionMemoryEnabled, adaptiveMemoryEnabled,
 emotionTransparency(off|implicit|explicit), reflectionCooldown(daily|weekly|monthly),
-memoryWritePaused, memoryReadLimit(1..8，默认 8)
+memoryWritePaused, memoryReadLimit(1..8，默认 8), timezoneOffsetMinutes(-840..840，浏览器自动同步)
 ```
 
 `context` 词表：`general`、`technicalProject`、`learning`、`personalGoal`、

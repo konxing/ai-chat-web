@@ -53,9 +53,10 @@ PostgreSQL + Prisma。迁移位于 `prisma/migrations/`，生产使用 `prisma m
 其中六条边是**复合外键**（`(id, userId)` 成对引用）：`DecisionOutcome→DecisionRecord`、`ReflectionCitation→ReflectionRecord`、`ReflectionCitation→MemoryItem`、`ReflectionCitation→DecisionRecord`，以及 `MemoryRelation` 的两端（`source` / `target` → `MemoryItem`），加上 `MemoryItem`/`ReflectionRecord`/`DecisionRecord` 为支撑它们而建的 `@@unique([id, userId])`。跨用户连边在库层就插不进去，不靠应用层记得校验。
 
 ### CognitivePreference
-`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、`memoryReadLimit`(1–8，默认 8)、`reflectionSweptAt?`、时间戳。
+`userId`(主键)、八个模块开关（`memoryEnabled`、`userModelEnabled`、`emotionEnabled`、`associationEnabled`、`timelineEnabled`、`reflectionEnabled`、`decisionMemoryEnabled`、`adaptiveMemoryEnabled`）、`emotionTransparency`(OFF/IMPLICIT/EXPLICIT)、`reflectionCooldown`(DAILY/WEEKLY/MONTHLY)、`memoryWritePaused`、`memoryReadLimit`(1–8，默认 8)、`timezoneOffsetMinutes?`、`reflectionSweptAt?`、时间戳。
 **默认全关**：库里没有行时应用层补 `OFF`，开关由服务端在每个模块入口读取，前端传什么都不算。`reflectionSweptAt` 不是设置项，是后台那趟反思扫描的节流标记。
 `memoryReadLimit` 是任务书 8.3「记忆检索设置」那一档的落点：它只截断读侧每轮注入的条数（`selectMemoryCandidates` 的 `limit`），上限 8 与内置常量 `MEMORY_READ_MAX_ITEMS` 取小，越界由服务层夹回，不新增开关也不影响写侧。
+`timezoneOffsetMinutes` 是用户墙钟相对 UTC 的偏移（分钟，东八区 480），打开聊天页时浏览器自动同步；相对时间（昨天/去年/N天前）按它锚本地日历，null 或越界值按 UTC 处理。落库的 validFrom 仍是 UTC 零点的日历日，偏移只决定「昨天是哪一天」。
 
 ### MemoryPolicy
 复合主键 `(userId, context)`，七个情境各一行。`allowPersistence`、`allowedMemoryTypes[]`、`requireConfirmation`、`retention`(SESSION_ONLY/…)、`allowUserProfile`、`allowReflection`、`allowAssociation`。

@@ -30,6 +30,11 @@ export interface CognitivePreferences {
    * 它不是模块开关，也不是策略表的一列：七种情境共用同一个读取上限。
    */
   memoryReadLimit: number;
+  /**
+   * 用户本地时区相对 UTC 的偏移（分钟，东八区 = 480），打开聊天页时由浏览器自动同步。
+   * 「昨天/去年」这类相对说法锚的是用户墙钟；null = 还没同步过，写侧按 UTC 处理。
+   */
+  timezoneOffsetMinutes: number | null;
 }
 
 /** 读侧每轮注入条数的上下界，与 `MEMORY_READ_MAX_ITEMS` 一致；默认值就是加设置之前的行为。 */
@@ -39,7 +44,7 @@ export const MEMORY_READ_LIMIT_DEFAULT = 8;
 
 type FlagKey = Exclude<
   keyof CognitivePreferences,
-  'emotionTransparency' | 'reflectionCooldown' | 'memoryWritePaused' | 'memoryReadLimit'
+  'emotionTransparency' | 'reflectionCooldown' | 'memoryWritePaused' | 'memoryReadLimit' | 'timezoneOffsetMinutes'
 >;
 
 /** 任务书 1.1 的八个开关：前七个各对一个模块，第八个管策略学习层。 */
@@ -72,7 +77,8 @@ const OFF: CognitivePreferences = {
   emotionTransparency: 'implicit',
   reflectionCooldown: 'daily',
   memoryWritePaused: false,
-  memoryReadLimit: MEMORY_READ_LIMIT_DEFAULT
+  memoryReadLimit: MEMORY_READ_LIMIT_DEFAULT,
+  timezoneOffsetMinutes: null
 };
 
 const TO_STORED: Record<EmotionTransparency, StoredRow['emotionTransparency']> = {
@@ -114,7 +120,12 @@ function toPreferences(row: StoredRow): CognitivePreferences {
     memoryReadLimit: Math.min(
       MEMORY_READ_LIMIT_MAX,
       Math.max(MEMORY_READ_LIMIT_MIN, row.memoryReadLimit ?? MEMORY_READ_LIMIT_DEFAULT)
-    )
+    ),
+    // 越界或脏值按「没同步过」处理：UTC-14 到 UTC+14 之外没有真实时区。
+    timezoneOffsetMinutes:
+      Number.isInteger(row.timezoneOffsetMinutes) && Math.abs(row.timezoneOffsetMinutes!) <= 840
+        ? row.timezoneOffsetMinutes!
+        : null
   } as CognitivePreferences;
   for (const flag of COGNITIVE_FLAGS) preferences[flag] = row[flag];
   return preferences;
@@ -133,6 +144,7 @@ function toStored(patch: CognitivePreferencesPatch): Partial<StoredRow> {
   }
   if (patch.memoryWritePaused !== undefined) stored.memoryWritePaused = patch.memoryWritePaused;
   if (patch.memoryReadLimit !== undefined) stored.memoryReadLimit = patch.memoryReadLimit;
+  if (patch.timezoneOffsetMinutes !== undefined) stored.timezoneOffsetMinutes = patch.timezoneOffsetMinutes;
   return stored;
 }
 

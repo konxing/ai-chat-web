@@ -22,7 +22,11 @@ import type { TimePrecision } from './memories';
  *
  * 时刻一律用 UTC 日界对齐，因为写侧 `memories.ts:226-233` 硬拦「精度比记下来的更精确」：
  * `day` 要求时间部分为 0、`month` 还要求 1 日、`year` 还要求 1 月 1 日。
- * 顺带一句：不做本地时区换算，因为用户的时区没有存，而 `saidAt` 本身就是一个 UTC 时刻。
+ *
+ * 相对说法（昨天/去年/N天前）锚的是**用户的墙钟**，不是服务器的 UTC：先把 saidAt 拨到
+ * 用户本地（tzOffsetMinutes，由偏好行存浏览器时区），再按本地日历取年月日；落库仍是
+ * UTC 零点的日历日，和绝对日期同一表示。偏移只决定「昨天是哪一天」。
+ * 缺省 0 = 没同步过时区的老行为。UTC+8 的用户本地清晨说「昨天」，按 UTC 日界会多退一天。
  */
 
 export interface TemporalFrame {
@@ -42,18 +46,18 @@ const DAY_MS = 86_400_000;
 const TOKEN_RE =
   /(\d{4})年(\d{1,2})月(\d{1,2})日|(\d{4})年(\d{1,2})月|(\d{4})年|(\d{4})-(\d{1,2})-(\d{1,2})|([今去前])年|这个月|上个月|昨天|前天|(\d{1,3})天前/g;
 
-export function resolveTemporalFrame(text: string, saidAt: Date): TemporalFrame | null {
+export function resolveTemporalFrame(text: string, saidAt: Date, tzOffsetMinutes = 0): TemporalFrame | null {
   const matches = [...text.matchAll(TOKEN_RE)];
   if (matches.length !== 1) return null;
 
-  const frame = frameOf(matches[0], saidAt);
+  const frame = frameOf(matches[0], saidAt, tzOffsetMinutes);
   if (!frame) return null;
   // 未来的时刻：这句说的是还没发生的事，落进 validFrom 就是把计划讲成已经发生。
   if (frame.validFrom.getTime() > saidAt.getTime()) return null;
   return frame;
 }
 
-function frameOf(match: RegExpMatchArray, saidAt: Date): TemporalFrame | null {
+function frameOf(match: RegExpMatchArray, saidAt: Date, tzOffsetMinutes: number): TemporalFrame | null {
   const [token, y1, m1, d1, y2, m2, y3, y4, m4, d4, yearWord, daysAgo] = match;
 
   if (y1) return absolute('day', Number(y1), Number(m1), Number(d1));
@@ -61,8 +65,11 @@ function frameOf(match: RegExpMatchArray, saidAt: Date): TemporalFrame | null {
   if (y3) return absolute('year', Number(y3), 1, 1);
   if (y4) return absolute('day', Number(y4), Number(m4), Number(d4));
 
-  const year = saidAt.getUTCFullYear();
-  const month = saidAt.getUTCMonth();
+  // 拨到用户本地墙钟再取日历：本地 1 月 1 日凌晨说「去年」，UTC 还是去年 12 月 31 日，
+  // 按 UTC 取年会再错退一年。
+  const local = new Date(saidAt.getTime() + tzOffsetMinutes * 60_000);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth();
   if (yearWord) {
     return { precision: 'year', validFrom: new Date(Date.UTC(year - (yearWord === '今' ? 0 : yearWord === '去' ? 1 : 2), 0, 1)) };
   }
@@ -73,7 +80,7 @@ function frameOf(match: RegExpMatchArray, saidAt: Date): TemporalFrame | null {
   const days = token === '昨天' ? 1 : token === '前天' ? 2 : Number(daysAgo);
   return {
     precision: 'day',
-    validFrom: new Date(Math.floor(saidAt.getTime() / DAY_MS) * DAY_MS - days * DAY_MS)
+    validFrom: new Date(Math.floor(local.getTime() / DAY_MS) * DAY_MS - days * DAY_MS)
   };
 }
 

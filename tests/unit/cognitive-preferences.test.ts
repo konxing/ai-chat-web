@@ -267,3 +267,39 @@ describe('记忆检索设置（任务书 8.3）', () => {
     expect(() => cognitivePreferencesPatchSchema.parse({ memoryReadLimit: 3.5 })).toThrow();
   });
 });
+
+describe('用户时区偏移（相对时间锚墙钟）', () => {
+  it('没有记录时是 null：没同步过的用户按 UTC 处理，行为不变', async () => {
+    const { getCognitivePreferences } = await prefs();
+
+    expect((await getCognitivePreferences(USER_A)).timezoneOffsetMinutes).toBeNull();
+  });
+
+  it('同步之后按 userId 落库，另一个用户不受影响，开关一个都不动', async () => {
+    const { getCognitivePreferences, updateCognitivePreferences } = await prefs();
+
+    await updateCognitivePreferences(USER_A, { timezoneOffsetMinutes: 480 });
+
+    expect((await getCognitivePreferences(USER_A)).timezoneOffsetMinutes).toBe(480);
+    expect((await getCognitivePreferences(USER_A)).memoryEnabled).toBe(false);
+    expect((await getCognitivePreferences(USER_B)).timezoneOffsetMinutes).toBeNull();
+  });
+
+  it('库里出现越界或非整数值时读侧按 null 收：真实时区之外没有合法偏移', async () => {
+    const { getCognitivePreferences } = await prefs();
+    db.rows.set(USER_A, { timezoneOffsetMinutes: 900 });
+    db.rows.set(USER_B, { timezoneOffsetMinutes: 33.5 });
+
+    expect((await getCognitivePreferences(USER_A)).timezoneOffsetMinutes).toBeNull();
+    expect((await getCognitivePreferences(USER_B)).timezoneOffsetMinutes).toBeNull();
+  });
+
+  it('PATCH 的白名单只收 -840..840 的整数', async () => {
+    const { cognitivePreferencesPatchSchema } = await import('@/lib/validation');
+
+    expect(cognitivePreferencesPatchSchema.parse({ timezoneOffsetMinutes: 480 })).toEqual({ timezoneOffsetMinutes: 480 });
+    expect(cognitivePreferencesPatchSchema.parse({ timezoneOffsetMinutes: -840 })).toEqual({ timezoneOffsetMinutes: -840 });
+    expect(() => cognitivePreferencesPatchSchema.parse({ timezoneOffsetMinutes: 841 })).toThrow();
+    expect(() => cognitivePreferencesPatchSchema.parse({ timezoneOffsetMinutes: 33.5 })).toThrow();
+  });
+});

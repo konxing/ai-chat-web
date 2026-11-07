@@ -167,6 +167,41 @@ describe('入队：这一轮欠着一条认知写入', () => {
     expect(cognitiveTask().rows.size).toBe(1);
   });
 
+  /**
+   * 唯一约束不看状态：DEAD 行一直占着 (sourceMessageId, kind) 这把键，同一条消息被合法重放时
+   * 会静默丢账。判过死的行在重放时重排成 PENDING、次数清零，而不是新建第二条。
+   */
+  it('撞上的行已经判 DEAD：重排成 PENDING 而不是静默丢账', async () => {
+    cognitiveTask().seed(
+      seeded({ status: 'DEAD', attempts: 3, lastErrorCode: 'MODULE_TIMEOUT', leaseOwner: 'worker-x', leaseUntil: new Date(BASE) })
+    );
+    const { enqueueCognitiveTask } = await queue();
+
+    const requeued = await enqueueCognitiveTask({ userId: USER, chatId: 'chat-1', sourceMessageId: 'msg-1', kind: 'MEMORY' });
+
+    expect(requeued).toBe(true);
+    expect(cognitiveTask().rows.size).toBe(1);
+    expect(taskRow('task-1')).toMatchObject({
+      status: 'PENDING',
+      attempts: 0,
+      leaseOwner: null,
+      leaseUntil: null,
+      lastErrorCode: null,
+      availableAt: new Date(BASE)
+    });
+    expect(db.warns.map(([event]) => event)).toContain('cognitive.task_requeued_from_dead');
+  });
+
+  it('撞上的行还在 PENDING/RUNNING：照旧 false，不去动别人的活', async () => {
+    cognitiveTask().seed(seeded({ status: 'RUNNING', attempts: 1, leaseOwner: 'worker-x' }));
+    const { enqueueCognitiveTask } = await queue();
+
+    const requeued = await enqueueCognitiveTask({ userId: USER, chatId: 'chat-1', sourceMessageId: 'msg-1', kind: 'MEMORY' });
+
+    expect(requeued).toBe(false);
+    expect(taskRow('task-1')).toMatchObject({ status: 'RUNNING', attempts: 1, leaseOwner: 'worker-x' });
+  });
+
   it('入队本身出错不外抛：调用方是刚把回答交付完的对话链路', async () => {
     cognitiveTask().create = () => Promise.reject(new Error('数据库连接断了'));
     const { enqueueCognitiveTask } = await queue();

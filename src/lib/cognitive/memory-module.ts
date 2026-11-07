@@ -333,7 +333,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
     // 时间那一栏交给 temporal：这句话里确实有一个能落地的时间说法，才落 validFrom；
     // 解析不出来就维持 unknown——「不知道说的是什么时候」是合法状态，编一个起点不是。
     const saidAt = turn.occurredAt ?? new Date();
-    const frame = resolveTemporalFrame(candidate.text, saidAt);
+    const frame = resolveTemporalFrame(candidate.text, saidAt, preferences.timezoneOffsetMinutes ?? 0);
 
     // 「先问再记」问出来的是一句**还没被用户答应**的话，所以它不写记忆行、也不进向量：
     // 它进的是另一张表。这里断了才是错的——那句话会凭空消失，用户的策略空转（片M 修的就是这个）。

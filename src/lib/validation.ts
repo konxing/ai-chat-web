@@ -134,7 +134,9 @@ export const cognitivePreferencesPatchSchema = z.object({
   memoryWritePaused: z.boolean().optional(),
   // 任务书 8.3 的「记忆检索设置」。上界 8 是读侧 `MEMORY_READ_MAX_ITEMS` 的同一口径；
   // 这里与 preferences.ts 各写一遍（本文件是依赖链的叶子），数字改一边忘改另一边时严格的一边先报错。
-  memoryReadLimit: z.number().int().min(1).max(8).optional()
+  memoryReadLimit: z.number().int().min(1).max(8).optional(),
+  // 用户时区偏移（分钟），浏览器自动同步写入。取值域和真实时区一样窄：UTC-14 到 UTC+14。
+  timezoneOffsetMinutes: z.number().int().min(-840).max(840).optional()
 });
 
 const MEMORY_CONTEXT_VALUES = [

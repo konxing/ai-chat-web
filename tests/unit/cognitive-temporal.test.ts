@@ -130,6 +130,46 @@ describe('解析：词表内的说法给出与精度对齐的有效起点', () =
   });
 });
 
+describe('相对说法锚用户墙钟：tzOffsetMinutes 只决定「昨天是哪一天」', () => {
+  it('UTC+8 本地清晨说「昨天」：落在本地昨天，按 UTC 日界会多退一天', () => {
+    // saidAt = 2026-11-06T16:30Z = 本地 11-07 00:30；「昨天」是本地 11-06，不是 UTC 的 11-05。
+    expect(resolveTemporalFrame('昨天去医院复查了', new Date('2026-11-06T16:30:00.000Z'), 480)).toEqual({
+      precision: 'day',
+      validFrom: new Date('2026-11-06T00:00:00.000Z')
+    });
+    // 同一时刻不传偏移 = 老行为（UTC 日界）。
+    expect(resolveTemporalFrame('昨天去医院复查了', new Date('2026-11-06T16:30:00.000Z'))?.validFrom.toISOString()).toBe(
+      '2026-11-05T00:00:00.000Z'
+    );
+  });
+
+  it('UTC+8 本地元旦凌晨说「去年」：是去年，按 UTC 取年会再错退一年', () => {
+    // saidAt = 2025-12-31T16:30Z = 本地 2026-01-01 00:30。
+    expect(resolveTemporalFrame('去年结的婚', new Date('2025-12-31T16:30:00.000Z'), 480)).toEqual({
+      precision: 'year',
+      validFrom: new Date('2025-01-01T00:00:00.000Z')
+    });
+  });
+
+  it('UTC+8 本地月初说「上个月」：月份按本地日历取', () => {
+    // saidAt = 2026-10-31T16:30Z = 本地 11-01 00:30。
+    expect(resolveTemporalFrame('上个月底交了房租', new Date('2026-10-31T16:30:00.000Z'), 480)).toEqual({
+      precision: 'month',
+      validFrom: new Date('2026-10-01T00:00:00.000Z')
+    });
+  });
+
+  it('落库仍是 UTC 零点的日历日：精度闸门不放行带时区偏移的时刻', () => {
+    const result = resolveTemporalFrame('前天晚上失眠了', new Date('2026-11-06T16:30:00.000Z'), 480);
+    expect(result?.precision).toBe('day');
+    expectAlignedToPrecision('day', result!.validFrom);
+  });
+
+  it('未来判定不受偏移影响：还没发生的绝对日期照样 null', () => {
+    expect(resolveTemporalFrame('2027年1月1日搬的家', new Date('2026-11-06T16:30:00.000Z'), 480)).toBeNull();
+  });
+});
+
 describe('拒绝：给不出诚实的单点时间就返回 null', () => {
   afterEach(() => {
     vi.useRealTimers();

@@ -253,6 +253,18 @@ export function ChatWorkspace({
     setSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
   }, []);
 
+  // 认知层的相对时间（「昨天/去年」）锚的是用户墙钟：把浏览器时区同步给服务端。
+  // 只在记忆模块开着、且库里存的和当前浏览器不一致时写一次；失败静默——时区是增益，不该挡聊天。
+  useEffect(() => {
+    const offset = -new Date().getTimezoneOffset();
+    apiFetch<{ preferences: { memoryEnabled: boolean; timezoneOffsetMinutes: number | null } }>('/api/account/cognitive')
+      .then(({ preferences }) => {
+        if (!preferences.memoryEnabled || preferences.timezoneOffsetMinutes === offset) return undefined;
+        return apiFetch('/api/account/cognitive', { method: 'PATCH', json: { timezoneOffsetMinutes: offset } });
+      })
+      .catch(() => undefined);
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     const next = !sidebarCollapsed;
     setSidebarCollapsed(next);

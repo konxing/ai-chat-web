@@ -45,7 +45,24 @@ export async function enqueueCognitiveTask(input: {
     return true;
   } catch (err) {
     // 同一条消息的同一类任务只欠一次，靠库层 @@unique([sourceMessageId, kind]) 兜（任务书 5.1）。
-    if ((err as { code?: string }).code === 'P2002') return false;
+    if ((err as { code?: string }).code === 'P2002') {
+      // 但唯一约束不看状态：DEAD 行会一直占着这把键，同一条消息永远再也欠不上账。
+      // 判过死的那条被合法重放时把它重排成 PENDING（次数清零、租约清掉）；
+      // 还欠着或正在跑的照旧 false。条件 UPDATE 带 status，并发下只有一个人能重排成功。
+      const revived = await prisma.cognitiveTask.updateMany({
+        where: { userId: input.userId, sourceMessageId: input.sourceMessageId, kind: input.kind, status: 'DEAD' },
+        data: { status: 'PENDING', attempts: 0, availableAt: new Date(), leaseOwner: null, leaseUntil: null, lastErrorCode: null }
+      });
+      if (revived.count > 0) {
+        log.warn('cognitive.task_requeued_from_dead', {
+          userId: input.userId,
+          chatId: input.chatId,
+          sourceMessageId: input.sourceMessageId
+        });
+        return true;
+      }
+      return false;
+    }
     log.warn('cognitive.task_enqueue_failed', {
       userId: input.userId,
       chatId: input.chatId,
