@@ -4,8 +4,18 @@ import {
   type CognitiveModule,
   type CognitiveTurn
 } from './manager';
-import { extractMemoryCandidates, MEMORY_CANDIDATES_PER_TURN } from './memory-extractor';
-import { aiMemoryExtractionEnabled, refineCandidatesWithAI, resolveMemoryExtractionProvider } from './memory-extractor-ai';
+import {
+  extractMemoryCandidates,
+  extractMemoryDirectives,
+  MEMORY_CANDIDATES_PER_TURN,
+  type MemoryCandidate
+} from './memory-extractor';
+import {
+  aiMemoryExtractionEnabled,
+  isReviewWorthwhile,
+  resolveMemoryExtractionProvider,
+  reviewTurnWithAI
+} from './memory-extractor-ai';
 import { decisionModule } from './decision-module';
 import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
@@ -39,9 +49,11 @@ import type { MemoryDto, MemoryOrigin } from './memories';
  *
  * 读：按这一轮的提问召回记忆（关键词重合度，不是时间倒序），过掉不在保留期内的，
  * 再渲染成一段「数据不是指令」的文本交给上下文构建。
- * 写：抽候选 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
- * WRITE 落新行、UPDATE 走演化、ASK_CONFIRM 进待确认候选。
+ * 写：抽候选（规则 + 用户命令「记住…」）→ 开了 AI 记忆审核时由审核模型决定最终留哪些，
+ *   没开时按规则那套 → 跳过用户永久删除过的 → 分类情境 → 按该情境的策略决定留不留，
+ *   WRITE 落新行、UPDATE 走演化、ASK_CONFIRM 进待确认候选。
  * 测试：tests/unit/cognitive-memory-module.test.ts、tests/unit/cognitive-chat-wiring.test.ts
+ *      闸门本身：tests/unit/cognitive-memory-extractor-ai.test.ts
  *
  * 读侧的「过滤 + 召回」和「渲染」各自是一个纯函数（selectMemoryCandidates / renderMemoryBlock），
  * 中间只夹一次算置信度的查询。拆开不是为了整洁，是为了认知评测 Harness 能在离线喂 fixture 跑同一条路径；
@@ -289,43 +301,52 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 代价是「这一轮什么都没抽到」的对话多读一行偏好——那是一次主键查询，
   // 而 8.3 要的是「关闭后不能继续执行对应的数据读取、生成和后台写入」，读它自己的开关不算那条链上的下游。
   const preferences = await getCognitivePreferences(turn.userId);
-  let candidates = extractMemoryCandidates(turn.content, { emotionEnabled: preferences.emotionEnabled });
-  if (candidates.length === 0) return;
-
   if (!preferences.memoryEnabled) return;
   // 「暂停长期记忆写入」（任务书 7.3）的闸门开在这三行读之前。
   // 放在 excludedHashes / getMemoryPolicies / listMemories 之后就成了「读了但没写」，
   // 而 8.3 要的是「关闭后不能继续执行对应的数据读取」——除这张偏好行本身之外，零读零写。
   if (preferences.memoryWritePaused) return;
 
-  // AI 二级筛选（Phase 2，env COGNITIVE_AI_MEMORY=1 才开，默认关）：规则已抽出候选才触发，
-  // 一轮一次、跑在后台 worker 里。AI 与规则取并集：补充规则漏抓的用户陈述、修正类型，正文仍是
-  // 用户亲口说的（origin=explicit 不失真）。模型坏了/解析失败回退规则候选，绝不丢记忆；AI 返回
-  // 空数组也不清空规则候选。最终落不落库、要不要先问，仍由下方 write-decision 按用户策略裁决。
-  if (await aiMemoryExtractionEnabled()) {
+  const extractOptions = { emotionEnabled: preferences.emotionEnabled };
+  const ruleCandidates = extractMemoryCandidates(turn.content, extractOptions);
+  // 用户当面说「记住…」的那句不进审核闸门：判断题可以交给审核模型，用户明确的指令不行。
+  const directives = extractMemoryDirectives(turn.content, extractOptions);
+  // 闸门关着时（默认）就是这条：纯规则路径，一次模型都不调，行为与改动前逐字一致。
+  let candidates = [...ruleCandidates, ...directives];
+
+  // AI 记忆审核（后台「系统配置」里那个开关，DB 没配过时回落 env COGNITIVE_AI_MEMORY=1）。
+  // 开着时这一层的结论就是最终候选清单：一轮问一次模型（跑在后台 worker 里，不落在对话关键路径上，
+  // 「好的」「嗯」这类零信息应答由 isReviewWorthwhile 前置跳过），它没列进来的规则候选会被剔除，
+  // 它按原话补上的规则漏抓的说法会被补进来；返回空数组＝这一轮不值得长期记，于是一条都不落库。
+  // 这正是「不是每句对话都被长期记忆」的落点，也是模型判错时唯一的代价方向：少记，不是记错。
+  // 模型不可用/超时/输出不像数组 → 回退规则候选（宁可按旧办法记着，也不因为审核环节坏掉就清空记忆）。
+  // 先判纯函数再读开关：开关那次 SystemConfig 查询只在「这一轮本来就可能要问模型」时才发生，
+  // 纯寒暄的轮次仍然除了偏好行什么都不读——和没开 AI 时一样。
+  const worthReviewing = ruleCandidates.length > 0 || directives.length > 0 || isReviewWorthwhile(turn.content);
+  if (worthReviewing && (await aiMemoryExtractionEnabled())) {
+    let reviewed: MemoryCandidate[] | null = null;
     try {
       const provider = await resolveMemoryExtractionProvider(turn.userId);
-      const refined = await refineCandidatesWithAI(turn.userId, turn.content, candidates, provider);
-      if (refined !== null && refined.length > 0) {
-        const merged = [...candidates];
-        const indexByKey = new Map(merged.map((candidate, index) => [dedupeKey(candidate.text), index]));
-        for (const candidate of refined) {
-          const key = dedupeKey(candidate.text);
-          const at = indexByKey.get(key);
-          if (at === undefined) {
-            indexByKey.set(key, merged.length);
-            merged.push(candidate);
-          } else {
-            // 同一条：采纳 AI 修正后的类型，正文保留规则那份用户原话。
-            merged[at] = { text: merged[at].text, type: candidate.type };
-          }
-        }
-        candidates = merged.slice(0, MEMORY_CANDIDATES_PER_TURN);
-      }
+      reviewed = await reviewTurnWithAI(turn.userId, turn.content, ruleCandidates, provider);
     } catch {
-      // provider 解析失败等：回退规则候选，不打断这一轮记忆。
+      reviewed = null;
     }
+    if (reviewed !== null) candidates = [...reviewed, ...directives];
   }
+
+  // 去重（同句被规则和审核各说一遍、命令句同时命中词表）＋ 每轮上限。
+  const unique: MemoryCandidate[] = [];
+  const seenKeys = new Set<string>();
+  for (const candidate of candidates) {
+    if (unique.length >= MEMORY_CANDIDATES_PER_TURN) break;
+    const key = dedupeKey(candidate.text);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    unique.push(candidate);
+  }
+  candidates = unique;
+
+  if (candidates.length === 0) return;
 
   // 用户永久删除过的内容不许被自动记回来（任务书 7.3）。放在候选检查之后：
   // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。

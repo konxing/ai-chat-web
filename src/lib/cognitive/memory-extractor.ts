@@ -129,3 +129,36 @@ export function extractMemoryCandidates(content: string, options: ExtractOptions
   }
   return candidates;
 }
+
+/**
+ * 用户直接命令系统「记下来」的那些句子。
+ *
+ * 为什么单独一条链：这类话是**指令**，不是「值得不值得记」的判断题。开了 AI 记忆审核之后，
+ * 审核模型有权否掉它认为一次性的说法，但它无权否掉用户当面下的命令——「记住我不吃香菜」
+ * 被哪条 AI 判成临时信息都是错的。所以这些句子走审核之外的路，直接进候选。
+ *
+ * 只认句首的命令式前缀 + 「记」类动词，主语必须不是「我」：「我记住了你说的」是陈述不是命令
+ * （真要记的话它自己会命中上面的词表），「这件事你要记住」这种倒装不抓——宁少不漏报。
+ * 动词表里刻意不收「别忘了」：那多半是叮嘱别人别忘带伞、别忘关门的临时提醒，
+ * 不是让系统长期记一件事；收了它反而给闸门开了个漏记的后门。
+ * 也不要求句子里有「我」：「记住：黑咖啡不加糖」没有第一人称，同样是命令。
+ */
+const MEMORY_DIRECTIVE_RE =
+  /^(?:请|麻烦|帮我|你|一定要?|务必|牢牢|千万|要)*(记住|记下|记一下|记下来)/;
+
+export function extractMemoryDirectives(content: string, options: ExtractOptions = {}): MemoryCandidate[] {
+  const candidates: MemoryCandidate[] = [];
+  const seen = new Set<string>();
+  for (const raw of content.split(SENTENCE_SPLIT)) {
+    if (candidates.length >= MEMORY_CANDIDATES_PER_TURN) break;
+    const text = raw.trim();
+    if (text.length < MEMORY_CANDIDATE_MIN_CHARS || text.length > MEMORY_CANDIDATE_MAX_CHARS) continue;
+    if (!MEMORY_DIRECTIVE_RE.test(text)) continue;
+    const key = text.replace(/\s+/g, '').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // 类型沿用词表判断（「记住我喜欢黑咖啡」算偏好）；判不出来才落到事实。
+    candidates.push({ text, type: classifySentence(text, options.emotionEnabled === true) ?? 'fact' });
+  }
+  return candidates;
+}

@@ -31,7 +31,8 @@ const db = vi.hoisted(() => ({
   timezoneOffsetMinutes: null as number | null,
   associationEnabled: false,
   aiEnabled: false,
-  aiRefined: null as null | Array<{ text: string; type: string }>,
+  aiReviewed: null as null | Array<{ text: string; type: string }>,
+  reviewCalls: 0,
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
   policyCalls: 0
@@ -116,11 +117,20 @@ vi.mock('@/lib/cognitive/memory-candidates', () => ({
   }
 }));
 
-vi.mock('@/lib/cognitive/memory-extractor-ai', () => ({
-  aiMemoryExtractionEnabled: () => Promise.resolve(db.aiEnabled),
-  refineCandidatesWithAI: () => Promise.resolve(db.aiRefined),
-  resolveMemoryExtractionProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
-}));
+vi.mock('@/lib/cognitive/memory-extractor-ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/memory-extractor-ai')>();
+  return {
+    ...actual,
+    // isReviewWorthwhile 用真实现：那是成本闸门，换成替身就等于把「零信息应答不调模型」
+    // 这条断言变成自证。真正出网的审核调用才换成探针返回值。
+    aiMemoryExtractionEnabled: () => Promise.resolve(db.aiEnabled),
+    reviewTurnWithAI: () => {
+      db.reviewCalls += 1;
+      return Promise.resolve(db.aiReviewed);
+    },
+    resolveMemoryExtractionProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
+  };
+});
 
 vi.mock('@/lib/providers', () => ({
   resolveDefaultProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
@@ -237,7 +247,8 @@ beforeEach(() => {
   db.timezoneOffsetMinutes = null;
   db.associationEnabled = false;
   db.aiEnabled = false;
-  db.aiRefined = null;
+  db.aiReviewed = null;
+  db.reviewCalls = 0;
   db.expandCalls = [];
   db.expandHits = [];
 });
@@ -1339,37 +1350,89 @@ describe('情绪总开关 emotionEnabled：写侧闸门与引擎读侧闸门（�
   });
 });
 
-describe('写侧：AI 二级抽取（Phase 2，默认关）', () => {
-  it('开着时规则与 AI 取并集：AI 补上规则漏抓的用户陈述', async () => {
+describe('写侧：AI 记忆审核是闸门（默认关）', () => {
+  it('闸门开着时审核结论替换规则候选：审核没列进来的那句不落库', async () => {
     db.memoryEnabled = true;
     db.aiEnabled = true;
-    db.aiRefined = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
+    db.aiReviewed = [{ text: '我养了一只叫年糕的布偶猫', type: 'fact' }];
 
-    await write('我养了一只叫年糕的布偶猫。');
+    await write('我养了一只叫年糕的布偶猫。我喜欢喝黑咖啡。');
 
-    const texts = db.creates.map((row) => row.content);
-    expect(texts).toContain('我养了一只叫年糕的布偶猫');
-    expect(texts).toContain('我喜欢喝黑咖啡');
+    expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
   });
 
-  it('AI 返回 null（模型坏了）回退规则候选，不丢记忆', async () => {
+  it('审核返回空数组＝这一轮不值得长期记，规则命中的也不落库', async () => {
     db.memoryEnabled = true;
     db.aiEnabled = true;
-    db.aiRefined = null;
+    db.aiReviewed = [];
+
+    await write('我喜欢喝黑咖啡。');
+
+    expect(db.creates).toEqual([]);
+    expect(db.proposals).toEqual([]);
+    expect(db.reviewCalls).toBe(1);
+  });
+
+  it('规则一个候选都没抽到时也问一次模型：审核能补上规则漏抓的原话', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [{ text: '我的工位在 3 楼靠窗', type: 'fact' }];
+
+    await write('我的工位在 3 楼靠窗，下午晒得慌。');
+
+    expect(db.reviewCalls).toBe(1);
+    expect(db.creates.map((row) => row.content)).toEqual(['我的工位在 3 楼靠窗']);
+  });
+
+  it('用户当面命令「记住…」的那句不过闸门：审核返回空也照记', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [];
+
+    await write('记住我不吃香菜。');
+
+    expect(db.creates.map((row) => row.content)).toEqual(['记住我不吃香菜']);
+  });
+
+  it('「好的」这种零信息应答不花模型调用', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
+
+    await write('好的，谢谢啦');
+
+    expect(db.reviewCalls).toBe(0);
+    expect(db.creates).toEqual([]);
+  });
+
+  it('审核模型坏了（返回 null）回退规则候选，不丢记忆', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = null;
 
     await write('我养了一只叫年糕的布偶猫。');
 
     expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
   });
 
-  it('默认关时不调 AI：只有规则候选', async () => {
+  it('默认关时一次 AI 都不调，写侧逐字回到纯规则路径', async () => {
     db.memoryEnabled = true;
     db.aiEnabled = false;
-    db.aiRefined = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
+    db.aiReviewed = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
 
     await write('我养了一只叫年糕的布偶猫。');
 
+    expect(db.reviewCalls).toBe(0);
     expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
+  });
+
+  it('闸门关着也认「记住…」命令：不依赖审核模型才生效', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = false;
+
+    await write('记住我不吃香菜。');
+
+    expect(db.creates.map((row) => row.content)).toEqual(['记住我不吃香菜']);
   });
 });
 

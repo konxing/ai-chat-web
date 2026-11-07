@@ -3,25 +3,34 @@ import { streamChatCompletion } from '@/lib/ai';
 import { getRawSystemSetting } from '@/lib/config';
 import { log } from '@/lib/logger';
 import { getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
-import { MEMORY_CANDIDATE_MAX_CHARS, MEMORY_CANDIDATE_MIN_CHARS, type MemoryCandidate } from './memory-extractor';
+import {
+  MEMORY_CANDIDATE_MAX_CHARS,
+  MEMORY_CANDIDATE_MIN_CHARS,
+  MEMORY_CANDIDATES_PER_TURN,
+  type MemoryCandidate
+} from './memory-extractor';
 import type { MemoryType } from './policy';
 
 /**
- * 选择性编码的第二级：AI 候选筛选（混合式记忆升级 Phase 2，借鉴 Mem0 / LangMem）。
+ * 记忆审核 AI：这一轮到底值不值得写进长期库，由它说了算（不是规则的附议者）。
  *
- * 成本红线（任务书 §9）：**不是每条消息都调模型**。这一层只在规则预筛已经抽出候选时才触发，
- * 一轮一次、跑在后台 worker 里，不落在对话关键路径上。规则一个候选都没抽到的普通闲聊，
- * 压根不会走到这里。
+ * 分工：规则层是**粗筛 + 兜底 + 命令通道**，审核模型是**闸门**。
+ * - 闸门开（后台「系统配置」的 `cognitiveAiMemoryEnabled`，老库回落 env `COGNITIVE_AI_MEMORY=1`）：
+ *   每个有实质内容的用户轮次都问一次模型（一轮一次，跑在后台 worker 里，不落在对话关键路径上），
+ *   它返回什么就记什么；返回空数组表示「这一轮不值得长期记」，于是这一轮一条都不落库——
+ *   包括规则已经命中、但它判为一次性的那些。这正是「不是每句对话都被长期记忆」的落点。
+ * - 闸门不开：写侧逐字回到纯规则路径，零行为变化。
+ * - 模型不可用、超时、输出解析不出数组：回退规则候选（记一次 warn）。审核模型坏掉时
+ *   宁可少判、不可清空用户记忆，所以这里的失败方向是「照旧按规则记」，不是「什么都不记」。
+ * - 用户当面命令「记住…」的那句不过闸门（见 `extractMemoryDirectives`）：判断题可以给 AI 做，
+ *   用户明确的指令不能被他自己的工具否掉。
  *
- * 默认关闭：由后台「系统配置」的 `cognitiveAiMemoryEnabled` 控制（env `COGNITIVE_AI_MEMORY=1`
- * 在老库还没这行配置时兜底）。关着时写侧逐字回到纯规则路径，零行为变化。模型不可用、超时、
- * 输出解析失败一律回退到规则候选，绝不因为 AI 坏了就丢记忆或把对话带下水。
+ * 模型只做一件事：判断值不值得长期记、给出类型。它不写库、不做最终保存决策——要不要落库、
+ * 要不要先问、会不会取代旧记忆，仍由现有 write-decision 按用户策略裁决（任务书最终原则）。
+ * 它也不许改写措辞：输出的每条必须能在用户原话里逐字找到（`keepVerbatimCandidates` 负责剔除），
+ * 否则「系统记住了用户说的话」这句话就是假的，`origin=explicit` 也跟着失真。
  *
- * 模型只做一件事：从用户这一轮原话里挑出**有长期价值**的陈述，给出类型。它不写库、不做最终
- * 保存决策——要不要落库、要不要先问、会不会取代旧记忆，仍由现有 write-decision 按用户策略裁决。
- * 这样 AI 的推断不会凌驾于用户明确策略之上（任务书最终原则）。
- *
- * 测试：tests/unit/cognitive-memory-extractor-ai.test.ts
+ * 测试：tests/unit/cognitive-memory-extractor-ai.test.ts、tests/unit/cognitive-memory-module.test.ts
  */
 
 /** 后台提取的硬截止：比对话读侧宽，但远小于模型默认 120s，避免一条坏请求拖住整轮欠账。 */
@@ -30,12 +39,14 @@ export const AI_EXTRACTION_TIMEOUT_MS = 30_000;
 const ALLOWED_TYPES: readonly MemoryType[] = ['fact', 'preference', 'goal', 'project', 'decision', 'emotion'];
 
 const SYSTEM_PROMPT = [
-  '你是一个记忆筛选器。给你用户这一轮说的话，以及规则已经初筛出的候选。',
-  '请只挑出对长期理解用户有价值的陈述（稳定事实、长期目标、稳定偏好、重要项目或决策、重要经历）。',
-  '忽略一次性闲聊、临时想法、普通知识问答、与用户个人无关的内容。',
-  '不要编造用户没说的信息，不要把疑问句当成事实。',
-  '每条用用户的原话或贴近原话的简洁陈述。type 只能是 fact/preference/goal/project/decision/emotion 之一。',
-  '只输出一个 JSON 数组，元素形如 {"text":"...","type":"fact"}；没有值得记的就输出 []。不要输出任何解释。'
+  '你是长期记忆审核员。给你用户这一轮说的话，以及规则初筛出的候选。',
+  '你的任务是决定这一轮里**哪些话值得写进长期记忆**，只输出那部分。',
+  '值得记：会改变系统以后如何理解这个用户的东西——稳定身份事实、长期偏好、长期目标、正在做的项目、明确的决策、反复或持续出现的状态。',
+  '不值得记：一次性闲聊和寒暄、当天才有效的安排、临时的犹豫和情绪宣泄、普通知识问答、跟用户本人无关的内容、以及没有信息量的复述。',
+  '宁缺毋滥：整轮都没有值得长期记的内容就输出 []，不要为了有输出而勉强挑一条。',
+  '每条的 text 必须是用户原话里的连续片段，一个字都不许改写、概括或补充。',
+  'type 只能是 fact/preference/goal/project/decision/emotion 之一。疑问句不是事实。',
+  '只输出一个 JSON 数组，元素形如 {"text":"用户原话片段","type":"fact"}；不要输出任何解释或多余字符。'
 ].join('\n');
 
 /**
@@ -125,10 +136,13 @@ export function parseAiCandidates(raw: string): MemoryCandidate[] | null {
 }
 
 /**
- * 调一次模型 refine 候选。返回 null 表示「这次 AI 没给出可用结果，回退规则」——
- * 调用方据此保留规则候选，而不是把这一轮的记忆清空。日志只记 id 和原因，不记正文（任务书 5.5）。
+ * 调一次审核模型，拿到「这一轮值得长期记的东西」。
+ *
+ * 返回 null 表示这次审核没给出可用结论（模型错、超时、输出解析不出数组）——调用方据此回退规则候选。
+ * 返回数组（含空数组）表示审核结论，**它就是最终候选清单**：规则命中但没被列进来的句子不再落库。
+ * 日志只记 id 和计数，不记正文（任务书 5.5）。
  */
-export async function refineCandidatesWithAI(
+export async function reviewTurnWithAI(
   userId: string,
   content: string,
   ruleCandidates: readonly MemoryCandidate[],
@@ -139,7 +153,7 @@ export async function refineCandidatesWithAI(
     '用户这一轮说的话：',
     content,
     '',
-    '规则初筛候选（供参考，可修正/补充/剔除）：',
+    '规则初筛候选（只是提示，不是你必须采纳的清单；不值得长期记的要剔除，值得记而你看到的原话片段可以补）：',
     JSON.stringify(ruleCandidates.map((candidate) => ({ text: candidate.text, type: candidate.type })))
   ].join('\n');
 
@@ -164,5 +178,56 @@ export async function refineCandidatesWithAI(
     log.warn('cognitive.ai_extraction_failed', { userId, reason: 'parse_failed' });
     return null;
   }
-  return parsed;
+  const { kept, dropped } = filterVerbatimCandidates(parsed, content);
+  if (dropped > 0) {
+    // 模型改写了措辞或凭空补了信息。丢掉那几条，但结论仍然有效——不回退规则，
+    // 因为「这一轮不值得记」的判断和「这几条不是你原话」是两件事。
+    log.warn('cognitive.ai_review_not_verbatim', { userId, dropped });
+  }
+  return kept.slice(0, MEMORY_CANDIDATES_PER_TURN);
+}
+
+/**
+ * 只保留能在用户原话里逐字找到的条目。
+ *
+ * 比对时两侧都去掉空白和常见标点：模型很爱把「我喜欢黑咖啡」回成「我喜欢黑咖啡。」，
+ * 那是同一句话，不该被当成改写；但它一旦回成「用户偏爱黑咖啡」，就不是原话了。
+ * 这一步是 `origin=explicit`（用户亲口说的）这条来源声明的前提，不是可选的整洁癖。
+ */
+export function filterVerbatimCandidates(
+  candidates: readonly MemoryCandidate[],
+  content: string
+): { kept: MemoryCandidate[]; dropped: number } {
+  const haystack = normalizeForContainment(content);
+  const kept = candidates.filter((candidate) => haystack.includes(normalizeForContainment(candidate.text)));
+  return { kept, dropped: candidates.length - kept.length };
+}
+
+/** 去空白与常见标点、转小写：只为「是不是原话片段」这个判断服务，不用于入库正文。 */
+export function normalizeForContainment(text: string): string {
+  return text.replace(/[\s。，、！!？?；;：:.…·\"'“”‘’（）()【】《》\-_—~～]/g, '').toLowerCase();
+}
+
+/**
+ * 这一轮值不值得为它花一次模型调用。
+ *
+ * 审核模型是按调用付费的，而对话里大量的轮次是「好的」「嗯嗯」「哈哈，谢谢啦」这种零信息应答。
+ * 闸门开在这些句子上前置拦一道：太短、只剩语气词（可叠加、可带句末助词）、或者根本没有
+ * 字母/数字/汉字（纯 emoji、纯符号）就不问模型，直接按规则那一套走（那种轮次规则也抽不出东西）。
+ */
+const PHATIC_TOKEN =
+  '(?:好的?|嗯+|哦+|噢+|啊+|哈+|嘻+|嘿+|呵+|行|可以|没事|不用|不必|谢[了谢]?|收到|知道了?|明白|懂了|是的?|对+|没问题|随便|再见|拜拜|OK|ok|Ok)';
+/** 只在句末剥掉的语气助词；「哈哈」这类不会因此变空，因为剥完还剩下的字必须由词表吃掉。 */
+const TRAILING_PARTICLE_RE = /[啦呀啊哦噢呢吧哈唔呗哟~～]+$/;
+const PADDING_RE = /^[\s。.!~～、，,]+|[\s。.!~～、，,]+$/g;
+const HAS_CONTENT_RE = /[0-9A-Za-z一-龥]/;
+const REVIEW_MIN_CHARS = 6;
+
+export function isReviewWorthwhile(content: string): boolean {
+  const text = content.trim();
+  if (text.length < REVIEW_MIN_CHARS) return false;
+  if (!HAS_CONTENT_RE.test(text)) return false;
+  const compact = text.replace(TRAILING_PARTICLE_RE, '').replace(PADDING_RE, '');
+  // 整串能被「语气词 + 标点」重复吃完，就是纯寒暄：「好的，谢谢啦」「嗯嗯，知道了哈」。
+  return !new RegExp(`^(?:${PHATIC_TOKEN}[\\s。.!~～、，,]*)+$`).test(compact);
 }

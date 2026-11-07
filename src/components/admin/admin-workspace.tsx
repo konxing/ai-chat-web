@@ -440,15 +440,16 @@ function ConfigTab() {
       <section className="panel p-5 sm:p-6">
         <h2 className="text-[15px] font-semibold text-white">记忆审核</h2>
         <p className="mt-1 text-[12.5px] text-white/40">
-          打开后，规则初筛出候选的对话轮次会再调一次模型审核记忆：挑出值得长期保存的内容并修正类型。
-          普通闲聊不触发，模型不可用时自动回退规则抽取。最终是否保存仍由用户自己的记忆策略决定。
+          打开后，每个有实质内容的用户轮次都交给审核模型判一次「值不值得长期记」：它列出什么就记什么，
+          它认为不值得的就不落库，规则初筛命中的句子也一样会被剔除。用户当面说「记住…」的那句不过这道闸门。
+          寒暄式应答不会触发调用；模型不可用时回退规则抽取。最终是否保存仍由用户自己的记忆策略决定。
         </p>
         <div className="mt-4 space-y-4">
           <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
             <div>
               <div className="text-[13px] font-medium text-white/80">启用 AI 记忆审核</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
-                只在规则已抽出候选的轮次调用模型，每轮至多一次，不阻塞正常聊天。
+                每轮至多调用一次模型（「好的」「嗯嗯」这类零信息应答前置跳过），跑在后台任务里，不阻塞正常聊天。
               </div>
             </div>
             <input

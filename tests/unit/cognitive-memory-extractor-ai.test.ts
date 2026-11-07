@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiProvider } from '@prisma/client';
 
 /**
- * AI 二级抽取（Phase 2）。钉三件事：解析的防御性、坏了就回退（返回 null）、默认关闭。
+ * 记忆审核 AI。钉四件事：解析的防御性、输出必须是用户原话、坏了才回退（返回 null）、默认关闭。
  * 模型调用换成替身，不真的出站；这一层只负责把模型输出变成可信候选，落库决策不归它。
  */
 const ctx = vi.hoisted(() => ({
@@ -115,39 +115,90 @@ describe('aiMemoryExtractionEnabled：后台配置优先，env 兜底', () => {
   });
 });
 
-describe('refineCandidatesWithAI：调一次模型，坏了回退 null', () => {
+describe('reviewTurnWithAI：审核结论就是最终候选，坏了回退 null', () => {
   it('模型给出合法数组时解析返回', async () => {
-    const { refineCandidatesWithAI } = await mod();
+    const { reviewTurnWithAI } = await mod();
     ctx.chunks = ['[{"text":"我住在杭州', '","type":"fact"}]'];
-    const got = await refineCandidatesWithAI('user-a', '我住在杭州。', [{ text: '我住在杭州', type: 'fact' }], PROVIDER);
+    const got = await reviewTurnWithAI('user-a', '我住在杭州。', [{ text: '我住在杭州', type: 'fact' }], PROVIDER);
     expect(ctx.calls).toBe(1);
     expect(got).toEqual([{ text: '我住在杭州', type: 'fact' }]);
   });
 
+  it('模型返回空数组是结论（这一轮不记），不是失败', async () => {
+    const { reviewTurnWithAI } = await mod();
+    ctx.chunks = ['[]'];
+    const got = await reviewTurnWithAI('user-a', '我今天心情还行。', [{ text: '我今天心情还行', type: 'emotion' }], PROVIDER);
+    expect(got).toEqual([]);
+  });
+
+  it('模型改写了措辞的那条不收：记的必须是用户原话', async () => {
+    const { reviewTurnWithAI } = await mod();
+    ctx.chunks = ['[{"text":"用户偏爱黑咖啡","type":"preference"},{"text":"我喜欢喝黑咖啡","type":"preference"}]'];
+    const got = await reviewTurnWithAI('user-a', '我喜欢喝黑咖啡，不加糖。', [], PROVIDER);
+    expect(got).toEqual([{ text: '我喜欢喝黑咖啡', type: 'preference' }]);
+  });
+
   it('模型抛错返回 null，不抛给调用方', async () => {
-    const { refineCandidatesWithAI } = await mod();
+    const { reviewTurnWithAI } = await mod();
     ctx.throws = true;
-    const got = await refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
+    const got = await reviewTurnWithAI('user-a', '我住在杭州。', [], PROVIDER);
     expect(got).toBeNull();
   });
 
   it('模型输出解析不了返回 null', async () => {
-    const { refineCandidatesWithAI } = await mod();
+    const { reviewTurnWithAI } = await mod();
     ctx.chunks = ['我觉得没什么值得记的'];
-    const got = await refineCandidatesWithAI('user-a', '今天天气不错。', [], PROVIDER);
+    const got = await reviewTurnWithAI('user-a', '今天天气不错。', [], PROVIDER);
     expect(got).toBeNull();
   });
 });
+
+describe('filterVerbatimCandidates：原话片段判定', () => {
+  it('标点与空白差异算同句，改写不算', async () => {
+    const { filterVerbatimCandidates } = await mod();
+    const content = '我喜欢黑咖啡，不加糖。';
+    expect(filterVerbatimCandidates([{ text: '我喜欢黑咖啡', type: 'preference' }], content).kept).toHaveLength(1);
+    expect(filterVerbatimCandidates([{ text: '我喜欢黑咖啡。', type: 'preference' }], content).kept).toHaveLength(1);
+    expect(filterVerbatimCandidates([{ text: '我爱喝美式', type: 'preference' }], content).kept).toHaveLength(0);
+  });
+
+  it(' dropped 计数用于日志', async () => {
+    const { filterVerbatimCandidates } = await mod();
+    const got = filterVerbatimCandidates(
+      [
+        { text: '我住在杭州', type: 'fact' },
+        { text: '他最近搬去了上海', type: 'fact' }
+      ],
+      '我住在杭州。'
+    );
+    expect(got.dropped).toBe(1);
+  });
+});
+
+describe('isReviewWorthwhile：不为零信息应答花一次模型调用', () => {
+  it('寒暄、语气词、纯符号、过短的轮次不问模型', async () => {
+    const { isReviewWorthwhile } = await mod();
+    for (const text of ['好的', '嗯嗯', '哈哈哈哈哈', '哦哦哦', '谢谢啦', '收到', '知道了', '。。。', '🙂🙂🙂', '行']) {
+      expect(isReviewWorthwhile(text)).toBe(false);
+    }
+  });
+
+  it('有实质内容就值得问，哪怕规则一个候选都没抽到', async () => {
+    const { isReviewWorthwhile } = await mod();
+    expect(isReviewWorthwhile('我下周要去成都出差，顺便看看那边的办公室。')).toBe(true);
+    expect(isReviewWorthwhile('帮我记一下这周的工作安排')).toBe(true);
+  });
+});
 describe('成本计数（§9.6 每轮额外模型调用数）', () => {
-  it('每次 refine 记一次，模型抛错也算（成本已发生）', async () => {
+  it('每次审核记一次，模型抛错也算（成本已发生）', async () => {
     const m = await mod();
     m.resetAiExtractionCallCount();
     expect(m.aiExtractionCallCountValue()).toBe(0);
     ctx.chunks = ['[]'];
-    await m.refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
+    await m.reviewTurnWithAI('user-a', '我住在杭州。', [], PROVIDER);
     expect(m.aiExtractionCallCountValue()).toBe(1);
     ctx.throws = true;
-    await m.refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
+    await m.reviewTurnWithAI('user-a', '我住在杭州。', [], PROVIDER);
     expect(m.aiExtractionCallCountValue()).toBe(2);
   });
 });

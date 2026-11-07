@@ -81,7 +81,7 @@
 
 后台任务永不阻塞对话：它跑在 HTTP 请求之外的独立轮询里，写侧失败只进日志和退避，读侧（构建上下文时召回记忆）另有 1 秒截止，超时就当没有。
 
-**AI 二级抽取（Phase 2，默认关）**：env `COGNITIVE_AI_MEMORY=1` 开启后，规则预筛抽出候选的轮次会再调一次模型（`memory-extractor-ai.ts`，30s 截止）补充规则漏抓的用户陈述、修正类型，与规则候选取并集。普通闲聊（规则零候选）不触发模型；模型不可用/解析失败回退规则候选。最终保存决策仍由 `write-decision` 按用户策略裁决，AI 不凌驾用户策略。审核模型默认用该用户的默认聊天模型；后台「系统配置 → 记忆审核」可选一个独立的审核模型并控制开关（存 SystemConfig 的 `cognitiveAiMemoryEnabled` / `cognitiveExtractionProviderId`，DB 未配时回落 env `COGNITIVE_AI_MEMORY` / `COGNITIVE_AI_MEMORY_PROVIDER`）。
+**AI 记忆审核（默认关）**：后台「系统配置 → 记忆审核」打开（DB 未配这一行时回落 env `COGNITIVE_AI_MEMORY=1`）后，**每个有实质内容的用户轮次**都交给审核模型判一次「值不值得长期记」（`memory-extractor-ai.ts` 的 `reviewTurnWithAI`，30s 截止）。它的结论就是最终候选清单：列出什么记什么，规则初筛命中但它判为一次性的句子会被剔除，它按原话补上的规则漏抓说法会被补进来。两条边界：一是正文必须是用户原话的连续片段（`filterVerbatimCandidates` 逐字校验，改写的一律丢，否则 `origin=explicit` 失真）；二是用户当面命令「记住…/别忘了…」（`extractMemoryDirectives`）不过这道闸门——判断题可以给模型，用户明确的指令不行。「好的」「嗯嗯」这类零信息应答由 `isReviewWorthwhile` 前置跳过，一次模型都不调。模型不可用/超时/输出解析不出数组时回退规则候选（审核环节坏掉不该清空用户记忆）。最终保存决策仍由 `write-decision` 按用户策略裁决，AI 不凌驾用户策略。审核模型默认用该用户的默认聊天模型；同一区块可选一个独立审核模型（存 SystemConfig 的 `cognitiveAiMemoryEnabled` / `cognitiveExtractionProviderId`，DB 未配时回落 env `COGNITIVE_AI_MEMORY` / `COGNITIVE_AI_MEMORY_PROVIDER`）。
 
 **AI 提取成本计数（Phase 7，§9.6）**：`memory-extractor-ai.ts` 暴露 `aiExtractionCallCountValue()`，数「真的发起了模型调用」的轮次（含失败，成本已发生）；默认关恒为 0。召回/精确率/MRR/事实更新等基线与阈值由既有评测账本（cognitive-eval-snapshot / -thresholds / -salience / -temporal-calibration）守护，A–E 基线对照复用这套 fixture。
 

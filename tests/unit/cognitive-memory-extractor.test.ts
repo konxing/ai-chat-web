@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractMemoryCandidates } from '@/lib/cognitive/memory-extractor';
+import { extractMemoryCandidates, extractMemoryDirectives } from '@/lib/cognitive/memory-extractor';
 
 /**
  * 规则抽取（任务书 Phase 2 的 MemoryExtractor 第一版）。
@@ -91,5 +91,34 @@ describe('候选抽取的克制', () => {
       ['我在用 Prisma。', '我喜欢喝温水。', '我打算考研。', '我住在杭州。', '我决定周末出发。'].join('')
     );
     expect(candidates).toHaveLength(3);
+  });
+});
+
+describe('extractMemoryDirectives：用户当面命令「记住…」', () => {
+  const dir = (text: string) => extractMemoryDirectives(text);
+
+  it('句首命令式抓到，类型沿用词表判断', () => {
+    expect(dir('记住我不吃香菜')).toEqual([{ text: '记住我不吃香菜', type: 'fact' }]);
+    expect(dir('请帮我记住：我不吃香菜')).toHaveLength(1);
+    // 句子里同时命中偏好词表时，类型按词表来，不按命令来。
+    expect(dir('你要记住我喜欢喝黑咖啡')).toEqual([{ text: '你要记住我喜欢喝黑咖啡', type: 'preference' }]);
+  });
+
+  it('主语是「我」的不算命令：那是陈述', () => {
+    expect(dir('我记住了你说的')).toEqual([]);
+  });
+
+  it('倒装和「别忘了」都不算：前者漏抽没关系，后者多半是临时叮嘱', () => {
+    expect(dir('这件事你要记住')).toEqual([]);
+    expect(dir('千万别忘了带伞')).toEqual([]);
+  });
+
+  it('命令句不要求句子里有「我」', () => {
+    expect(dir('记住：黑咖啡不加糖')).toHaveLength(1);
+  });
+
+  it('普通陈述不会被误当命令', () => {
+    expect(dir('我在用 Next.js 15')).toEqual([]);
+    expect(dir('请假之前先把这周的事安排一下')).toEqual([]);
   });
 });
