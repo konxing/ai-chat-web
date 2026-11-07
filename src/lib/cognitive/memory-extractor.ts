@@ -40,7 +40,7 @@ const RULES: ReadonlyArray<{ type: MemoryType; markers: readonly string[] }> = [
       '迁移到'
     ]
   },
-  { type: 'goal', markers: ['我打算', '我计划', '我准备', '我想', '我要', '我的目标是', '以后要'] },
+  { type: 'goal', markers: ['我打算', '我计划', '我准备', '我想', '我要', '我的目标是', '目标是', '以后要'] },
   { type: 'preference', markers: ['我喜欢', '我不喜欢', '我讨厌', '我习惯', '我不爱', '我偏好', '我爱'] },
   {
     type: 'fact',
@@ -90,7 +90,9 @@ const EMOTION_MARKERS: readonly string[] = [
 const SENTENCE_SPLIT = /[。；;\n]+|[!?！？]+/;
 
 /** 疑问句、疑问词结尾的句子一律不算陈述。问「我的项目怎么部署」不是在告诉我一个项目事实。 */
-const QUESTION_MARK = /[?？]|怎么|如何|为什么|[吗呢]\s*$/;
+// 句末的 ？/！ 会被 SENTENCE_SPLIT 当分隔符吃掉，所以疑问词必须能拦住「我喜欢喝什么样的咖啡」这类
+// 只剩疑问代词收尾的句子；「我什么都没说」不以「什么」收尾，不受影响。
+const QUESTION_MARK = /[?？]|怎么|如何|为什么|什么样|怎样|哪里|哪儿|多少|什么\s*$|[吗呢]\s*$/;
 
 export interface MemoryCandidate {
   text: string;

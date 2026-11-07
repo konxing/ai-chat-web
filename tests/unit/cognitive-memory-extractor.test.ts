@@ -16,6 +16,13 @@ describe('候选抽取的命中', () => {
     expect(one('我在用 Next.js 15 和 Prisma。')).toEqual([{ text: '我在用 Next.js 15 和 Prisma', type: 'project' }]);
   });
 
+  it('「目标是」引出的学习目标按 goal 抽', () => {
+    // 冒烟验收抓到的漏记：这句话没有任何一条旧标记词命中，整句被丢掉。
+    const candidates = one('我在学 TypeScript，目标是今年能独立写后端服务。');
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.type).toBe('goal');
+  });
+
   it('偏好、目标、决策、身份事实各归其类', () => {
     expect(one('我不喜欢被反复追问细节。')[0]?.type).toBe('preference');
     expect(one('我打算下个月把旧笔记整理一遍。')[0]?.type).toBe('goal');
@@ -42,6 +49,14 @@ describe('候选抽取的克制', () => {
     expect(one('我的项目怎么部署比较好呢？')).toEqual([]);
     expect(one('我该怎么办？')).toEqual([]);
     expect(one('我打算换工作吗？')).toEqual([]);
+  });
+
+  it('只靠问号收尾的疑问句也不抽：切句吃掉了标点，不等于那句话不是问句', () => {
+    // 冒烟验收抓到的真缺陷：「我喜欢喝什么样的咖啡？」被当成偏好落库——
+    // 它不含「吗/怎么/如何」，唯一的问句信号是那个被切句吃掉的「？」。
+    expect(one('我喜欢喝什么样的咖啡？')).toEqual([]);
+    expect(one('我喜欢什么？')).toEqual([]);
+    expect(one('我住在哪里呢？')).toEqual([]);
   });
 
   it('没有第一人称的转述不抽', () => {
