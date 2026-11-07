@@ -20,7 +20,8 @@ import { getMemoryPolicies } from './policy';
 import type { MemoryContext, MemoryPolicy } from './policy';
 import type { Confidence } from './confidence';
 import { getCognitivePreferences, type EmotionTransparency } from './preferences';
-import { rankMemories, rankMemoriesHybrid, type NumericVector } from './retrieval';
+import { rankMemories, rankMemoriesHybrid, scoreByKeyword, type NumericVector } from './retrieval';
+import { decayPriority, memoryDecayEnabled } from './memory-decay';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import { proposeCandidate } from './memory-candidates';
@@ -191,7 +192,15 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
   if (input.queryVector == null) {
-    return rankMemories(input.query, usable, { limit });
+    // 衰减排序（Phase 5）默认关：实测它降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」
+    // 保持原排序。env COGNITIVE_MEMORY_DECAY=1 才用衰减 tie-break（相关度优先，同分按新近+确认+稳定）。
+    if (!memoryDecayEnabled()) return rankMemories(input.query, usable, { limit });
+    const scored = scoreByKeyword(input.query, usable);
+    scored.sort(
+      (left, right) =>
+        right.score - left.score || decayPriority(right.memory, input.now) - decayPriority(left.memory, input.now)
+    );
+    return scored.slice(0, limit).map((entry) => entry.memory);
   }
 
   // 排序用的是带了 vector 字段的临时对象，返回的必须还是调用方给的那几行：

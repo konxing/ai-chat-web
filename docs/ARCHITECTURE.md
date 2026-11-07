@@ -122,6 +122,7 @@
 | `src/lib/cognitive/memories.ts` / `retrieval.ts` | 记忆读写、双时间有效性、关键词召回与上下文注入 |
 | `src/lib/cognitive/retrieval-router.ts` | 按需召回路由（Phase 4，默认开）：纯知识/翻译/数学问题判 none、读侧连记忆池都不读；涉及「我」的召回，综合分析判 complex；拿不准保守召回 |
 | `src/lib/cognitive/memory-consolidator.ts` | 后台巩固（Phase 3，默认关）：同 type+context 高相似度冗余记忆聚簇，最新为主、其余可逆归档 + PART_OF 证据边 |
+| `src/lib/cognitive/memory-decay.ts` | 衰减优先级（Phase 5，默认关）：由新近度+确认+类型稳定派生，只降召回优先级不删历史。**实测降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」关闭**，env COGNITIVE_MEMORY_DECAY=1 才接进读侧 |
 | `src/lib/cognitive/memory-display.ts`（五类记忆） | 六个 `MemoryType` 之上的功能分类：情景（project/decision/emotion）、语义（fact/长期 goal）、程序（preference）、前瞻（带未来说法的 goal）；working 是会话层不入库。纯函数派生，不另存列 |
 | `src/lib/cognitive/forgetting.ts` / `exclusions.ts` | 永久删除（含派生数据与欠账撤销）、来源排除规则 |
 | `src/lib/cognitive/decisions.ts` / `decision-module.ts` | 决策读写、用户确认、结果链接、相似决策召回 |
