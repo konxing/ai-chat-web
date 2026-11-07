@@ -20,7 +20,11 @@ import {
   describeConfidenceFactor,
   describeMemoryListCap,
   describeValidRange,
-  memoryClassLabel
+  memoryClassLabel,
+  classifyMemoryClass,
+  MEMORY_CLASS_LABELS,
+  MEMORY_CLASS_ORDER,
+  type StoredMemoryClass
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
 import type { ReconsolidationFlag } from '@/lib/cognitive/reconsolidation';
@@ -85,6 +89,8 @@ export function MemoryPanel() {
   const [flagBusy, setFlagBusy] = useState(false);
 
   const [memories, setMemories] = useState<MemoryDto[]>([]);
+  /** 五类筛选（Phase 6）：'all' 或某个落库类。客户端过滤已加载的记忆，不另发请求。 */
+  const [classFilter, setClassFilter] = useState<StoredMemoryClass | 'all'>('all');
   /** 归档的那一份（任务书 7.2）：和当前有效的那一份分开显示，恢复只有在这里才有入口。 */
   const [archived, setArchived] = useState<MemoryDto[]>([]);
   /** 两份列表各有 200 行的读取上限，到顶了得说出来（口径同时间线和洞察那屏）。 */
@@ -503,6 +509,13 @@ export function MemoryPanel() {
   // 访问窗口截断了也要说：不然「最近 200 轮」听起来像全部历史。
   const accessCapNote = describeAccessCap(accessCapped, accessWindow);
 
+  // 五类筛选（Phase 6）：只摆实际有记忆的分类，不渲染空分类 chip。
+  const presentClasses = MEMORY_CLASS_ORDER.filter(
+    (cls): cls is StoredMemoryClass => cls !== 'working' && memories.some((m) => classifyMemoryClass(m.type, m.content) === cls)
+  );
+  const visibleMemories =
+    classFilter === 'all' ? memories : memories.filter((m) => classifyMemoryClass(m.type, m.content) === classFilter);
+
   return (
     <section className="panel p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -561,20 +574,55 @@ export function MemoryPanel() {
       */}
       <FailedTasksPanel />
 
+      {presentClasses.length > 0 ? (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[12px] text-white/40">按分类</span>
+          <button
+            type="button"
+            onClick={() => setClassFilter('all')}
+            className={
+              classFilter === 'all'
+                ? 'badge badge-green !px-2 !py-0.5 !text-[11px]'
+                : 'chip !px-2 !py-0.5 !text-[11px]'
+            }
+          >
+            全部 {memories.length}
+          </button>
+          {presentClasses.map((cls) => (
+            <button
+              key={cls}
+              type="button"
+              onClick={() => setClassFilter(cls)}
+              className={
+                classFilter === cls
+                  ? 'badge badge-green !px-2 !py-0.5 !text-[11px]'
+                  : 'chip !px-2 !py-0.5 !text-[11px]'
+              }
+            >
+              {MEMORY_CLASS_LABELS[cls]} {memories.filter((m) => classifyMemoryClass(m.type, m.content) === cls).length}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mt-5 space-y-2.5">
         {loadError ? <Alert tone="error">{loadError}</Alert> : null}
         {capNote ? <Alert tone="info">{capNote}</Alert> : null}
       {accessCapNote ? <Alert tone="info">{accessCapNote}</Alert> : null}
         {loading ? (
           <LoadingBlock label="加载记忆" />
-        ) : memories.length === 0 ? (
+        ) : visibleMemories.length === 0 ? (
           <EmptyState
             icon={<Brain className="h-5 w-5" />}
-            title="还没有记住的内容"
-            description="打开长期记忆后，你在对话里明确说过的信息会出现在这里。"
+            title={memories.length === 0 ? '还没有记住的内容' : '这个分类下暂无记忆'}
+            description={
+              memories.length === 0
+                ? '打开长期记忆后，你在对话里明确说过的信息会出现在这里。'
+                : '换回「全部」可以看到其他分类的记忆。'
+            }
           />
         ) : (
-          memories.map((memory) => {
+          visibleMemories.map((memory) => {
             const isEdit = panel?.kind === 'edit' && panel.id === memory.id;
             const isArchive = panel?.kind === 'archive' && panel.id === memory.id;
             const isRetract = panel?.kind === 'retract' && panel.id === memory.id;
