@@ -88,6 +88,10 @@ const EMOTION_MARKERS: readonly string[] = [
 
 /** 只在句末标点处切：ASCII 句点留给「Next.js」「1.5」这类写法，不然技术句子会被剁碎。 */
 const SENTENCE_SPLIT = /[。；;\n]+|[!?！？]+/;
+/** 带捕获组的同一张表：切出来的偶数位是句子、奇数位是吃掉它的标点。问句判定要用到那个标点。 */
+const SENTENCE_SPLIT_CAPTURE = /([。；;\n]+|[!?！？]+)/;
+/** 列表项前缀（- / * / • / 1. ）。它不是话的一部分，存进记忆只会让召回和展示都带个破折号。 */
+const LIST_MARKER = /^[-*•·]\s+|^(\d{1,2})[.、)]\s+/;
 
 /** 疑问句、疑问词结尾的句子一律不算陈述。问「我的项目怎么部署」不是在告诉我一个项目事实。 */
 // 句末的 ？/！ 会被 SENTENCE_SPLIT 当分隔符吃掉，所以疑问词必须能拦住「我喜欢喝什么样的咖啡」这类
@@ -120,11 +124,16 @@ function classifySentence(sentence: string, emotionEnabled: boolean): MemoryType
 export function extractMemoryCandidates(content: string, options: ExtractOptions = {}): MemoryCandidate[] {
   const candidates: MemoryCandidate[] = [];
   const seen = new Set<string>();
-  for (const raw of content.split(SENTENCE_SPLIT)) {
+  // 用带捕获组的切法：问号/叹号在切分时被吃掉，而「这句是不是问句」恰恰要看那个标点。
+  // 此前先切再判，「- 我要培养什么能力？」切完只剩「我要培养什么能力」，问句判定全落空，
+  // 一条列表里的问句就这么作为「目标」进了长期库——用户问它目标是什么时，它只能复述这个问句。
+  const parts = content.split(SENTENCE_SPLIT_CAPTURE);
+  for (let index = 0; index < parts.length; index += 2) {
     if (candidates.length >= MEMORY_CANDIDATES_PER_TURN) break;
-    const text = raw.trim();
+    const text = (parts[index] ?? '').trim().replace(LIST_MARKER, '').trim();
+    const terminator = parts[index + 1] ?? '';
     if (text.length < MEMORY_CANDIDATE_MIN_CHARS || text.length > MEMORY_CANDIDATE_MAX_CHARS) continue;
-    if (!text.includes('我') || QUESTION_MARK.test(text)) continue;
+    if (!text.includes('我') || /[?？]/.test(terminator) || QUESTION_MARK.test(text)) continue;
     const type = classifySentence(text, options.emotionEnabled === true);
     if (!type) continue;
     const key = text.replace(/\s+/g, '').toLowerCase();

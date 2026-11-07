@@ -20,6 +20,7 @@ import { decisionModule } from './decision-module';
 import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
 import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
+import { resolveDefaultProvider } from '@/lib/providers';
 import { expandRelatedMemories, RELATION_TYPE_LABELS, type RelatedMemoryHit } from './relations';
 import { embedMemoryText } from './embedding';
 import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
@@ -333,19 +334,24 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   let reviewedCount: number | null = null;
   if (worthReviewing && (await aiMemoryExtractionEnabled())) {
     existing = await listMemories(turn.userId, { includeSuperseded: true });
+    const active = existing.filter((memory) => memory.supersededAt === null);
     let reviewed: MemoryCandidate[] | null = null;
     try {
       const provider = await resolveMemoryExtractionProvider(turn.userId);
       // 审核模型要能指认「这句推翻了哪条旧说法」，所以把那批还活跃的行连 id 一起给它。
       // 近重复检测只会比字面（阈值 0.8，「我不跑步了」和「每天跑步三公里」差得远，判不出同一件事），
       // 语义上的改口只有看着旧说法才认得出来——这一步补的就是那个洞。
-      reviewed = await reviewTurnWithAI(
-        turn.userId,
-        turn.content,
-        ruleCandidates,
-        provider,
-        existing.filter((memory) => memory.supersededAt === null)
-      );
+      reviewed = await reviewTurnWithAI(turn.userId, turn.content, ruleCandidates, provider, active);
+      // 审核模型限流或挂掉时（免费档按天限流是常态，实测 50 次/天用完就整片 429），
+      // 换默认聊天模型再审一次：回退规则对长段陈述等于什么都不记，
+      // 而「关键的一段话没进长期记忆」正是这层存在要避免的事。两个都失败才回退规则。
+      if (reviewed === null) {
+        const fallback = await resolveDefaultProvider(turn.userId).catch(() => null);
+        if (fallback && fallback.id !== provider.id) {
+          log.warn('cognitive.ai_review_fallback_provider', { userId: turn.userId, from: provider.id, to: fallback.id });
+          reviewed = await reviewTurnWithAI(turn.userId, turn.content, ruleCandidates, fallback, active);
+        }
+      }
     } catch {
       reviewed = null;
     }

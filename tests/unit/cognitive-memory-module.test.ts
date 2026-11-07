@@ -32,7 +32,9 @@ const db = vi.hoisted(() => ({
   associationEnabled: false,
   aiEnabled: false,
   aiReviewed: null as null | Array<{ text: string; type: string; supersedesId?: string }>,
+  aiFallbackReviewed: null as null | Array<{ text: string; type: string; supersedesId?: string }>,
   reviewCalls: 0,
+  reviewProviders: [] as string[],
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
   policyCalls: 0
@@ -124,16 +126,17 @@ vi.mock('@/lib/cognitive/memory-extractor-ai', async (importOriginal) => {
     // isReviewWorthwhile 用真实现：那是成本闸门，换成替身就等于把「零信息应答不调模型」
     // 这条断言变成自证。真正出网的审核调用才换成探针返回值。
     aiMemoryExtractionEnabled: () => Promise.resolve(db.aiEnabled),
-    reviewTurnWithAI: () => {
+    reviewTurnWithAI: (_userId: string, _content: string, _rules: unknown, provider: { id: string }) => {
       db.reviewCalls += 1;
-      return Promise.resolve(db.aiReviewed);
+      db.reviewProviders.push(provider.id);
+      return Promise.resolve(provider.id === 'p-fallback' ? db.aiFallbackReviewed : db.aiReviewed);
     },
     resolveMemoryExtractionProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
   };
 });
 
 vi.mock('@/lib/providers', () => ({
-  resolveDefaultProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
+  resolveDefaultProvider: () => Promise.resolve({ id: 'p-fallback', modelId: 'fallback' })
 }));
 
 vi.mock('@/lib/cognitive/exclusions', async (importOriginal) => {
@@ -248,7 +251,9 @@ beforeEach(() => {
   db.associationEnabled = false;
   db.aiEnabled = false;
   db.aiReviewed = null;
+  db.aiFallbackReviewed = null;
   db.reviewCalls = 0;
+  db.reviewProviders = [];
   db.expandCalls = [];
   db.expandHits = [];
 });
@@ -1458,6 +1463,30 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
 
     expect(db.revises).toEqual([]);
     expect(db.creates.map((row) => row.content)).toEqual(['改成每天游泳了']);
+  });
+
+  it('审核模型限流/挂掉时换默认聊天模型再审一次：长段陈述不因免费档限流而丢', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = null;
+    db.aiFallbackReviewed = [{ text: '我把它归纳为 8 项核心能力', type: 'project' }];
+
+    await write('我把它归纳为 8 项核心能力，以及对应的 24 个思维习惯。');
+
+    expect(db.reviewProviders).toEqual(['p-1', 'p-fallback']);
+    expect(db.creates.map((row) => row.content)).toEqual(['我把它归纳为 8 项核心能力']);
+  });
+
+  it('两个模型都失败才回退规则：回退方向是照旧按规则记，不是清空', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = null;
+    db.aiFallbackReviewed = null;
+
+    await write('我在用 Next.js 15 和 Prisma。');
+
+    expect(db.reviewProviders).toEqual(['p-1', 'p-fallback']);
+    expect(db.creates.map((row) => row.content)).toEqual(['我在用 Next.js 15 和 Prisma']);
   });
 
   it('开了审核就把活跃记忆读一次给模型指认，且复用那次读、不再读第二遍', async () => {

@@ -94,6 +94,22 @@ describe('候选抽取的克制', () => {
   });
 });
 
+describe('问句与列表项：切分吃掉的标点不能反过来骗过问句判定', () => {
+  it('列表里的问句不再作为「目标」落库（线上真故障：它曾被存成一条只有标题的记忆）', () => {
+    expect(one('- 我要培养什么能力？')).toEqual([]);
+    expect(one('我要培养什么能力？')).toEqual([]);
+  });
+
+  it('列表前缀不进候选正文', () => {
+    expect(one('- 我喜欢喝黑咖啡。')).toEqual([{ text: '我喜欢喝黑咖啡', type: 'preference' }]);
+    expect(one('1. 我住在杭州。')).toEqual([{ text: '我住在杭州', type: 'fact' }]);
+  });
+
+  it('叹号结尾的陈述照常抽（只有问号才是问句）', () => {
+    expect(one('我喜欢喝黑咖啡！')).toEqual([{ text: '我喜欢喝黑咖啡', type: 'preference' }]);
+  });
+});
+
 describe('extractMemoryDirectives：用户当面命令「记住…」', () => {
   const dir = (text: string) => extractMemoryDirectives(text);
 
