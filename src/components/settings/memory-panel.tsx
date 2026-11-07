@@ -19,7 +19,8 @@ import {
   describeArchivedListCap,
   describeConfidenceFactor,
   describeMemoryListCap,
-  describeValidRange
+  describeValidRange,
+  memoryClassLabel
 } from '@/lib/cognitive/memory-display';
 import type { MemoryDto, MemoryRevisionDto } from '@/lib/cognitive/memories';
 import type { ReconsolidationFlag } from '@/lib/cognitive/reconsolidation';
@@ -595,6 +596,7 @@ export function MemoryPanel() {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       <span className="chip !px-2 !py-0.5 !text-[10.5px]">{TYPE_LABELS[memory.type]}</span>
+                      <span className="chip !px-2 !py-0.5 !text-[10.5px]">{memoryClassLabel(memory)}</span>
                       <span className="chip !px-2 !py-0.5 !text-[10.5px]">{CONTEXT_LABELS[memory.context]}</span>
                       <span
                         className={

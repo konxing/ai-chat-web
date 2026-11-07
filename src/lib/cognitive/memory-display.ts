@@ -22,6 +22,68 @@ export const TYPE_LABELS: Record<MemoryType, string> = {
   emotion: '情绪'
 };
 
+/**
+ * 五类记忆体系（混合式记忆升级 Phase 1，借鉴 LangMem / Letta 的分层思想）。
+ *
+ * 这是现有六个 `MemoryType` 之上的一层**功能分类**，不是新存储：同一条记忆仍只存一行，
+ * 「类」回答的是「这条记忆在认知里扮演什么角色」，供召回路由、巩固和界面分组使用。
+ *
+ * - working（工作记忆）：当前会话上下文，由现有上下文窗口承载，**不长期落库**，所以没有
+ *   对应的存储 type，也不参与下面的 classifyMemoryClass（它只分类已落库的长期记忆）。
+ * - episodic（情景）：具体经历/事件——项目、决策、情绪感受。
+ * - semantic（语义）：稳定事实与长期认知——事实、长期目标。
+ * - procedural（程序）：偏好与协作方式。
+ * - prospective（前瞻）：未来计划/意图。目标里带明确未来说法的归这一类，否则归语义（长期目标）。
+ *
+ * 分类只由 type 和原文里的未来标记决定，不调模型、不猜：一次偶然讨论不会被升成长期专长。
+ */
+export const MEMORY_CLASSES = ['working', 'episodic', 'semantic', 'procedural', 'prospective'] as const;
+export type MemoryClass = (typeof MEMORY_CLASSES)[number];
+/** 已落库的长期记忆只可能是后四类；working 是会话层，不入库。 */
+export type StoredMemoryClass = Exclude<MemoryClass, 'working'>;
+
+export const MEMORY_CLASS_LABELS: Record<MemoryClass, string> = {
+  working: '工作记忆',
+  episodic: '情景记忆',
+  semantic: '语义记忆',
+  procedural: '程序性记忆',
+  prospective: '前瞻记忆'
+};
+
+export const MEMORY_CLASS_ORDER: readonly MemoryClass[] = [
+  'working',
+  'episodic',
+  'semantic',
+  'procedural',
+  'prospective'
+];
+
+/** 目标句里出现这些说法，才算「未来计划」（前瞻），否则按长期目标（语义）处理。 */
+const PROSPECTIVE_MARKERS: readonly string[] = [
+  '打算',
+  '计划',
+  '准备',
+  '未来',
+  '明年',
+  '下个月',
+  '以后要',
+  '接下来'
+];
+
+export function classifyMemoryClass(type: MemoryType, content: string): StoredMemoryClass {
+  if (type === 'project' || type === 'decision' || type === 'emotion') return 'episodic';
+  if (type === 'preference') return 'procedural';
+  if (type === 'goal') {
+    return PROSPECTIVE_MARKERS.some((marker) => content.includes(marker)) ? 'prospective' : 'semantic';
+  }
+  return 'semantic';
+}
+
+/** 界面 chip 用：一条已落库记忆的功能分类标签。 */
+export function memoryClassLabel(memory: Pick<MemoryDto, 'type' | 'content'>): string {
+  return MEMORY_CLASS_LABELS[classifyMemoryClass(memory.type, memory.content)];
+}
+
 export const CONTEXT_LABELS: Record<MemoryContext, string> = {
   general: '日常',
   technicalProject: '技术项目',

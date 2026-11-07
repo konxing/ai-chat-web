@@ -116,6 +116,7 @@
 | `src/lib/cognitive/task-queue.ts` | 欠账落库：入队、原子领取、租约回收、退避重试、作废 |
 | `src/lib/cognitive/task-worker.ts` | 进程内轮询执行器：重建这一轮、跑写侧、收口；由 `instrumentation.ts` 拉起 |
 | `src/lib/cognitive/memories.ts` / `retrieval.ts` | 记忆读写、双时间有效性、关键词召回与上下文注入 |
+| `src/lib/cognitive/memory-display.ts`（五类记忆） | 六个 `MemoryType` 之上的功能分类：情景（project/decision/emotion）、语义（fact/长期 goal）、程序（preference）、前瞻（带未来说法的 goal）；working 是会话层不入库。纯函数派生，不另存列 |
 | `src/lib/cognitive/forgetting.ts` / `exclusions.ts` | 永久删除（含派生数据与欠账撤销）、来源排除规则 |
 | `src/lib/cognitive/decisions.ts` / `decision-module.ts` | 决策读写、用户确认、结果链接、相似决策召回 |
 | `src/lib/cognitive/reflections.ts` / `reflection-sweep.ts` | 洞察状态机与后台扫描（反证搜索、去重、冷却） |
