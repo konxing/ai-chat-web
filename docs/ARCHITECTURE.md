@@ -83,6 +83,8 @@
 
 **AI 二级抽取（Phase 2，默认关）**：env `COGNITIVE_AI_MEMORY=1` 开启后，规则预筛抽出候选的轮次会再调一次默认模型（`memory-extractor-ai.ts`，30s 截止）补充规则漏抓的用户陈述、修正类型，与规则候选取并集。普通闲聊（规则零候选）不触发模型；模型不可用/解析失败回退规则候选。最终保存决策仍由 `write-decision` 按用户策略裁决，AI 不凌驾用户策略。
 
+**AI 提取成本计数（Phase 7，§9.6）**：`memory-extractor-ai.ts` 暴露 `aiExtractionCallCountValue()`，数「真的发起了模型调用」的轮次（含失败，成本已发生）；默认关恒为 0。召回/精确率/MRR/事实更新等基线与阈值由既有评测账本（cognitive-eval-snapshot / -thresholds / -salience / -temporal-calibration）守护，A–E 基线对照复用这套 fixture。
+
 **记忆巩固（Phase 3，默认关）**：env `COGNITIVE_MEMORY_CONSOLIDATION=1` 开启后，后台 worker 每轮对活跃用户跑 `memory-consolidator.ts`：同 type+同 context、bigram 相似度 ≥0.85 的冗余记忆聚成簇，保留最新一条为活跃主记忆，其余**可逆归档**并写 `PART_OF` 边连到主记忆作为证据。不删除、不覆盖原文，跨类型/跨情境/换值（我住北京↔我住上海）绝不合并。幂等：归档后下一轮聚不出簇。这一版不做 LLM 综合摘要。
 
 ### 上传 / 语音

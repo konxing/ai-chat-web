@@ -34,6 +34,7 @@ afterEach(() => {
   ctx.throws = false;
   ctx.calls = 0;
   delete process.env.COGNITIVE_AI_MEMORY;
+  void mod().then((m) => m.resetAiExtractionCallCount());
 });
 
 describe('parseAiCandidates：防御性解析', () => {
@@ -107,5 +108,18 @@ describe('refineCandidatesWithAI：调一次模型，坏了回退 null', () => {
     ctx.chunks = ['我觉得没什么值得记的'];
     const got = await refineCandidatesWithAI('user-a', '今天天气不错。', [], PROVIDER);
     expect(got).toBeNull();
+  });
+});
+describe('成本计数（§9.6 每轮额外模型调用数）', () => {
+  it('每次 refine 记一次，模型抛错也算（成本已发生）', async () => {
+    const m = await mod();
+    m.resetAiExtractionCallCount();
+    expect(m.aiExtractionCallCountValue()).toBe(0);
+    ctx.chunks = ['[]'];
+    await m.refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
+    expect(m.aiExtractionCallCountValue()).toBe(1);
+    ctx.throws = true;
+    await m.refineCandidatesWithAI('user-a', '我住在杭州。', [], PROVIDER);
+    expect(m.aiExtractionCallCountValue()).toBe(2);
   });
 });

@@ -42,6 +42,25 @@ export function aiMemoryExtractionEnabled(): boolean {
 }
 
 /**
+ * AI 提取的调用计数（任务书 §9.6「每轮额外记忆模型调用数」）。进程内累加，只数「真的发起了
+ * 模型调用」的轮次，模型坏了/解析失败也各记一次（成本已经发生）。默认关时恒为 0。
+ */
+let aiExtractionCallCount = 0;
+
+export function recordAiExtractionCall(): void {
+  aiExtractionCallCount += 1;
+}
+
+export function aiExtractionCallCountValue(): number {
+  return aiExtractionCallCount;
+}
+
+/** 测试用：把计数归零。 */
+export function resetAiExtractionCallCount(): void {
+  aiExtractionCallCount = 0;
+}
+
+/**
  * 从模型返回的文本里解析候选。模型不一定支持 structured outputs，所以防御性地抓第一个 JSON 数组：
  * 剥掉可能的 ```json 包裹、取第一个 '[' 到最后一个 ']'。解析不出合法数组就返回 null（调用方回退规则）。
  * 逐条校验：text 是非空字符串且不超长，type 在六类里；问句、含「忽略系统规则」之类指令的不收。
@@ -86,6 +105,7 @@ export async function refineCandidatesWithAI(
   ruleCandidates: readonly MemoryCandidate[],
   provider: AiProvider
 ): Promise<MemoryCandidate[] | null> {
+  recordAiExtractionCall();
   const userPrompt = [
     '用户这一轮说的话：',
     content,
