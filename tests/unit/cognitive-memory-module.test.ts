@@ -117,7 +117,7 @@ vi.mock('@/lib/cognitive/memory-candidates', () => ({
 }));
 
 vi.mock('@/lib/cognitive/memory-extractor-ai', () => ({
-  aiMemoryExtractionEnabled: () => db.aiEnabled,
+  aiMemoryExtractionEnabled: () => Promise.resolve(db.aiEnabled),
   refineCandidatesWithAI: () => Promise.resolve(db.aiRefined),
   resolveMemoryExtractionProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
 }));

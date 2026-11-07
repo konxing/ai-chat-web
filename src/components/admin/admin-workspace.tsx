@@ -303,6 +303,8 @@ function ConfigTab() {
   const [defaultProviderId, setDefaultProviderId] = useState('');
   const [maxUploadMB, setMaxUploadMB] = useState(20);
   const [maintenanceNotice, setMaintenanceNotice] = useState('');
+  const [cognitiveAiMemoryEnabled, setCognitiveAiMemoryEnabled] = useState(false);
+  const [cognitiveExtractionProviderId, setCognitiveExtractionProviderId] = useState('');
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -310,7 +312,15 @@ function ConfigTab() {
   const load = useCallback(async () => {
     try {
       const data = await apiFetch<{
-        settings: { siteName: string; registrationOpen: boolean; defaultProviderId: string | null; maxUploadMB: number; maintenanceNotice: string };
+        settings: {
+          siteName: string;
+          registrationOpen: boolean;
+          defaultProviderId: string | null;
+          maxUploadMB: number;
+          maintenanceNotice: string;
+          cognitiveAiMemoryEnabled: boolean;
+          cognitiveExtractionProviderId: string | null;
+        };
         providers: ProviderDto[];
       }>('/api/admin/config');
       setSiteName(data.settings.siteName);
@@ -318,6 +328,8 @@ function ConfigTab() {
       setDefaultProviderId(data.settings.defaultProviderId ?? '');
       setMaxUploadMB(data.settings.maxUploadMB);
       setMaintenanceNotice(data.settings.maintenanceNotice);
+      setCognitiveAiMemoryEnabled(data.settings.cognitiveAiMemoryEnabled);
+      setCognitiveExtractionProviderId(data.settings.cognitiveExtractionProviderId ?? '');
       setProviders(data.providers);
     } catch (err) {
       setError(errorMessage(err));
@@ -345,6 +357,8 @@ function ConfigTab() {
           defaultProviderId: defaultProviderId || null,
           maxUploadMB,
           maintenanceNotice,
+          cognitiveAiMemoryEnabled,
+          cognitiveExtractionProviderId: cognitiveExtractionProviderId || null,
           confirmPassword: password
         }
       });
@@ -419,6 +433,48 @@ function ConfigTab() {
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel p-5 sm:p-6">
+        <h2 className="text-[15px] font-semibold text-white">记忆审核</h2>
+        <p className="mt-1 text-[12.5px] text-white/40">
+          打开后，规则初筛出候选的对话轮次会再调一次模型审核记忆：挑出值得长期保存的内容并修正类型。
+          普通闲聊不触发，模型不可用时自动回退规则抽取。最终是否保存仍由用户自己的记忆策略决定。
+        </p>
+        <div className="mt-4 space-y-4">
+          <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+            <div>
+              <div className="text-[13px] font-medium text-white/80">启用 AI 记忆审核</div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
+                只在规则已抽出候选的轮次调用模型，每轮至多一次，不阻塞正常聊天。
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+              checked={cognitiveAiMemoryEnabled}
+              onChange={(e) => setCognitiveAiMemoryEnabled(e.target.checked)}
+            />
+          </label>
+          <div>
+            <label className="label">记忆审核模型</label>
+            <select
+              className="field"
+              value={cognitiveExtractionProviderId}
+              onChange={(e) => setCognitiveExtractionProviderId(e.target.value)}
+            >
+              <option value="">跟随默认全局模型</option>
+              {providers.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.name}（{provider.modelId}）
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-[11.5px] text-white/35">
+              选一个独立模型专门审核记忆（比如更便宜或更稳的）；不选则用默认全局模型。所选模型不可用时回退默认。
+            </p>
           </div>
         </div>
       </section>

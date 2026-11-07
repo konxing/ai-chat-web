@@ -9,7 +9,10 @@ const ctx = vi.hoisted(() => ({
   chunks: [] as string[],
   throws: false,
   calls: 0,
-  providerThrows: false
+  providerThrows: false,
+  // 系统配置探针：null = 库里没这一行（走 env 兜底）
+  enabledSetting: null as unknown,
+  providerSetting: null as unknown
 }));
 
 vi.mock('@/lib/ai', () => ({
@@ -22,6 +25,11 @@ vi.mock('@/lib/ai', () => ({
 
 vi.mock('@/lib/logger', () => ({
   log: { debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined }
+}));
+
+vi.mock('@/lib/config', () => ({
+  getRawSystemSetting: (key: string) =>
+    Promise.resolve(key === 'cognitiveAiMemoryEnabled' ? ctx.enabledSetting : ctx.providerSetting)
 }));
 
 vi.mock('@/lib/providers', () => ({
@@ -41,6 +49,8 @@ afterEach(() => {
   ctx.throws = false;
   ctx.calls = 0;
   ctx.providerThrows = false;
+  ctx.enabledSetting = null;
+  ctx.providerSetting = null;
   delete process.env.COGNITIVE_AI_MEMORY;
   delete process.env.COGNITIVE_AI_MEMORY_PROVIDER;
   void mod().then((m) => m.resetAiExtractionCallCount());
@@ -81,18 +91,27 @@ describe('parseAiCandidates：防御性解析', () => {
   });
 });
 
-describe('aiMemoryExtractionEnabled：默认关', () => {
-  it('没设 env 时关闭', async () => {
+describe('aiMemoryExtractionEnabled：后台配置优先，env 兜底', () => {
+  it('库里没配置也没设 env 时关闭', async () => {
     const { aiMemoryExtractionEnabled } = await mod();
-    expect(aiMemoryExtractionEnabled()).toBe(false);
+    expect(await aiMemoryExtractionEnabled()).toBe(false);
   });
 
-  it('只有明确的 1 才开', async () => {
+  it('库里没配置时回落 env：只有明确的 1 才开', async () => {
     const { aiMemoryExtractionEnabled } = await mod();
     process.env.COGNITIVE_AI_MEMORY = '1';
-    expect(aiMemoryExtractionEnabled()).toBe(true);
+    expect(await aiMemoryExtractionEnabled()).toBe(true);
     process.env.COGNITIVE_AI_MEMORY = 'true';
-    expect(aiMemoryExtractionEnabled()).toBe(false);
+    expect(await aiMemoryExtractionEnabled()).toBe(false);
+  });
+
+  it('后台配置里开了就开了，不看 env；关了 env 也顶不开', async () => {
+    const { aiMemoryExtractionEnabled } = await mod();
+    ctx.enabledSetting = true;
+    expect(await aiMemoryExtractionEnabled()).toBe(true);
+    ctx.enabledSetting = false;
+    process.env.COGNITIVE_AI_MEMORY = '1';
+    expect(await aiMemoryExtractionEnabled()).toBe(false);
   });
 });
 
@@ -134,15 +153,22 @@ describe('成本计数（§9.6 每轮额外模型调用数）', () => {
 });
 
 describe('resolveMemoryExtractionProvider：指定独立审核模型', () => {
-  it('没配 COGNITIVE_AI_MEMORY_PROVIDER 时用默认聊天模型', async () => {
+  it('没配置时用默认聊天模型', async () => {
     const { resolveMemoryExtractionProvider } = await mod();
     expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'default-provider' });
   });
 
-  it('配了就用指定的 provider', async () => {
+  it('env 配了就用指定的 provider（库里没配置时）', async () => {
     process.env.COGNITIVE_AI_MEMORY_PROVIDER = 'p-review';
     const { resolveMemoryExtractionProvider } = await mod();
     expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'p-review' });
+  });
+
+  it('后台系统配置优先于 env', async () => {
+    process.env.COGNITIVE_AI_MEMORY_PROVIDER = 'p-env';
+    ctx.providerSetting = 'p-db';
+    const { resolveMemoryExtractionProvider } = await mod();
+    expect(await resolveMemoryExtractionProvider('user-a')).toEqual({ id: 'p-db' });
   });
 
   it('指定的取不到（写错/无权）回退默认模型，不抛错', async () => {

@@ -302,7 +302,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 一轮一次、跑在后台 worker 里。AI 与规则取并集：补充规则漏抓的用户陈述、修正类型，正文仍是
   // 用户亲口说的（origin=explicit 不失真）。模型坏了/解析失败回退规则候选，绝不丢记忆；AI 返回
   // 空数组也不清空规则候选。最终落不落库、要不要先问，仍由下方 write-decision 按用户策略裁决。
-  if (aiMemoryExtractionEnabled()) {
+  if (await aiMemoryExtractionEnabled()) {
     try {
       const provider = await resolveMemoryExtractionProvider(turn.userId);
       const refined = await refineCandidatesWithAI(turn.userId, turn.content, candidates, provider);

@@ -7,6 +7,10 @@ export interface SystemSettings {
   defaultProviderId: string | null;
   maxUploadMB: number;
   maintenanceNotice: string;
+  /** AI 记忆审核开关（Phase 2）。数据库里没配过时回落到 env COGNITIVE_AI_MEMORY。 */
+  cognitiveAiMemoryEnabled: boolean;
+  /** 记忆审核用的独立模型；null = 跟随默认聊天模型。DB 没配过时回落 env COGNITIVE_AI_MEMORY_PROVIDER。 */
+  cognitiveExtractionProviderId: string | null;
 }
 
 const DEFAULTS: SystemSettings = {
@@ -14,7 +18,9 @@ const DEFAULTS: SystemSettings = {
   registrationOpen: false,
   defaultProviderId: null,
   maxUploadMB: 300,
-  maintenanceNotice: ''
+  maintenanceNotice: '',
+  cognitiveAiMemoryEnabled: false,
+  cognitiveExtractionProviderId: null
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -22,16 +28,18 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'registrationOpen',
   'defaultProviderId',
   'maxUploadMB',
-  'maintenanceNotice'
+  'maintenanceNotice',
+  'cognitiveAiMemoryEnabled',
+  'cognitiveExtractionProviderId'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
-  if (key === 'registrationOpen') return Boolean(value) as SystemSettings[K];
+  if (key === 'registrationOpen' || key === 'cognitiveAiMemoryEnabled') return Boolean(value) as SystemSettings[K];
   if (key === 'maxUploadMB') {
     const n = Number(value);
     return (Number.isFinite(n) && n >= 1 && n <= 320 ? Math.floor(n) : DEFAULTS.maxUploadMB) as SystemSettings[K];
   }
-  if (key === 'defaultProviderId') {
+  if (key === 'defaultProviderId' || key === 'cognitiveExtractionProviderId') {
     return (typeof value === 'string' && value.length > 0 ? value : null) as SystemSettings[K];
   }
   return (typeof value === 'string' ? value : DEFAULTS[key]) as SystemSettings[K];
@@ -52,6 +60,15 @@ export async function getSystemSettings(): Promise<SystemSettings> {
 export async function getSystemSetting<K extends keyof SystemSettings>(key: K): Promise<SystemSettings[K]> {
   const row = await prisma.systemConfig.findUnique({ where: { key } });
   return row ? coerce(key, row.value) : DEFAULTS[key];
+}
+
+/**
+ * 原始读一行配置：行不存在返回 null（不回落 DEFAULTS）。给「数据库里没配过时回落 env」的场景用——
+ * 老库已经 seed 过、新键还没有行，这时不能因为默认值把 env 顶掉。
+ */
+export async function getRawSystemSetting(key: string): Promise<unknown | null> {
+  const row = await prisma.systemConfig.findUnique({ where: { key } });
+  return row ? row.value : null;
 }
 
 export async function updateSystemSettings(

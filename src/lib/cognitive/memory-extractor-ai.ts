@@ -1,5 +1,6 @@
 import type { AiProvider } from '@prisma/client';
 import { streamChatCompletion } from '@/lib/ai';
+import { getRawSystemSetting } from '@/lib/config';
 import { log } from '@/lib/logger';
 import { getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { MEMORY_CANDIDATE_MAX_CHARS, MEMORY_CANDIDATE_MIN_CHARS, type MemoryCandidate } from './memory-extractor';
@@ -12,9 +13,9 @@ import type { MemoryType } from './policy';
  * 一轮一次、跑在后台 worker 里，不落在对话关键路径上。规则一个候选都没抽到的普通闲聊，
  * 压根不会走到这里。
  *
- * 默认关闭：由 `aiMemoryExtractionEnabled()`（env `COGNITIVE_AI_MEMORY=1`）控制。关着时
- * 写侧逐字回到纯规则路径，零行为变化。模型不可用、超时、输出解析失败一律回退到规则候选，
- * 绝不因为 AI 坏了就丢记忆或把对话带下水。
+ * 默认关闭：由后台「系统配置」的 `cognitiveAiMemoryEnabled` 控制（env `COGNITIVE_AI_MEMORY=1`
+ * 在老库还没这行配置时兜底）。关着时写侧逐字回到纯规则路径，零行为变化。模型不可用、超时、
+ * 输出解析失败一律回退到规则候选，绝不因为 AI 坏了就丢记忆或把对话带下水。
  *
  * 模型只做一件事：从用户这一轮原话里挑出**有长期价值**的陈述，给出类型。它不写库、不做最终
  * 保存决策——要不要落库、要不要先问、会不会取代旧记忆，仍由现有 write-decision 按用户策略裁决。
@@ -37,8 +38,13 @@ const SYSTEM_PROMPT = [
   '只输出一个 JSON 数组，元素形如 {"text":"...","type":"fact"}；没有值得记的就输出 []。不要输出任何解释。'
 ].join('\n');
 
-/** 是否启用 AI 二级抽取。默认关；只认 env 的明确 '1'，其余一律按关处理。 */
-export function aiMemoryExtractionEnabled(): boolean {
+/**
+ * 是否启用 AI 二级抽取。后台「系统配置」里的 `cognitiveAiMemoryEnabled` 说了算；
+ * 老库还没有这一行时回落 env `COGNITIVE_AI_MEMORY`（其余取值一律按关处理）。
+ */
+export async function aiMemoryExtractionEnabled(): Promise<boolean> {
+  const raw = await getRawSystemSetting('cognitiveAiMemoryEnabled').catch(() => null);
+  if (raw !== null) return raw === true || raw === 'true';
   return process.env.COGNITIVE_AI_MEMORY === '1';
 }
 
@@ -70,7 +76,9 @@ export function resetAiExtractionCallCount(): void {
  * 审核模型是增益，配错不该把这一轮记忆清零。
  */
 export async function resolveMemoryExtractionProvider(userId: string): Promise<AiProvider> {
-  const configured = process.env.COGNITIVE_AI_MEMORY_PROVIDER;
+  // 后台系统配置里的 cognitiveExtractionProviderId 优先；没配过时回落 env。
+  const fromSetting = (await getRawSystemSetting('cognitiveExtractionProviderId').catch(() => null)) as string | null;
+  const configured = fromSetting || process.env.COGNITIVE_AI_MEMORY_PROVIDER;
   if (configured) {
     try {
       return await getProviderForUser(configured, userId);

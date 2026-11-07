@@ -34,6 +34,12 @@ export async function PATCH(req: Request) {
       });
       if (!provider) throw new ApiError(400, 'PROVIDER_NOT_FOUND', '所选全局模型不存在');
     }
+    if (body.cognitiveExtractionProviderId) {
+      const provider = await prisma.aiProvider.findFirst({
+        where: { id: body.cognitiveExtractionProviderId, ownerType: 'GLOBAL' }
+      });
+      if (!provider) throw new ApiError(400, 'PROVIDER_NOT_FOUND', '所选记忆审核模型不存在');
+    }
     const { confirmPassword: _confirmPassword, ...patch } = body;
     const settings = await updateSystemSettings(patch, user.id);
     await writeAdminAudit(req, user, {
