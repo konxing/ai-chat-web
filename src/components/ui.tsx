@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, X, XCircle, Lock } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { lockScroll, unlockScroll } from '@/lib/scroll-lock';
 
 /* ------------------------------- Modal ------------------------------- */
 
@@ -31,19 +32,21 @@ export function Modal({
   footer?: ReactNode;
   width?: string;
 }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') closeRef.current();
     };
     document.addEventListener('keydown', onKey);
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    lockScroll();
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = previous;
+      unlockScroll();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (
