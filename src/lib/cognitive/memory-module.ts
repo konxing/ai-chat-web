@@ -4,7 +4,9 @@ import {
   type CognitiveModule,
   type CognitiveTurn
 } from './manager';
-import { extractMemoryCandidates } from './memory-extractor';
+import { extractMemoryCandidates, MEMORY_CANDIDATES_PER_TURN } from './memory-extractor';
+import { aiMemoryExtractionEnabled, refineCandidatesWithAI } from './memory-extractor-ai';
+import { resolveDefaultProvider } from '@/lib/providers';
 import { decisionModule } from './decision-module';
 import { userModelModule } from './user-model-module';
 import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from './memory-display';
@@ -275,7 +277,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 代价是「这一轮什么都没抽到」的对话多读一行偏好——那是一次主键查询，
   // 而 8.3 要的是「关闭后不能继续执行对应的数据读取、生成和后台写入」，读它自己的开关不算那条链上的下游。
   const preferences = await getCognitivePreferences(turn.userId);
-  const candidates = extractMemoryCandidates(turn.content, { emotionEnabled: preferences.emotionEnabled });
+  let candidates = extractMemoryCandidates(turn.content, { emotionEnabled: preferences.emotionEnabled });
   if (candidates.length === 0) return;
 
   if (!preferences.memoryEnabled) return;
@@ -283,6 +285,35 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 放在 excludedHashes / getMemoryPolicies / listMemories 之后就成了「读了但没写」，
   // 而 8.3 要的是「关闭后不能继续执行对应的数据读取」——除这张偏好行本身之外，零读零写。
   if (preferences.memoryWritePaused) return;
+
+  // AI 二级筛选（Phase 2，env COGNITIVE_AI_MEMORY=1 才开，默认关）：规则已抽出候选才触发，
+  // 一轮一次、跑在后台 worker 里。AI 与规则取并集：补充规则漏抓的用户陈述、修正类型，正文仍是
+  // 用户亲口说的（origin=explicit 不失真）。模型坏了/解析失败回退规则候选，绝不丢记忆；AI 返回
+  // 空数组也不清空规则候选。最终落不落库、要不要先问，仍由下方 write-decision 按用户策略裁决。
+  if (aiMemoryExtractionEnabled()) {
+    try {
+      const provider = await resolveDefaultProvider(turn.userId);
+      const refined = await refineCandidatesWithAI(turn.userId, turn.content, candidates, provider);
+      if (refined !== null && refined.length > 0) {
+        const merged = [...candidates];
+        const indexByKey = new Map(merged.map((candidate, index) => [dedupeKey(candidate.text), index]));
+        for (const candidate of refined) {
+          const key = dedupeKey(candidate.text);
+          const at = indexByKey.get(key);
+          if (at === undefined) {
+            indexByKey.set(key, merged.length);
+            merged.push(candidate);
+          } else {
+            // 同一条：采纳 AI 修正后的类型，正文保留规则那份用户原话。
+            merged[at] = { text: merged[at].text, type: candidate.type };
+          }
+        }
+        candidates = merged.slice(0, MEMORY_CANDIDATES_PER_TURN);
+      }
+    } catch {
+      // provider 解析失败等：回退规则候选，不打断这一轮记忆。
+    }
+  }
 
   // 用户永久删除过的内容不许被自动记回来（任务书 7.3）。放在候选检查之后：
   // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。

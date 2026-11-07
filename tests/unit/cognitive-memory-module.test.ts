@@ -30,6 +30,8 @@ const db = vi.hoisted(() => ({
   memoryReadLimit: 8,
   timezoneOffsetMinutes: null as number | null,
   associationEnabled: false,
+  aiEnabled: false,
+  aiRefined: null as null | Array<{ text: string; type: string }>,
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
   policyCalls: 0
@@ -112,6 +114,15 @@ vi.mock('@/lib/cognitive/memory-candidates', () => ({
     db.proposals.push(input);
     return Promise.resolve({ id: 'cand-1', created: true });
   }
+}));
+
+vi.mock('@/lib/cognitive/memory-extractor-ai', () => ({
+  aiMemoryExtractionEnabled: () => db.aiEnabled,
+  refineCandidatesWithAI: () => Promise.resolve(db.aiRefined)
+}));
+
+vi.mock('@/lib/providers', () => ({
+  resolveDefaultProvider: () => Promise.resolve({ id: 'p-1', modelId: 'test' })
 }));
 
 vi.mock('@/lib/cognitive/exclusions', async (importOriginal) => {
@@ -224,6 +235,8 @@ beforeEach(() => {
   db.memoryReadLimit = 8;
   db.timezoneOffsetMinutes = null;
   db.associationEnabled = false;
+  db.aiEnabled = false;
+  db.aiRefined = null;
   db.expandCalls = [];
   db.expandHits = [];
 });
@@ -1322,5 +1335,39 @@ describe('情绪总开关 emotionEnabled：写侧闸门与引擎读侧闸门（�
     const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
 
     expect(block?.text).toContain('最近一想到汇报就发紧');
+  });
+});
+
+describe('写侧：AI 二级抽取（Phase 2，默认关）', () => {
+  it('开着时规则与 AI 取并集：AI 补上规则漏抓的用户陈述', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiRefined = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
+
+    await write('我养了一只叫年糕的布偶猫。');
+
+    const texts = db.creates.map((row) => row.content);
+    expect(texts).toContain('我养了一只叫年糕的布偶猫');
+    expect(texts).toContain('我喜欢喝黑咖啡');
+  });
+
+  it('AI 返回 null（模型坏了）回退规则候选，不丢记忆', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiRefined = null;
+
+    await write('我养了一只叫年糕的布偶猫。');
+
+    expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
+  });
+
+  it('默认关时不调 AI：只有规则候选', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = false;
+    db.aiRefined = [{ text: '我喜欢喝黑咖啡', type: 'preference' }];
+
+    await write('我养了一只叫年糕的布偶猫。');
+
+    expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
   });
 });
