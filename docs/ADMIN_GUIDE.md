@@ -57,6 +57,8 @@ printf '%s\n' "$NEW_PASSWORD" | npx tsx scripts/emergency.ts --reset-owner-passw
 
 ### 全局模型
 - 新增/编辑/删除全局 Provider：名称、Base URL（生产必须 HTTPS）、API Key、模型 ID、能力（文本/视觉/文件/音频）、参数 JSON、启用、默认。
+- Base URL 与模型 ID 只接受可见半角字符（中文输入法打出的全角 `：`、全角字母会在保存时被拒绝并点名该字符）；名称可以中文。
+- 上游返回非 2xx 时，`error.message` 里会带上模型服务的原话（脱敏并截断到 180 字符），不再只有“HTTP 400”。
 - “测试连接”会调用 `GET {baseUrl}/models`，只显示状态/模型数量，不返回 Key。
 - API Key 使用 AES-256-GCM 加密；列表只显示掩码；浏览器永远拿不到明文。
 - 用户可在设置页添加自己的 Provider；只能看到全局启用模型 + 自己的模型。

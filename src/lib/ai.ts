@@ -35,6 +35,28 @@ const MAX_ERROR_BODY_BYTES = 8_192;
 /** 对面回来的包：safeFetch 的返回类型里取，避免和 DOM 的 Response 类型打架。 */
 type ProviderResponse = Awaited<ReturnType<typeof safeFetch>>['response'];
 
+/**
+ * 从上游错误体里取一句能给人看的原因。
+ *
+ * 之前 400/502 只回「模型服务返回错误（HTTP 400）」，而 OpenRouter 其实原话说了
+ * 「xxx is not a valid model ID」——模型 ID 里有个全角冒号，用户对着这句话一眼就能懂，
+ * 对着 HTTP 400 只能瞎猜。上游原文先经过 apiKey 脱敏，再截断，不整包外泄。
+ */
+export function upstreamReason(detail: string): string | null {
+  const trimmed = detail.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown }; message?: unknown };
+    const raw =
+      typeof parsed.error?.message === 'string' ? parsed.error.message : typeof parsed.message === 'string' ? parsed.message : null;
+    if (raw) return raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+  } catch {
+    /* 非 JSON，退回原文 */
+  }
+  const printable = trimmed.match(/[\x20-\x7e]{6,}/);
+  return printable ? printable[0].slice(0, 180) : null;
+}
+
 export async function readBodyCapped(
   response: ProviderResponse,
   maxBytes: number
@@ -166,7 +188,14 @@ export async function* streamChatCompletion(input: {
     if (response.status === 404) {
       throw new ApiError(502, 'AI_ENDPOINT_NOT_FOUND', '模型接口不存在，请检查 Base URL 与模型 ID');
     }
-    throw new ApiError(502, 'AI_PROVIDER_ERROR', `模型服务返回错误（HTTP ${response.status}）`);
+    const reason = upstreamReason(sanitized);
+    throw new ApiError(
+      502,
+      'AI_PROVIDER_ERROR',
+      reason
+        ? `模型服务返回错误（HTTP ${response.status}）：${reason}`
+        : `模型服务返回错误（HTTP ${response.status}），请检查 Base URL、模型 ID 与参数`
+    );
   }
 
   try {

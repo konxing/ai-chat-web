@@ -10,11 +10,43 @@ import { log } from './logger';
 export const CAPABILITIES = ['text', 'vision', 'files', 'audio', 'embedding'] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
+/**
+ * 半角字符检查：Base URL 和模型 ID 只能出现可见 ASCII。
+ *
+ * 起因是真实故障——中文输入法把 `:` 打成全角 `：`，`nvidia/nemotron-3.5-super-vl：free`
+ * 存进去后 OpenRouter 直接回 400「not a valid model ID」，界面只有一句
+ * 「模型服务返回错误（HTTP 400）」，看不出哪里错。保存时就拦住比事后猜快得多。
+ *
+ * 这里只拒绝、不自动改写：全角冒号是明确的手误，但把任何非 ASCII 静默转成半角
+ * 会掩盖真正的拼错（比如把 `l` 打成 `｜`），用户应该看到自己写了什么。
+ */
+export function firstNonHalfWidth(value: string): string | null {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 0x21 || code > 0x7e) return char;
+  }
+  return null;
+}
+
+function halfWidthField(label: string, max: number) {
+  return z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .refine((value) => firstNonHalfWidth(value) === null, (value) => {
+      const bad = firstNonHalfWidth(value);
+      return {
+        message: `${label} 含非半角字符「${bad === ' ' ? '空格' : bad}」，请只用英文半角字符（中文输入法常把 : 打成 ：）`
+      };
+    });
+}
+
 export const providerInputSchema = z.object({
   name: z.string().trim().min(1).max(64),
-  baseUrl: z.string().trim().min(1).max(512),
+  baseUrl: halfWidthField('Base URL', 512),
   apiKey: z.string().trim().min(1).max(500).optional(),
-  modelId: z.string().trim().min(1).max(128),
+  modelId: halfWidthField('模型 ID', 128),
   capabilities: z.array(z.enum(CAPABILITIES)).min(1).max(5),
   params: z
     .object({
@@ -22,7 +54,7 @@ export const providerInputSchema = z.object({
       maxTokens: z.number().int().min(1).max(64000).optional(),
       // 向量臂用的模型名。`AiProvider` 上没有第二个模型字段，所以约定放在这里；
       // 空串不收，缺省时由 `embedding.ts` 退回 modelId——**不给默认模型名**。
-      embeddingModel: z.string().trim().min(1).max(128).optional()
+      embeddingModel: halfWidthField('向量模型 ID', 128).optional()
     })
     .strict()
     .optional(),

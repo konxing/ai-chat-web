@@ -6,13 +6,27 @@ export interface ApiErrorPayload {
   details?: unknown;
 }
 
+/**
+ * VALIDATION_ERROR 的逐字段原因放在 details 里，界面只渲染 message。
+ * 不把它拼上来的话，用户永远只看到「请求参数无效」，看不出是哪个输入框错了。
+ */
+function firstValidationDetail(details: unknown): string | null {
+  if (!Array.isArray(details)) return null;
+  for (const issue of details) {
+    const message = (issue as { message?: unknown } | null)?.message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return null;
+}
+
 export class ApiClientError extends Error {
   status: number;
   code: string;
   details?: unknown;
 
   constructor(status: number, payload: ApiErrorPayload) {
-    super(payload.message);
+    const detail = payload.code === 'VALIDATION_ERROR' ? firstValidationDetail(payload.details) : null;
+    super(detail ?? payload.message);
     this.status = status;
     this.code = payload.code;
     this.details = payload.details;
