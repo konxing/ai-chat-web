@@ -25,6 +25,7 @@ import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
 import { proposeCandidate } from './memory-candidates';
 import { resolveTemporalFrame } from './temporal';
+import { routeMemoryRetrieval } from './retrieval-router';
 import {
   LOW_CONFIDENCE_MARKER,
   MEMORY_FRAMING,
@@ -82,6 +83,9 @@ function dedupeKey(text: string): string {
 
 async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   const now = new Date();
+  // 按需召回路由（Phase 4）：纯知识/翻译/数学问题不注入个人记忆，连记忆池都不读，省 token。
+  // 涉及用户自己的事照常召回；拿不准保守召回。路由是纯函数，落在任何数据库读之前。
+  if (routeMemoryRetrieval(turn.content).need === 'none') return [];
   // 候选池是当前有效的全部记忆（上限 MEMORY_RETRIEVAL_POOL 行），排序交给关键词召回。
   const rows = await listMemories(turn.userId, { asOf: now, take: MEMORY_RETRIEVAL_POOL });
   if (rows.length === 0) return [];

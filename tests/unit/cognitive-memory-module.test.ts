@@ -1371,3 +1371,25 @@ describe('写侧：AI 二级抽取（Phase 2，默认关）', () => {
     expect(db.creates.map((row) => row.content)).toEqual(['我养了一只叫年糕的布偶猫']);
   });
 });
+
+describe('读侧：按需召回路由（Phase 4）', () => {
+  it('纯知识/数学问题不注入个人记忆，连记忆池都不读', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow()];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '1加1等于几' });
+
+    expect(blocks).toEqual([]);
+    expect(db.listFilters).toEqual([]);
+  });
+
+  it('涉及用户自己的问题照常召回', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我喜欢喝黑咖啡' })];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '我喜欢喝什么样的咖啡？' });
+
+    expect(db.listFilters.length).toBeGreaterThan(0);
+    expect(blocks[0]?.text).toContain('黑咖啡');
+  });
+});
