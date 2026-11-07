@@ -741,12 +741,18 @@ export function ChatWorkspace({
     };
     recognition.onerror = () => {
       setNotice('语音识别失败，请重试或使用文字输入');
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       setRecording(false);
     };
-    recognition.onend = () => setRecording(false);
+    recognition.onend = () => {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      setRecording(false);
+    };
     recognitionRef.current = recognition;
     setRecording(true);
     setRecordSeconds(0);
+    // 这条路径以前只把秒数归零、从没起过表，所以界面上永远停在 0s。
+    recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
     recognition.start();
   }, [appendTranscript]);
 
