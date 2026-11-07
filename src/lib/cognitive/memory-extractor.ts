@@ -97,6 +97,11 @@ const QUESTION_MARK = /[?？]|怎么|如何|为什么|什么样|怎样|哪里|�
 export interface MemoryCandidate {
   text: string;
   type: MemoryType;
+  /**
+   * 只有 AI 记忆审核会填：这句是用户对某条已有记忆的改口，审核模型点名要推翻那一行的 id。
+   * 规则层永远留空——词表判不出「说的是同一件事的新说法」，那种判断本来就是模型的活。
+   */
+  supersedesId?: string;
 }
 
 export interface ExtractOptions {

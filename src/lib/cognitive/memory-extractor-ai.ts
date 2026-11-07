@@ -39,15 +39,62 @@ export const AI_EXTRACTION_TIMEOUT_MS = 30_000;
 const ALLOWED_TYPES: readonly MemoryType[] = ['fact', 'preference', 'goal', 'project', 'decision', 'emotion'];
 
 const SYSTEM_PROMPT = [
-  '你是长期记忆审核员。给你用户这一轮说的话，以及规则初筛出的候选。',
+  '你是长期记忆审核员。给你用户这一轮说的话、规则初筛出的候选，以及已经存着的他的长期记忆。',
   '你的任务是决定这一轮里**哪些话值得写进长期记忆**，只输出那部分。',
-  '值得记：会改变系统以后如何理解这个用户的东西——稳定身份事实、长期偏好、长期目标、正在做的项目、明确的决策、反复或持续出现的状态。',
+  '值得记：会改变系统以后如何理解这个用户的东西——稳定身份事实、长期偏好、长期目标、正在做的项目、明确的决策、反复或持续出现的状态，以及和他身体、健康、生活重大变化有关的具体经历。',
   '不值得记：一次性闲聊和寒暄、当天才有效的安排、临时的犹豫和情绪宣泄、普通知识问答、跟用户本人无关的内容、以及没有信息量的复述。',
   '宁缺毋滥：整轮都没有值得长期记的内容就输出 []，不要为了有输出而勉强挑一条。',
-  '每条的 text 必须是用户原话里的连续片段，一个字都不许改写、概括或补充。',
+  'text 取用户原话里的**一个完整分句**（到逗号或句号为止的那一段）：不许加字（包括主语和连接词）、不许改写、不许概括；',
+  '也不要把一句连续的话拆成几个碎片——「改成每天游泳了」这种新说法被拆丢，比多记一条更糟。',
+  '用户是在改口（不再做某事、换成别的、搬到别处、决定换掉）时：把说明**新状态**的那个分句记下来，',
+  '并在 replaces 里填上他被推翻的那条已有记忆的 id；没有对应的旧记忆就不填 replaces。',
+  'replaces 只能用下面「已有记忆」里给到的 id，不许自己编。',
   'type 只能是 fact/preference/goal/project/decision/emotion 之一。疑问句不是事实。',
-  '只输出一个 JSON 数组，元素形如 {"text":"用户原话片段","type":"fact"}；不要输出任何解释或多余字符。'
+  '只输出一个 JSON 数组，元素形如 {"text":"用户原话分句","type":"fact","replaces":"m-3"}（replaces 可省略）；',
+  '不要输出任何解释或多余字符。'
 ].join('\n');
+
+/** 审核提示词原文（导出给评测与探针复用，保证测的就是线上跑的这一段）。 */
+export const AI_REVIEW_SYSTEM_PROMPT = SYSTEM_PROMPT;
+
+/** 喂给审核模型的已有记忆条数上限：再多只是把提示词撑大，改口的旧说法几乎总在最近这批里。 */
+export const AI_REVIEW_EXISTING_MAX = 20;
+/** 已有记忆正文进提示词时的截断长度（只为让模型认出那件事，不需要全文）。 */
+const AI_REVIEW_EXISTING_TEXT_MAX = 80;
+
+/** 审核模型可以引用「推翻哪条旧记忆」的那些行。只带 id、类型和正文片段。 */
+export interface ExistingMemoryBrief {
+  id: string;
+  type: MemoryType;
+  content: string;
+}
+
+/** 这一轮发给审核模型的 user 消息正文：用户原话 + 规则初筛候选 + 已有记忆（可引用 id）。 */
+export function buildReviewUserPrompt(
+  content: string,
+  ruleCandidates: readonly MemoryCandidate[],
+  existing: readonly ExistingMemoryBrief[] = []
+): string {
+  const parts = [
+    '用户这一轮说的话：',
+    content,
+    '',
+    '规则初筛候选（只是提示，不是你必须采纳的清单；不值得长期记的要剔除，值得记而你看到的原话片段可以补）：',
+    JSON.stringify(ruleCandidates.map((candidate) => ({ text: candidate.text, type: candidate.type })))
+  ];
+  if (existing.length > 0) {
+    parts.push(
+      '',
+      '已有记忆（改口时用 replaces 填这里的 id，一次最多推翻一条）：',
+      JSON.stringify(
+        existing
+          .slice(0, AI_REVIEW_EXISTING_MAX)
+          .map((row) => ({ id: row.id, type: row.type, text: row.content.slice(0, AI_REVIEW_EXISTING_TEXT_MAX) }))
+      )
+    );
+  }
+  return parts.join('\n');
+}
 
 /**
  * 是否启用 AI 二级抽取。后台「系统配置」里的 `cognitiveAiMemoryEnabled` 说了算；
@@ -104,8 +151,10 @@ export async function resolveMemoryExtractionProvider(userId: string): Promise<A
  * 从模型返回的文本里解析候选。模型不一定支持 structured outputs，所以防御性地抓第一个 JSON 数组：
  * 剥掉可能的 ```json 包裹、取第一个 '[' 到最后一个 ']'。解析不出合法数组就返回 null（调用方回退规则）。
  * 逐条校验：text 是非空字符串且不超长，type 在六类里；问句、含「忽略系统规则」之类指令的不收。
+ * `allowedReplaceIds` 给了才认 `replaces` 字段，而且只认这份集合里的 id——模型自己编的 id 一律丢弃，
+ * 指错旧记忆比不指更贵（那会把一条还有效的说法归档掉）。
  */
-export function parseAiCandidates(raw: string): MemoryCandidate[] | null {
+export function parseAiCandidates(raw: string, allowedReplaceIds?: ReadonlySet<string>): MemoryCandidate[] | null {
   const start = raw.indexOf('[');
   const end = raw.lastIndexOf(']');
   if (start === -1 || end === -1 || end <= start) return null;
@@ -130,33 +179,61 @@ export function parseAiCandidates(raw: string): MemoryCandidate[] | null {
     const key = trimmed.replace(/\s+/g, '').toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    candidates.push({ text: trimmed, type: type as MemoryType });
+    const candidate: MemoryCandidate = { text: trimmed, type: type as MemoryType };
+    const replaces = (item as { replaces?: unknown }).replaces;
+    if (allowedReplaceIds && typeof replaces === 'string' && allowedReplaceIds.has(replaces)) {
+      candidate.supersedesId = replaces;
+    }
+    candidates.push(candidate);
   }
   return candidates;
 }
 
 /**
- * 调一次审核模型，拿到「这一轮值得长期记的东西」。
+ * 问一次审核模型，拿到「这一轮值得长期记的东西」。
  *
  * 返回 null 表示这次审核没给出可用结论（模型错、超时、输出解析不出数组）——调用方据此回退规则候选。
  * 返回数组（含空数组）表示审核结论，**它就是最终候选清单**：规则命中但没被列进来的句子不再落库。
+ *
+ * 一次失败会重试一次（总共至多两趟）：实测免费档的审核模型在连着问时会零星直接调用失败，
+ * 而失败的方向是「回退规则」，也就是这一轮又变成规则抽到什么记什么——正是这套设计要避免的形状。
+ * 重试只多花一次调用，不改变任何判定口径。
+ *
  * 日志只记 id 和计数，不记正文（任务书 5.5）。
  */
 export async function reviewTurnWithAI(
   userId: string,
   content: string,
   ruleCandidates: readonly MemoryCandidate[],
-  provider: AiProvider
+  provider: AiProvider,
+  existing: readonly ExistingMemoryBrief[] = []
 ): Promise<MemoryCandidate[] | null> {
-  recordAiExtractionCall();
-  const userPrompt = [
-    '用户这一轮说的话：',
-    content,
-    '',
-    '规则初筛候选（只是提示，不是你必须采纳的清单；不值得长期记的要剔除，值得记而你看到的原话片段可以补）：',
-    JSON.stringify(ruleCandidates.map((candidate) => ({ text: candidate.text, type: candidate.type })))
-  ].join('\n');
+  const userPrompt = buildReviewUserPrompt(content, ruleCandidates, existing);
+  const allowedReplaceIds = new Set(existing.map((row) => row.id));
 
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const raw = await collectReviewText(userId, provider, userPrompt);
+    if (raw === null) continue;
+    const parsed = parseAiCandidates(raw, allowedReplaceIds);
+    if (parsed === null) {
+      log.warn('cognitive.ai_extraction_failed', { userId, reason: 'parse_failed', attempt });
+      continue;
+    }
+    const { kept, dropped } = filterVerbatimCandidates(parsed, content);
+    if (dropped > 0) {
+      // 模型改写了措辞或凭空补了信息。丢掉那几条；但如果它挑的每一条都不是原话，那更像是
+      // 没按格式出牌而不是判「都不值得记」——那种情况整趟结论作废，回退规则，别把记忆清空。
+      log.warn('cognitive.ai_review_not_verbatim', { userId, dropped, kept: kept.length, attempt });
+      if (kept.length === 0) continue;
+    }
+    return kept.slice(0, MEMORY_CANDIDATES_PER_TURN);
+  }
+  return null;
+}
+
+/** 跑一趟模型把流式输出攒成文本；调用失败返回 null 并记一条日志。 */
+async function collectReviewText(userId: string, provider: AiProvider, userPrompt: string): Promise<string | null> {
+  recordAiExtractionCall();
   let raw = '';
   try {
     for await (const event of streamChatCompletion({
@@ -173,18 +250,7 @@ export async function reviewTurnWithAI(
     log.warn('cognitive.ai_extraction_failed', { userId, reason: 'model_error' });
     return null;
   }
-  const parsed = parseAiCandidates(raw);
-  if (parsed === null) {
-    log.warn('cognitive.ai_extraction_failed', { userId, reason: 'parse_failed' });
-    return null;
-  }
-  const { kept, dropped } = filterVerbatimCandidates(parsed, content);
-  if (dropped > 0) {
-    // 模型改写了措辞或凭空补了信息。丢掉那几条，但结论仍然有效——不回退规则，
-    // 因为「这一轮不值得记」的判断和「这几条不是你原话」是两件事。
-    log.warn('cognitive.ai_review_not_verbatim', { userId, dropped });
-  }
-  return kept.slice(0, MEMORY_CANDIDATES_PER_TURN);
+  return raw;
 }
 
 /**

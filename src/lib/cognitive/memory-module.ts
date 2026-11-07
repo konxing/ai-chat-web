@@ -319,25 +319,51 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 「好的」「嗯」这类零信息应答由 isReviewWorthwhile 前置跳过），它没列进来的规则候选会被剔除，
   // 它按原话补上的规则漏抓的说法会被补进来；返回空数组＝这一轮不值得长期记，于是一条都不落库。
   // 这正是「不是每句对话都被长期记忆」的落点，也是模型判错时唯一的代价方向：少记，不是记错。
-  // 模型不可用/超时/输出不像数组 → 回退规则候选（宁可按旧办法记着，也不因为审核环节坏掉就清空记忆）。
-  // 先判纯函数再读开关：开关那次 SystemConfig 查询只在「这一轮本来就可能要问模型」时才发生，
-  // 纯寒暄的轮次仍然除了偏好行什么都不读——和没开 AI 时一样。
+  // 模型不可用/超时/输出不像数组/挑出来的全不是原话 → 回退规则候选（宁可按旧办法记着，
+  // 也不因为审核环节坏掉就清空记忆）。
+  // 先判纯函数再读配置和记忆表：纯寒暄的轮次仍然除了偏好行什么都不读——和没开 AI 时一样。
   const worthReviewing = ruleCandidates.length > 0 || directives.length > 0 || isReviewWorthwhile(turn.content);
+  // 按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。这里不按保留期过滤：过期只是
+  // 「不再进对话」，行还在库里，用户改口就该落在那一行上；把过期行剔出匹配池只会让同一件事多存一条。
+  // includeSuperseded 同理：用户改口后旧版本被取代，但他哪天原话重说一遍时，旧版本必须还在
+  // 匹配池里，known 表才拦得住——否则近重复检测又会跳过完全同句，同一句话落成第二条当前版本。
+  let existing: MemoryDto[] | null = null;
+  // null = 这一轮根本没问模型；数字 = 问过，这是它给的条数（0 就是「这一轮不值得长期记」）。
+  // 只记条数，正文一个字都不进日志（任务书 5.5）。没有这一行，「为什么这句没记住」只能靠猜。
+  let reviewedCount: number | null = null;
   if (worthReviewing && (await aiMemoryExtractionEnabled())) {
+    existing = await listMemories(turn.userId, { includeSuperseded: true });
     let reviewed: MemoryCandidate[] | null = null;
     try {
       const provider = await resolveMemoryExtractionProvider(turn.userId);
-      reviewed = await reviewTurnWithAI(turn.userId, turn.content, ruleCandidates, provider);
+      // 审核模型要能指认「这句推翻了哪条旧说法」，所以把那批还活跃的行连 id 一起给它。
+      // 近重复检测只会比字面（阈值 0.8，「我不跑步了」和「每天跑步三公里」差得远，判不出同一件事），
+      // 语义上的改口只有看着旧说法才认得出来——这一步补的就是那个洞。
+      reviewed = await reviewTurnWithAI(
+        turn.userId,
+        turn.content,
+        ruleCandidates,
+        provider,
+        existing.filter((memory) => memory.supersededAt === null)
+      );
     } catch {
       reviewed = null;
     }
-    if (reviewed !== null) candidates = [...reviewed, ...directives];
+    if (reviewed !== null) {
+      reviewedCount = reviewed.length;
+      candidates = [...reviewed, ...directives];
+    }
   }
 
   // 去重（同句被规则和审核各说一遍、命令句同时命中词表）＋ 每轮上限。
+  // 带着「推翻哪条旧说法」的那些排前面：每轮落库有额度（MEMORY_WRITE_MAX_PER_TURN），
+  // 而改口的新说法被额度挤掉，留下的就是两条互相冲突的现行——那比少记一条临时感想贵得多。
+  const ordered = [...candidates].sort(
+    (left, right) => Number(Boolean(right.supersedesId)) - Number(Boolean(left.supersedesId))
+  );
   const unique: MemoryCandidate[] = [];
   const seenKeys = new Set<string>();
-  for (const candidate of candidates) {
+  for (const candidate of ordered) {
     if (unique.length >= MEMORY_CANDIDATES_PER_TURN) break;
     const key = dedupeKey(candidate.text);
     if (seenKeys.has(key)) continue;
@@ -346,21 +372,26 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   }
   candidates = unique;
 
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    if (reviewedCount !== null && reviewedCount === 0) {
+      log.info('cognitive.ai_review_nothing_worth_keeping', {
+        userId: turn.userId,
+        ruleCandidates: ruleCandidates.length
+      });
+    }
+    return;
+  }
 
   // 用户永久删除过的内容不许被自动记回来（任务书 7.3）。放在候选检查之后：
   // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。
   const excluded = await excludedHashes(turn.userId);
   const policies = await getMemoryPolicies(turn.userId);
-  // 按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。这里不按保留期过滤：过期只是
-  // 「不再进对话」，行还在库里，用户改口就该落在那一行上；把过期行剔出匹配池只会让同一件事多存一条。
-  // includeSuperseded 同理：用户改口后旧版本被取代，但他哪天原话重说一遍时，旧版本必须还在
-  // 匹配池里，known 表才拦得住——否则近重复检测又会跳过完全同句，同一句话落成第二条当前版本。
-  const existing = await listMemories(turn.userId, { includeSuperseded: true });
-  // 键是归一化后的正文，值记着 id 和来源对话：判断「换个对话又原话说了一遍」得知道旧那条是哪来的。
+  // 审核那一路已经读过一次，这里复用；没走审核时才在这里读。
+  existing ??= await listMemories(turn.userId, { includeSuperseded: true });
   const known = new Map(
     existing.map((memory) => [dedupeKey(memory.content), { id: memory.id, chatId: memory.chatId }])
   );
+  const activeIds = new Set(existing.filter((memory) => memory.supersededAt === null).map((memory) => memory.id));
   const superseded = new Set<string>();
 
   let written = 0;
@@ -380,7 +411,16 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       continue;
     }
     if (excluded.has(exclusionHash(turn.userId, candidate.text))) continue;
-    const previousId = findNearDuplicate(candidate, existing);
+    const lexicalPreviousId = findNearDuplicate(candidate, existing);
+    const namedPreviousId =
+      candidate.supersedesId && candidate.supersedesId !== lexicalPreviousId && activeIds.has(candidate.supersedesId)
+        ? candidate.supersedesId
+        : null;
+    const previousId = lexicalPreviousId ?? namedPreviousId;
+    if (namedPreviousId) {
+      // 只记 id：审核模型指认了一次词面认不出的改口，这是那条演化唯一的可追溯线索。
+      log.info('cognitive.ai_review_supersede', { userId: turn.userId, previousId: namedPreviousId });
+    }
     // 同一轮里连着两个新说法时，第二个的落点取决于第一个的结果，而我们没有那个结果：
     // 少记一条比留下两条互相冲突的版本便宜。
     if (previousId && superseded.has(previousId)) continue;

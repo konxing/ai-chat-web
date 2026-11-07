@@ -31,7 +31,7 @@ const db = vi.hoisted(() => ({
   timezoneOffsetMinutes: null as number | null,
   associationEnabled: false,
   aiEnabled: false,
-  aiReviewed: null as null | Array<{ text: string; type: string }>,
+  aiReviewed: null as null | Array<{ text: string; type: string; supersedesId?: string }>,
   reviewCalls: 0,
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
@@ -1433,6 +1433,42 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
     await write('记住我不吃香菜。');
 
     expect(db.creates.map((row) => row.content)).toEqual(['记住我不吃香菜']);
+  });
+
+  it('审核模型点名推翻旧说法：字面完全不像的改口也走演化，不留两条互相冲突的现行', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.readRows = [memoryRow({ id: 'mem-run', type: 'preference', content: '我现在每天早上跑步三公里' })];
+    db.aiReviewed = [{ text: '改成每天游泳了', type: 'preference', supersedesId: 'mem-run' }];
+
+    await write('其实我不跑步了，改成每天游泳了。');
+
+    expect(db.revises).toHaveLength(1);
+    expect(db.revises[0]).toMatchObject({ previousId: 'mem-run', content: '改成每天游泳了', type: 'preference' });
+    expect(db.creates).toEqual([]);
+  });
+
+  it('审核模型指了一个不存在的 id：不认，照旧走词面近重复那条路', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.readRows = [memoryRow({ id: 'mem-run', type: 'preference', content: '我现在每天早上跑步三公里' })];
+    db.aiReviewed = [{ text: '改成每天游泳了', type: 'preference', supersedesId: 'mem-ghost' }];
+
+    await write('其实我不跑步了，改成每天游泳了。');
+
+    expect(db.revises).toEqual([]);
+    expect(db.creates.map((row) => row.content)).toEqual(['改成每天游泳了']);
+  });
+
+  it('开了审核就把活跃记忆读一次给模型指认，且复用那次读、不再读第二遍', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [{ text: '我住在杭州', type: 'fact' }];
+
+    await write('我搬到杭州住了。');
+
+    const listReads = db.listFilters.filter((call) => (call as { filters?: { includeSuperseded?: boolean } }).filters?.includeSuperseded).length;
+    expect(listReads).toBe(1);
   });
 });
 
