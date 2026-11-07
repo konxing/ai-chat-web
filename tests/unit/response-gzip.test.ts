@@ -12,6 +12,8 @@ const gzipModule = nodeRequire('../../server-gzip.cjs') as {
 
 const BIG = '<html><body>' + 'A'.repeat(4096) + '</body></html>';
 const SMALL = '<p>tiny</p>';
+/** 单块超过 gzip 流 16KB 高水位的响应： Next 的响应泵会尊重 res.write 的返回值并等 drain。 */
+const HUGE = JSON.stringify({ text: '数'.repeat(12_000) });
 
 interface RawResponse {
   status: number;
@@ -63,6 +65,17 @@ beforeAll(async () => {
     gzipModule.attachGzip(req, res);
     const path = (req.url || '').split('?')[0];
 
+    if (path === '/bigwrite') {
+      // 模拟 Next 的响应泵：write 返回 false 就等 drain 再收尾。
+      // 旧实现把 gzip 流的背压当成套接字的背压报上去，drain 永远不来，这里会永久卡死。
+      void (async () => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        const ok = res.write(HUGE);
+        if (!ok) await new Promise<void>((resolve) => res.once('drain', resolve));
+        res.end();
+      })();
+      return;
+    }
     if (path === '/set-header') {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
@@ -208,6 +221,14 @@ describe('attachGzip', () => {
     const res = await requestRaw(port, '/flight', { acceptEncoding: 'gzip' });
     expect(res.headers['content-encoding']).toBe('gzip');
     expect(decoded(res)).toBe(BIG);
+  });
+
+  it('单块超过 16KB 的响应不会卡死尊重背压的调用方', async () => {
+    const started = Date.now();
+    const res = await requestRaw(port, '/bigwrite', { acceptEncoding: 'gzip' });
+    expect(res.headers['content-encoding']).toBe('gzip');
+    expect(decoded(res)).toBe(HUGE);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it('appends to an existing Vary instead of replacing it', async () => {

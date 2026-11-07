@@ -95,6 +95,12 @@ function attachGzip(req, res) {
   let stream = null;
   let closed = false;
   let headFrozen = false;
+  // 套接字最后一次写入是否还有余量。res.write 的返回值必须报告**套接字**的背压，
+  // 而不是 gzip 流的：调用方（Next 的响应泵）拿到 false 就会等 res 的 'drain'，
+  // 而 Node 只在它自己的写入返回过 false 时才发 'drain'——报 gzip 的 false 等于
+  // 让调用方等一个永远不会来的事件：大于 16KB 的单块响应会永久卡住（线上真故障：
+  // 一条 21.6KB 的会话详情 JSON 让整个会话点不开）。
+  let socketOk = true;
   const finishers = [];
 
   function compressible(explicit, status) {
@@ -129,7 +135,8 @@ function attachGzip(req, res) {
 
     stream = zlib.createGzip({ level: LEVEL });
     stream.on('data', (chunk) => {
-      if (!rawWrite(chunk)) stream.pause();
+      socketOk = rawWrite(chunk);
+      if (!socketOk) stream.pause();
     });
     stream.on('error', () => {
       stream = null;
@@ -140,6 +147,7 @@ function attachGzip(req, res) {
       rawEnd();
     });
     res.on('drain', () => {
+      socketOk = true;
       if (stream) stream.resume();
     });
   }
@@ -184,7 +192,10 @@ function attachGzip(req, res) {
 
     if (decide({}, res.statusCode) !== 'gzip') return rawWrite.apply(res, args);
     ensureStream();
-    return stream.write(chunk, encoding, callback);
+    // 返回值只反映套接字余量（见 socketOk 的注释）；gzip 自己的背压由 pause/resume 内部消化。
+    // 返回值只反映套接字余量（见 socketOk 的注释）；gzip 自己的背压由 pause/resume 内部消化。
+    stream.write(chunk, encoding, callback);
+    return socketOk;
   };
 
   res.end = function patchedEnd() {
