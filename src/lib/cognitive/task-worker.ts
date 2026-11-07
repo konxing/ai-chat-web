@@ -194,8 +194,9 @@ async function settleTask(task: CognitiveTask): Promise<void> {
     });
     return;
   }
-  // 只要有一个模块是超时，这一轮就整条判死：我们不知道它到底写没写进去，
-  // 而重跑正是「同一句话记两条」的来源。宁可留下一行可查的 DEAD。
+  // 只要有一个模块是超时，这一轮就整条判死：runCognitiveWrites 会等到超时模块真正落地才返回，
+  // 但「它最后到底是写成了还是写了一半」从这里已经分不清，而重跑正是「同一句话记两条」的来源。
+  // 宁可留下一行可查的 DEAD。
   if (outcome.failed.some((failure) => failure.reason === 'timeout')) {
     await killCognitiveTask(task, COGNITIVE_WORKER_ID, 'MODULE_TIMEOUT');
     log.warn('cognitive.task_timeout', { taskId: task.id, userId: task.userId });

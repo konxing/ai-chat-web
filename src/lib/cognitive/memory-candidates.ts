@@ -9,13 +9,18 @@ import { exclusionHash, recordExclusions, type ExclusionSource } from './exclusi
 import { policyLearningEnabled, recordPolicySignal } from './policy-learner';
 import {
   MEMORY_LIST_MAX_ROWS,
+  attachMemoryVector,
   createMemoryInTx,
   fromDbTimePrecision,
+  listMemories,
   toDbTimePrecision,
   validateMemoryContent,
   type MemoryDto,
   type TimePrecision
 } from './memories';
+import { embedMemoryText } from './embedding';
+import { recordTopicRelations } from './relations';
+import { getCognitivePreferences } from './preferences';
 import {
   fromDbMemoryContext,
   fromDbMemoryType,
@@ -267,13 +272,16 @@ export async function confirmCandidate(id: string, userId: string): Promise<Memo
   const row = await readPending(userId, id);
   const content = decryptCognitiveString(row.contentCiphertext, contentAad(row.userId, row.id));
   const decidedAt = new Date();
-  return prisma.$transaction(async (tx) => {
+  // 同主题边的匹配池：和 writeMemory 同一个口径（当前有效版本），在事务外取。
+  const context = fromDbMemoryContext(row.context);
+  const existing = await listMemories(userId);
+  const memory = await prisma.$transaction(async (tx) => {
     const stamped = await claim(tx, userId, id, 'confirmed', decidedAt);
     if (stamped.count === 0) throw new ApiError(409, 'CANDIDATE_DECIDED', '这条候选已经处理过了');
-    return createMemoryInTx(tx, {
+    const created = await createMemoryInTx(tx, {
       userId,
       type: fromDbMemoryType(row.type),
-      context: fromDbMemoryContext(row.context),
+      context,
       content,
       origin: 'userConfirmed',
       confirmedAt: decidedAt,
@@ -282,7 +290,29 @@ export async function confirmCandidate(id: string, userId: string): Promise<Memo
       chatId: row.chatId,
       sourceMessageId: row.sourceMessageId
     });
+    // 用户点「记住」进来的记忆和自动写入的必须是同一形态：没有同主题边，它在记忆网络里
+    // 永远孤立；没有向量，它永远走不了混合召回。两条都和 writeMemory 同事务/同事后口径。
+    await recordTopicRelations(tx, {
+      userId,
+      memoryId: created.id,
+      content,
+      context,
+      sourceMessageId: row.sourceMessageId,
+      existing: existing.map((item) => ({ id: item.id, content: item.content, context: item.context }))
+    });
+    return created;
   });
+  // 向量在事务外补，成败不回滚「已确认」：和 writeMemory 的 attachVectors 同一立场。
+  // 关着图关联时不补——那是「关闭后不执行对应写入」的口径。
+  if ((await getCognitivePreferences(userId)).associationEnabled) {
+    try {
+      const stored = await embedMemoryText(userId, memory.id, content);
+      await attachMemoryVector(userId, memory.id, stored);
+    } catch {
+      log.warn('cognitive.embedding_failed', { userId, memoryId: memory.id });
+    }
+  }
+  return memory;
 }
 
 /**

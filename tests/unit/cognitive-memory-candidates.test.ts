@@ -54,6 +54,7 @@ const candidates = () =>
 const memoryItems = () =>
   table('memoryItem', { defaults: () => ({ recordedAt: new Date(), version: 1, supersededAt: null, archivedAt: null }) });
 const evidence = () => table('memoryEvidence');
+const relations = () => table('memoryRelation');
 const signals = () => table('memoryPolicySignal');
 /**
  * 偏好表：拒绝要顺手记一条学习证据，而记不记由第八个开关（`adaptiveMemoryEnabled`）说了算。
@@ -76,11 +77,22 @@ vi.mock('@/lib/prisma', () => {
     memoryCandidate: candidates(),
     memoryItem: memoryItems(),
     memoryEvidence: evidence(),
+    memoryRelation: relations(),
     memoryPolicySignal: signals(),
     cognitivePreference: preferences()
   };
   return { prisma: { ...tx, $transaction: (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx) } };
 });
+
+/** 向量出站换成探针：确认链路只断「有没有去算、算完挂没挂回行上」，不算真向量。 */
+const embeddingCalls = vi.hoisted(() => ({ embeds: [] as Array<{ userId: string; memoryId: string; text: string }> }));
+
+vi.mock('@/lib/cognitive/embedding', () => ({
+  embedMemoryText: (userId: string, memoryId: string, text: string) => {
+    embeddingCalls.embeds.push({ userId, memoryId, text });
+    return Promise.resolve({ ciphertext: Buffer.from('vector'), model: 'test-model' });
+  }
+}));
 
 async function service() {
   return await import('@/lib/cognitive/memory-candidates');
@@ -132,6 +144,7 @@ function seedCandidate(overrides: Row): Row {
 
 beforeEach(async () => {
   await service();
+  embeddingCalls.embeds = [];
   for (const current of tables.values()) current.rows.clear();
 });
 
@@ -224,6 +237,56 @@ describe('待确认候选（任务书 1.2 的 ASK_CONFIRM）', () => {
     // 记忆行自带一条支持证据：用户确认过这件事，就是这条记忆目前唯一的凭据。
     const rows = await evidence().findMany({ where: { memoryId: memory.id } });
     expect(rows.map((r) => r.kind)).toEqual(['SUPPORTS']);
+  });
+
+  /**
+   * 确认进来的记忆和自动写入的必须是同一形态：用户点「记住」的那句以前只落一行记忆——
+   * 没有同主题边，它在记忆网络里永远孤立；没有向量，它永远走不了混合召回。
+   * 边和 writeMemory 同一事务口径，向量同一「事务后补、成败不回滚」口径。
+   */
+  it('确认：同主题边同事务写、向量事务后补，和自动写入同一形态', async () => {
+    const memoryAad = (userId: string, id: string) => `memory:v1:${userId}:${id}`;
+    memoryItems().seed({
+      id: 'mem-old',
+      userId: USER,
+      chatId: 'chat-1',
+      sourceMessageId: 'msg-0',
+      type: 'PREFERENCE',
+      context: 'PERSONAL_GOAL',
+      origin: 'EXPLICIT',
+      contentCiphertext: encryptString('我想换个工作方向', memoryAad(USER, 'mem-old')),
+      embeddingCiphertext: null,
+      embeddingModel: null,
+      confirmedAt: new Date(),
+      version: 1,
+      supersededAt: null,
+      archivedAt: null,
+      validFrom: null,
+      validTo: null,
+      validPrecision: 'UNKNOWN',
+      recordedAt: new Date('2026-11-01T09:00:00.000Z')
+    });
+    seedCandidate({ id: 'cand-1', content: '我最近在想要不要换个工作方向' });
+    // 图关联开着，向量那一支才该被触发；关着时连出站请求都不发。
+    preferences().seed({ userId: USER, associationEnabled: true });
+    const { confirmCandidate } = await service();
+
+    const memory = await confirmCandidate('cand-1', USER);
+
+    const edges = [...relations().rows.values()];
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({
+      userId: USER,
+      sourceMemoryId: memory.id,
+      targetMemoryId: 'mem-old',
+      relationType: 'SAME_TOPIC',
+      status: 'ACTIVE'
+    });
+    expect(embeddingCalls.embeds).toEqual([
+      { userId: USER, memoryId: memory.id, text: '我最近在想要不要换个工作方向' }
+    ]);
+    const stored = memoryItems().rows.get(memory.id) as Row;
+    expect(stored.embeddingModel).toBe('test-model');
   });
 
   it('拒绝：候选变 REJECTED、不产生记忆，并给这个情境记一条学习信号', async () => {

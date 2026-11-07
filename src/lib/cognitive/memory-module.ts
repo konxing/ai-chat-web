@@ -101,8 +101,6 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     emotionEnabled: turn.emotionEnabled,
     limit: preference.memoryReadLimit
   });
-  // 只给要注入的这几条算分：一批一次 groupBy，不是每条各查一次。
-  const confidence = await assessMemories(turn.userId, memories, now);
   // 关联扩展是 associationEnabled 的运行时读者：关着时连关系表都不问。
   // 扩展目标只从这一轮已经取回的可见池里出，所以不会把失效行捞回上下文。
   let related: RelatedMemoryHit[] = [];
@@ -118,6 +116,13 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
       emotionTransparency
     });
   }
+  // 种子和关联扩展一起算分：一条记忆作种子注入时带着低可信度标注，被关系边捞进来时
+  // 也必须带——不然低凭据记忆可以稳定地以「相关记忆」身份绕过标注（任务书 3.3）。
+  const confidence = await assessMemories(
+    turn.userId,
+    [...memories, ...related.map((hit) => hit.memory)],
+    now
+  );
   return renderMemoryBlock(memories, confidence, emotionTransparency, related);
 }
 
@@ -223,11 +228,12 @@ export function renderMemoryBlock(
     const line =
       `- [${TYPE_LABELS[memory.type]}｜${CONTEXT_LABELS[memory.context]}｜${ORIGIN_LABELS[memory.origin]}] ` +
       `${memory.content}${suffix}${marker}`;
-    if (size + line.length > MEMORY_READ_MAX_CHARS) break;
+    // +1 是行尾换行符：text 是 join('\n') 出来的，预算不算换行，贴边时整块实际会越界。
+    if (size + line.length + 1 > MEMORY_READ_MAX_CHARS) break;
     lines.push(line);
     used.push(memory.id);
     if (memory.type === 'emotion') emotionUsed += 1;
-    size += line.length;
+    size += line.length + 1;
   }
   if (lines.length === 0) return [];
   // 关联扩展的条目和正文共用同一个字符预算：任务书 3.2 的 1500 是整块上下文，
@@ -239,12 +245,14 @@ export function renderMemoryBlock(
       const relatedLines: string[] = [];
       let relatedSize = size + header.length + 1;
       for (const hit of related) {
+        // 关联行同样吃可信度标注：由关系边捞进来的低凭据记忆不得在提示词里光秃秃出现。
+        const marker = (confidence.get(hit.memory.id)?.band ?? 'low') === 'low' ? LOW_CONFIDENCE_MARKER : '';
         const line =
           `- [相关｜${RELATION_TYPE_LABELS[hit.relationType]}｜${hit.hop} 跳] ` +
-          `${hit.memory.content}（由「${hit.viaSnippet}」关联）`;
-        if (relatedSize + line.length > MEMORY_READ_MAX_CHARS) break;
+          `${hit.memory.content}（由「${hit.viaSnippet}」关联）${marker}`;
+        if (relatedSize + line.length + 1 > MEMORY_READ_MAX_CHARS) break;
         relatedLines.push(line);
-        relatedSize += line.length;
+        relatedSize += line.length + 1;
         relatedUsed.push(hit.memory.id);
       }
       if (relatedLines.length > 0) lines.push(header, ...relatedLines);
@@ -280,10 +288,11 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 这一轮没什么可记的时候，不必为了一张空表多问一次数据库。
   const excluded = await excludedHashes(turn.userId);
   const policies = await getMemoryPolicies(turn.userId);
-  // listMemories 只给当前有效版本、按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。
-  // 这里不按保留期过滤：过期只是「不再进对话」，行还在库里，用户改口就该落在那一行上；
-  // 把过期行剔出匹配池只会让同一件事多存一条。
-  const existing = await listMemories(turn.userId);
+  // 按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。这里不按保留期过滤：过期只是
+  // 「不再进对话」，行还在库里，用户改口就该落在那一行上；把过期行剔出匹配池只会让同一件事多存一条。
+  // includeSuperseded 同理：用户改口后旧版本被取代，但他哪天原话重说一遍时，旧版本必须还在
+  // 匹配池里，known 表才拦得住——否则近重复检测又会跳过完全同句，同一句话落成第二条当前版本。
+  const existing = await listMemories(turn.userId, { includeSuperseded: true });
   // 键是归一化后的正文，值记着 id 和来源对话：判断「换个对话又原话说了一遍」得知道旧那条是哪来的。
   const known = new Map(
     existing.map((memory) => [dedupeKey(memory.content), { id: memory.id, chatId: memory.chatId }])
@@ -329,7 +338,8 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
     // 「先问再记」问出来的是一句**还没被用户答应**的话，所以它不写记忆行、也不进向量：
     // 它进的是另一张表。这里断了才是错的——那句话会凭空消失，用户的策略空转（片M 修的就是这个）。
     if (plan.decision === 'ASK_CONFIRM') {
-      if (proposed >= MEMORY_WRITE_MAX_PER_TURN) break;
+      // 超额的「先问再记」逐条跳过就行：break 会连后面本该 WRITE 落库的候选一起丢掉。
+      if (proposed >= MEMORY_WRITE_MAX_PER_TURN) continue;
       await proposeCandidate({
         userId: turn.userId,
         chatId: turn.chatId,

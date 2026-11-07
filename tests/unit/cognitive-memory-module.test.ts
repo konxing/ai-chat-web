@@ -153,9 +153,11 @@ import {
   MEMORY_READ_MAX_CHARS,
   MEMORY_RETRIEVAL_POOL,
   MEMORY_READ_MAX_ITEMS,
-  MEMORY_WRITE_MAX_PER_TURN
+  MEMORY_WRITE_MAX_PER_TURN,
+  renderMemoryBlock
 } from '@/lib/cognitive/memory-module';
 import { runCognitiveReads } from '@/lib/cognitive/manager';
+import type { MemoryDto } from '@/lib/cognitive/memories';
 
 const TURN = { userId: 'user-a', chatId: 'chat-1', content: '', sourceMessageId: 'msg-1' };
 const OCCURRED = new Date('2026-11-02T10:00:00.000Z');
@@ -317,18 +319,28 @@ describe('写侧：策略在服务端真的生效', () => {
   });
 
   /**
-   * 归档后再把同一句话说一遍，会落成新的第一条——这是他判的甲。
-   * 这里钉的是「写侧用的是默认口径」：归档的排除发生在服务层，
-   * 只要写侧不自己放宽过滤，那条排除就自动生效。证据薄，钉的是调用形状。
+   * 归档的行仍由服务层默认口径排除，写侧不自己放宽；但被取代的旧版本必须留在匹配池里——
+   * 用户改口（我住北京 → 我住上海）后再原话重说「我住北京」，known 表靠旧行拦得住，
+   * 缺了它同一句话会落成第二条当前版本，两条互相冲突。
    */
-  it('写侧读的是默认口径那一份，不自己把归档的行捞回匹配池', async () => {
+  it('写侧的匹配池带被取代的旧版本，但不捞归档行', async () => {
     db.memoryEnabled = true;
 
     await write('我在用 Prisma。');
 
     const call = db.listFilters[db.listFilters.length - 1] as { userId: string; filters?: unknown };
     expect(call.userId).toBe('user-a');
-    expect(call.filters).toBeUndefined();
+    expect(call.filters).toEqual({ includeSuperseded: true });
+  });
+
+  it('被取代的旧版本仍拦住原话重说：不会落成第二条当前版本', async () => {
+    db.memoryEnabled = true;
+    // 模拟 includeSuperseded 的真实返回：这行已被「我住上海」取代，但正文还在池子里。
+    db.readRows = [memoryRow({ id: 'mem-old', content: '我住北京', chatId: 'chat-9' })];
+
+    await write('我住北京。');
+
+    expect(db.creates).toEqual([]);
   });
 
   it('一轮里最多落两条，防止一条长消息灌库', async () => {
@@ -421,6 +433,20 @@ describe('写侧：先问再记真的去问（ASK_CONFIRM → 待确认候选）
 
     expect(db.creates).toHaveLength(1);
     expect(db.proposals).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+  });
+
+  /**
+   * 问过两条之后的 break 会把排在后面的 WRITE 候选一起丢掉：用户先说两句决策话、
+   * 再说一句普通事实，那句事实曾经静默消失。挤掉的只能是超额的问句本身。
+   */
+  it('问过两条之后，排在后面的可写候选照常落库', async () => {
+    db.memoryEnabled = true;
+
+    await write('我决定辞职。我定了要不要换房。我在用 Prisma。');
+
+    expect(db.proposals).toHaveLength(MEMORY_WRITE_MAX_PER_TURN);
+    expect(db.creates).toHaveLength(1);
+    expect(db.creates[0]).toMatchObject({ content: '我在用 Prisma' });
   });
 
   it('用户没设「先问」的情境照常落库，候选表一个都不写', async () => {
@@ -724,6 +750,43 @@ describe('读侧：记忆作为数据进提示词', () => {
     expect(block?.text).toContain('相关记忆');
     expect(block?.text).toContain('上次爬山也带了相机');
     expect(block?.memoryIds).toContain('hop-1');
+  });
+
+  it('关联扩展行进提示词时也吃可信度标注：由关系边捞进来的低凭据记忆不得光秃秃出现', async () => {
+    db.memoryEnabled = true;
+    db.associationEnabled = true;
+    db.band = 'low';
+    db.readRows = [memoryRow()];
+    db.expandHits = [
+      {
+        memory: memoryRow({ id: 'hop-1', content: '上次爬山也带了相机' }),
+        hop: 1,
+        relationType: 'SAME_TOPIC',
+        viaMemoryId: 'mem-1',
+        viaSnippet: '我在用 Prisma'
+      }
+    ];
+
+    const [block] = await memoryModule.read({ ...TURN, content: '在吗' });
+
+    const relatedLine = (block?.text ?? '').split('\n').find((line) => line.includes('上次爬山也带了相机'));
+    expect(relatedLine).toContain('可信度低');
+  });
+
+  it('字符预算把换行符也算进去：贴边时整块不越 MEMORY_READ_MAX_CHARS', () => {
+    const confidenceOf = (band: 'low' | 'medium' | 'high') =>
+      new Map([['mem-1', { score: 0.6, band, factors: [] }]]) as never;
+    // 用探针块反推出表头和行前缀的真实长度，不硬编码标签文案。
+    const probe = renderMemoryBlock([memoryRow({ content: '甲' }) as MemoryDto], confidenceOf('high'))[0].text;
+    const [header, probeLine] = probe.split('\n');
+    const prefix = probeLine.slice(0, -'甲'.length);
+    const atEdge = MEMORY_READ_MAX_CHARS - header.length - prefix.length;
+
+    // 正文恰好顶到「不含换行」的旧预算：旧实现放行、整块实际 1501 字；现在这一条必须丢。
+    expect(renderMemoryBlock([memoryRow({ content: '字'.repeat(atEdge) }) as MemoryDto], confidenceOf('high'))).toEqual([]);
+    // 短一个字符则放行，且整块（含换行）刚好不越预算。
+    const fits = renderMemoryBlock([memoryRow({ content: '字'.repeat(atEdge - 1) }) as MemoryDto], confidenceOf('high'))[0].text;
+    expect(fits.length).toBeLessThanOrEqual(MEMORY_READ_MAX_CHARS);
   });
 
   it('关联开关关着时一次都不问关系表，注入块和加这一片之前一样', async () => {

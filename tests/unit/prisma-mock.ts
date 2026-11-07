@@ -114,6 +114,8 @@ export interface MockTable {
     Array<Row & { _count: { _all: number } }>
   >;
   create(args: { data: Row }): Promise<Row>;
+  /** where 就是完整唯一键（真用法：关系表 upsert）。命中改 update，没命中走 create 的唯一约束校验。 */
+  upsert(args: { where: Where; create: Row; update: Row }): Promise<Row>;
   updateMany(args: { where?: Where; data: Row }): Promise<{ count: number }>;
   deleteMany(args: { where?: Where }): Promise<{ count: number }>;
   count(args: { where?: Where }): Promise<number>;
@@ -210,6 +212,15 @@ export function createTable(options: TableOptions = {}): MockTable {
       }
       rows.set(String(row[idField]), row);
       return Promise.resolve({ ...row });
+    },
+    upsert({ where, create, update }) {
+      const existing = [...rows.values()].find((row) => matches(row, where));
+      if (existing) {
+        for (const [field, value] of Object.entries(update)) existing[field] = value;
+        existing.updatedAt = stamp();
+        return Promise.resolve({ ...existing });
+      }
+      return table.create({ data: create });
     },
     updateMany({ where, data }) {
       const targets = [...rows.values()].filter((row) => matches(row, where));

@@ -238,15 +238,21 @@ describe('认知模块的写侧', () => {
     expect(db.warns).toEqual([]);
   });
 
-  it('写侧的截止由调用方给：后台任务等得起，读侧仍然卡一秒就放弃', async () => {
+  it('写侧判超时后仍等模块落地：去重靠同用户串行，放走了就记重；读侧仍然卡一秒就放弃', async () => {
     const manager = await loadManager();
     vi.useFakeTimers();
     try {
       db.row = { memoryEnabled: true, emotionEnabled: true };
+      let finishWrite: (() => void) | undefined;
       manager.registerCognitiveModule({
         key: 'memory',
         read: () => Promise.resolve([]),
-        write: () => new Promise(() => undefined)
+        // 模块没有在 20 秒内落地——但它**终究会**落地。写侧的 timeout 只是提前记账，
+        // 返回必须等模块真写完，否则下一个同用户任务领走时这次写入还在半路，两句话会记成两条。
+        write: () =>
+          new Promise<void>((resolve) => {
+            finishWrite = resolve;
+          })
       });
       manager.registerCognitiveModule({ key: 'emotion', read: () => new Promise(() => undefined) });
 
@@ -256,14 +262,17 @@ describe('认知模块的写侧', () => {
       await vi.advanceTimersByTimeAsync(1_500);
       expect(await reads).toMatchObject({ failed: ['emotion'] });
 
+      // 20 秒到点：超时已经记账，但模块还压着没落地，写侧不许返回。
+      await vi.advanceTimersByTimeAsync(19_000);
       let writeDone = false;
       void writes.then(() => {
         writeDone = true;
       });
-      await vi.advanceTimersByTimeAsync(18_000);
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(writeDone).toBe(false);
 
-      await vi.advanceTimersByTimeAsync(2_000);
+      // 模块落地，写侧这才带着 timeout 失败返回。
+      finishWrite!();
       await expect(writes).resolves.toMatchObject({ failed: [{ module: 'memory', reason: 'timeout' }] });
     } finally {
       vi.useRealTimers();

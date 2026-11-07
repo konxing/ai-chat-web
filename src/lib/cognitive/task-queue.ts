@@ -167,10 +167,12 @@ export async function killCognitiveTask(task: CognitiveTask, workerId: string, e
  */
 export async function cancelCognitiveTasks(
   tx: Prisma.TransactionClient,
-  filter: { userId: string; chatId?: string }
+  filter: { userId: string; chatId?: string; sourceMessageId?: string }
 ): Promise<number> {
   const where: Prisma.CognitiveTaskWhereInput = { userId: filter.userId };
   if (filter.chatId) where.chatId = filter.chatId;
+  // 「忘掉这一条」用：只撤产出这条记忆的那条消息欠的活，别动同一会话里别的记忆线索。
+  if (filter.sourceMessageId) where.sourceMessageId = filter.sourceMessageId;
   const { count } = await tx.cognitiveTask.deleteMany({ where });
   return count;
 }

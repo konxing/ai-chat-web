@@ -338,9 +338,9 @@ function task(id: string, overrides: Row = {}): Row {
 }
 
 describe('删除要连带撤掉还没跑的欠账', () => {
-  it('删一条记忆 ⇒ 它来源那次对话的欠账一起撤，且在同一个事务里', async () => {
-    db.rows.set('mem-1', row('mem-1'));
-    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' })];
+  it('删一条记忆 ⇒ 它来源那条消息欠的账一起撤，且在同一个事务里', async () => {
+    db.rows.set('mem-1', row('mem-1', { sourceMessageId: 'msg-1' }));
+    db.tasks = [task('task-1'), task('task-2', { sourceMessageId: 'msg-2' })];
     const { purgeMemory } = await forgetting();
 
     await purgeMemory('mem-1', USER);
@@ -350,9 +350,19 @@ describe('删除要连带撤掉还没跑的欠账', () => {
     expect(db.tasks.map((row) => row.id)).toEqual(['task-2']);
   });
 
-  it('别人那次对话的欠账一条都不动（同 chatId 也不行，得连 userId 一起对）', async () => {
-    db.rows.set('mem-1', row('mem-1'));
-    db.tasks = [task('task-other', { userId: OTHER })];
+  it('同一次对话、但不是这条记忆来源的那条消息欠的账不动：忘掉一条不殃及别的记忆线索', async () => {
+    db.rows.set('mem-1', row('mem-1', { sourceMessageId: 'msg-1' }));
+    db.tasks = [task('task-1'), task('task-same-chat', { sourceMessageId: 'msg-2' })];
+    const { purgeMemory } = await forgetting();
+
+    await purgeMemory('mem-1', USER);
+
+    expect(db.tasks.map((row) => row.id)).toEqual(['task-same-chat']);
+  });
+
+  it('别人欠的账一条都不动（同 sourceMessageId 也不行，得连 userId 一起对）', async () => {
+    db.rows.set('mem-1', row('mem-1', { sourceMessageId: 'msg-1' }));
+    db.tasks = [task('task-other', { userId: OTHER, sourceMessageId: 'msg-1' })];
     const { purgeMemory } = await forgetting();
 
     await purgeMemory('mem-1', USER);
@@ -360,9 +370,9 @@ describe('删除要连带撤掉还没跑的欠账', () => {
     expect(db.tasks.map((row) => row.id)).toEqual(['task-other']);
   });
 
-  it('记忆不是从对话里来的（chatId 为空）⇒ 什么都不撤：不带 chatId 是按用户全撤', async () => {
-    db.rows.set('mem-1', row('mem-1', { chatId: null }));
-    db.tasks = [task('task-1'), task('task-2', { chatId: 'chat-2', sourceMessageId: 'msg-2' })];
+  it('记忆不是从消息里来的（来源消息为空）⇒ 什么都不撤：手工录入的行没有欠账可撤', async () => {
+    db.rows.set('mem-1', row('mem-1', { sourceMessageId: null }));
+    db.tasks = [task('task-1'), task('task-2', { sourceMessageId: 'msg-2' })];
     const { purgeMemory } = await forgetting();
 
     await purgeMemory('mem-1', USER);

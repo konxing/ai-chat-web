@@ -131,7 +131,10 @@ export async function runCognitiveWrites(
     (module) => module.write && preferences[MODULE_SWITCH[module.key]] === true
   );
   const failed: CognitiveWriteFailure[] = [];
-  for (const outcome of await settleAll(enabled, (module) => module.write!(turn), deadlineMs)) {
+  // 第三个参数 true：写侧判超时后仍等模块真正落地再返回。worker 靠「上一轮写完才领下一轮」
+  // 保证同一用户的去重快照不并发——超时只是提前记账，模块的写还在后台跑，
+  // 这时放行下一轮，两个任务各快照一次「没见过」，同一句话会记成两条。
+  for (const outcome of await settleAll(enabled, (module) => module.write!(turn), deadlineMs, true)) {
     if (outcome.status !== 'ok') {
       failed.push({ module: outcome.module.key, reason: outcome.reason });
       log.warn('cognitive.write_failed', { module: outcome.module.key, userId: turn.userId, reason: outcome.reason });
@@ -162,9 +165,10 @@ type Outcome<T> =
 function settleAll<T>(
   modules: CognitiveModule[],
   run: (module: CognitiveModule) => Promise<T>,
-  deadlineMs: number
+  deadlineMs: number,
+  waitAfterTimeout = false
 ): Promise<Array<Outcome<T>>> {
-  return Promise.all(modules.map((module) => settle(module, () => run(module), deadlineMs)));
+  return Promise.all(modules.map((module) => settle(module, () => run(module), deadlineMs, waitAfterTimeout)));
 }
 
 /**
@@ -172,7 +176,12 @@ function settleAll<T>(
  * 提前求值会让整条 settleAll 直接抛出来。以前外面还有一层 fire-and-forget 兜住，
  * 现在调用方是 await 它的 worker，这条洞得在这儿补。
  */
-async function settle<T>(module: CognitiveModule, run: () => Promise<T>, deadlineMs: number): Promise<Outcome<T>> {
+async function settle<T>(
+  module: CognitiveModule,
+  run: () => Promise<T>,
+  deadlineMs: number,
+  waitAfterTimeout = false
+): Promise<Outcome<T>> {
   let task: Promise<T>;
   try {
     task = run();
@@ -190,7 +199,12 @@ async function settle<T>(module: CognitiveModule, run: () => Promise<T>, deadlin
   );
   try {
     const result = await Promise.race([settled, deadline]);
-    if (result === 'timeout') return { status: 'failed', module, reason: 'timeout' };
+    if (result === 'timeout') {
+      // 写侧（waitAfterTimeout）在这里等模块真写完：去重靠同用户串行，放走了就记重。
+      // 读侧不能等——那一秒卡的是对话本身，模块爱跑多久跑多久，结果丢掉即可。
+      if (waitAfterTimeout) await settled;
+      return { status: 'failed', module, reason: 'timeout' };
+    }
     return result.status === 'ok'
       ? { status: 'ok', module, value: result.value }
       : { status: 'failed', module, reason: result.reason };

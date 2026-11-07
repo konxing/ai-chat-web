@@ -235,9 +235,12 @@ export async function purgeMemory(memoryId: string, userId: string): Promise<Pur
     // 记忆没了，它留下的检索痕迹也跟着走（任务书 7.1 那张表）。按**被删的这批 id** 清，
     // 不按会话清：那张表上没有会话列，而「这一轮检索发生在哪次对话」和这里的来源会话本来也不是同一件事。
     await deleteAccessForMemories(tx, userId, ids);
-    // 来源那次对话还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
-    // 挡不住换个说法的那一句。没有来源对话的记忆不去动别人的队列。
-    if (head.chatId) await cancelCognitiveTasks(tx, { userId, chatId: head.chatId });
+    // 来源那条消息还欠着的活也一起撤：排除规则挡得住「同一句原话再记一遍」，
+    // 挡不住换个说法的那一句。只撤到来源消息为止——同一会话里别的记忆线索欠的活不归这一条管；
+    // 「忘记这次对话」整会话撤账是 purgeMemoriesByChat 的口径。手工录入的记忆没有来源消息，不撤账。
+    if (head.sourceMessageId) {
+      await cancelCognitiveTasks(tx, { userId, sourceMessageId: head.sourceMessageId });
+    }
     // 一次删除按情境各记一条证据，不是按行数：用户点的是一个按钮，
     // 一版接一版的同一件事更不该被数成「他反复表达了五次这个意思」。
     for (const context of contexts) if (recordSignals) await recordPolicySignal(tx, userId, context);
