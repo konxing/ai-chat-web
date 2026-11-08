@@ -35,6 +35,8 @@ const db = vi.hoisted(() => ({
   aiFallbackReviewed: null as null | Array<{ text: string; type: string; supersedesId?: string }>,
   reviewCalls: 0,
   reviewProviders: [] as string[],
+  sourceExcerpts: [] as Array<{ messageId: string; chatId: string | null; chatTitle: string | null; text: string }>,
+  sourceDiveCalls: [] as Array<{ userId: string; ids: string[] }>,
   expandCalls: [] as unknown[],
   expandHits: [] as Array<Record<string, unknown>>,
   policyCalls: 0
@@ -93,6 +95,19 @@ vi.mock('@/lib/cognitive/memories', async (importOriginal) => {
         .slice(0, filters?.take)
         .map((row) => ({ ...row, userId }));
       return Promise.resolve(rows);
+    }
+  };
+});
+
+vi.mock('@/lib/cognitive/memory-source-dive', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cognitive/memory-source-dive')>();
+  return {
+    ...actual,
+    // 措辞判定、挑 id、预算截断都是纯函数，用真实现；只有「按 id 取原文」这一步换成探针，
+    // 这样测到的就是「追问细节时确实去取、取到的确实进了第二个块」。
+    fetchSourceExcerpts: (userId: string, ids: string[]) => {
+      db.sourceDiveCalls.push({ userId, ids });
+      return Promise.resolve(db.sourceExcerpts);
     }
   };
 });
@@ -254,6 +269,8 @@ beforeEach(() => {
   db.aiFallbackReviewed = null;
   db.reviewCalls = 0;
   db.reviewProviders = [];
+  db.sourceExcerpts = [];
+  db.sourceDiveCalls = [];
   db.expandCalls = [];
   db.expandHits = [];
 });
@@ -1520,5 +1537,70 @@ describe('读侧：按需召回路由（Phase 4）', () => {
 
     expect(db.listFilters.length).toBeGreaterThan(0);
     expect(blocks[0]?.text).toContain('黑咖啡');
+  });
+});
+
+describe('读侧：追问细节时溯源到原始对话', () => {
+  it('措辞要细节时，把命中记忆指向的原始陈述取回来作为第二块注入', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [
+      memoryRow({
+        content: '我要培养的 8 项核心能力：问题发现、系统思维、科学验证…',
+        type: 'goal',
+        sourceMessageId: 'msg-src-1'
+      })
+    ];
+    db.sourceExcerpts = [
+      {
+        messageId: 'msg-src-1',
+        chatId: 'chat-1',
+        chatTitle: '个人能力培养体系',
+        text: '原始全文：1. 问题发现能力……2. 系统思维能力……'
+      }
+    ];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '这 24 个习惯具体是什么？' });
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks[1].text).toContain('原始陈述');
+    expect(blocks[1].text).toContain('来自《个人能力培养体系》');
+    expect(blocks[1].text).toContain('2. 系统思维能力');
+    expect(db.sourceDiveCalls[0]?.ids).toEqual(['msg-src-1']);
+  });
+
+  it('普通提问不触发溯源：不多读一次消息表', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我的长期目标是培养能力体系', type: 'goal', sourceMessageId: 'msg-src-1' })];
+    db.sourceExcerpts = [
+      { messageId: 'msg-src-1', chatId: 'chat-1', chatTitle: '体系', text: '原始全文' }
+    ];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '我的长期目标是什么？' });
+
+    expect(blocks).toHaveLength(1);
+    expect(db.sourceDiveCalls).toEqual([]);
+  });
+
+  it('命中记忆没有来源时不溯源：没有可去的地方', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我喜欢喝黑咖啡', sourceMessageId: null })];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '我喜欢喝黑咖啡，具体是哪种？' });
+
+    expect(blocks).toHaveLength(1);
+    expect(db.sourceDiveCalls).toEqual([]);
+  });
+
+  it('取源失败不影响记忆块本身：溯源是增益，不是前置条件', async () => {
+    db.memoryEnabled = true;
+    db.readRows = [memoryRow({ content: '我的长期目标是培养能力体系', type: 'goal', sourceMessageId: 'msg-src-1' })];
+    db.sourceExcerpts = [];
+    db.sourceDiveCalls = [];
+
+    const blocks = await memoryModule.read({ ...TURN, content: '详细说说我的长期目标' });
+
+    // 取回空列表 = 没有可注入的原文，记忆块照常只有一块。
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].text).toContain('长期目标');
   });
 });

@@ -123,6 +123,7 @@
 | `src/lib/cognitive/task-worker.ts` | 进程内轮询执行器：重建这一轮、跑写侧、收口；由 `instrumentation.ts` 拉起 |
 | `src/lib/cognitive/memories.ts` / `retrieval.ts` | 记忆读写、双时间有效性、关键词召回与上下文注入 |
 | `src/lib/cognitive/retrieval-router.ts` | 按需召回路由（Phase 4，默认开）：纯知识/翻译/数学问题判 none、读侧连记忆池都不读；涉及「我」的召回，综合分析判 complex；拿不准保守召回 |
+| `src/lib/cognitive/memory-source-dive.ts` | 记忆溯源展开：措辞明确要细节（具体/详细/展开/有哪些…）时，按命中记忆的 `sourceMessageId` 回原始用户消息取原文，作为第二个注入块交给模型（限本人名下、去重、最多 2 条、8000 字封顶，取不到/解密失败静默跳过，不拖垮记忆块）。普通轮次一条都不多读 |
 | `src/lib/cognitive/memory-consolidator.ts` | 后台巩固（Phase 3，默认关）：同 type+context 高相似度冗余记忆聚簇，最新为主、其余可逆归档 + PART_OF 证据边 |
 | `src/lib/cognitive/memory-decay.ts` | 衰减优先级（Phase 5，默认关）：由新近度+确认+类型稳定派生，只降召回优先级不删历史。**实测降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」关闭**，env COGNITIVE_MEMORY_DECAY=1 才接进读侧 |
 | `src/lib/cognitive/memory-display.ts`（五类记忆） | 六个 `MemoryType` 之上的功能分类：情景（project/decision/emotion）、语义（fact/长期 goal）、程序（preference）、前瞻（带未来说法的 goal）；working 是会话层不入库。纯函数派生，不另存列 |

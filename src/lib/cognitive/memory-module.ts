@@ -38,6 +38,13 @@ import { proposeCandidate } from './memory-candidates';
 import { resolveTemporalFrame } from './temporal';
 import { routeMemoryRetrieval } from './retrieval-router';
 import {
+  composeSourceExcerpt,
+  fetchSourceExcerpts,
+  selectSourceMessageIds,
+  wantsSourceDive,
+  SOURCE_DIVE_HEADER
+} from './memory-source-dive';
+import {
   LOW_CONFIDENCE_MARKER,
   MEMORY_FRAMING,
   emotionTransparencyNote,
@@ -142,7 +149,30 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     [...memories, ...related.map((hit) => hit.memory)],
     now
   );
-  return renderMemoryBlock(memories, confidence, emotionTransparency, related);
+  const blocks = renderMemoryBlock(memories, confidence, emotionTransparency, related);
+
+  // 追问细节时顺藤溯源（read-side source dive）：记忆里存的是摘要，读侧整块预算才 1500 字，
+  // 「这 24 个习惯具体是什么」这种问题摘要装不下。这时按命中记忆的 sourceMessageId 回到原始
+  // 用户消息，把原文取回来作为第二块注入。只在措辞明确要细节时做，普通轮次一条都不多读；
+  // 取源失败只记一条告警，上面的记忆块照常生效（溯源是增益，不是前置条件）。
+  if (blocks.length > 0 && wantsSourceDive(turn.content)) {
+    const ids = selectSourceMessageIds(memories);
+    if (ids.length > 0) {
+      try {
+        const excerpt = composeSourceExcerpt(await fetchSourceExcerpts(turn.userId, ids));
+        if (excerpt) {
+          blocks.push({
+            module: 'memory',
+            label: '记忆出处',
+            text: `${SOURCE_DIVE_HEADER}\n${excerpt}`
+          });
+        }
+      } catch {
+        log.warn('cognitive.source_dive_failed', { userId: turn.userId, count: ids.length });
+      }
+    }
+  }
+  return blocks;
 }
 
 export interface MemorySelectionInput {
