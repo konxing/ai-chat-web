@@ -11,6 +11,8 @@ export interface SystemSettings {
   cognitiveAiMemoryEnabled: boolean;
   /** 记忆审核用的独立模型；null = 跟随默认聊天模型。DB 没配过时回落 env COGNITIVE_AI_MEMORY_PROVIDER。 */
   cognitiveExtractionProviderId: string | null;
+  /** 会话结束总结开关：对话闲置够久后把这一场记忆碎片收拢成要点，并与其它记忆查重。 */
+  cognitiveSessionSummaryEnabled: boolean;
 }
 
 const DEFAULTS: SystemSettings = {
@@ -20,7 +22,8 @@ const DEFAULTS: SystemSettings = {
   maxUploadMB: 300,
   maintenanceNotice: '',
   cognitiveAiMemoryEnabled: false,
-  cognitiveExtractionProviderId: null
+  cognitiveExtractionProviderId: null,
+  cognitiveSessionSummaryEnabled: false
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -30,11 +33,14 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'maxUploadMB',
   'maintenanceNotice',
   'cognitiveAiMemoryEnabled',
-  'cognitiveExtractionProviderId'
+  'cognitiveExtractionProviderId',
+  'cognitiveSessionSummaryEnabled'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
-  if (key === 'registrationOpen' || key === 'cognitiveAiMemoryEnabled') return Boolean(value) as SystemSettings[K];
+  if (key === 'registrationOpen' || key === 'cognitiveAiMemoryEnabled' || key === 'cognitiveSessionSummaryEnabled') {
+    return Boolean(value) as SystemSettings[K];
+  }
   if (key === 'maxUploadMB') {
     const n = Number(value);
     return (Number.isFinite(n) && n >= 1 && n <= 320 ? Math.floor(n) : DEFAULTS.maxUploadMB) as SystemSettings[K];

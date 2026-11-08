@@ -9,6 +9,7 @@ import { ensureCognitiveModules } from './memory-module';
 import { getCognitivePreferences } from './preferences';
 import { runReflectionSweep } from './reflection-sweep';
 import { runMemoryConsolidation } from './memory-consolidator';
+import { runSessionSummarySweep } from './memory-session-summary';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -114,6 +115,9 @@ export async function runCognitiveWorkerTick(): Promise<number> {
       await runReflectionSweep(userId, { now: new Date() });
       // 巩固（Phase 3，env 默认关）：幂等——冗余条归档后下一轮就聚不出簇，不会反复动库。
       await runMemoryConsolidation(userId);
+      // 会话结束总结（默认关，后台开关控制）：对话闲置够久后把这一场的碎片收拢成要点，
+      // 并与其它已存记忆比对查重/查差别。一轮最多一场，碎片归档后条件自然不成立，不会重复。
+      await runSessionSummarySweep(userId);
     }
     return tasks.length;
   } catch {

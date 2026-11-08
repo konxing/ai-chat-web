@@ -305,6 +305,7 @@ function ConfigTab() {
   const [maintenanceNotice, setMaintenanceNotice] = useState('');
   const [cognitiveAiMemoryEnabled, setCognitiveAiMemoryEnabled] = useState(false);
   const [cognitiveExtractionProviderId, setCognitiveExtractionProviderId] = useState('');
+  const [cognitiveSessionSummaryEnabled, setCognitiveSessionSummaryEnabled] = useState(false);
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -320,6 +321,7 @@ function ConfigTab() {
           maintenanceNotice: string;
           cognitiveAiMemoryEnabled: boolean;
           cognitiveExtractionProviderId: string | null;
+          cognitiveSessionSummaryEnabled: boolean;
         };
         providers: ProviderDto[];
       }>('/api/admin/config');
@@ -330,6 +332,7 @@ function ConfigTab() {
       setMaintenanceNotice(data.settings.maintenanceNotice);
       setCognitiveAiMemoryEnabled(data.settings.cognitiveAiMemoryEnabled);
       setCognitiveExtractionProviderId(data.settings.cognitiveExtractionProviderId ?? '');
+      setCognitiveSessionSummaryEnabled(data.settings.cognitiveSessionSummaryEnabled);
       setProviders(data.providers);
     } catch (err) {
       setError(errorMessage(err));
@@ -359,6 +362,7 @@ function ConfigTab() {
           maintenanceNotice,
           cognitiveAiMemoryEnabled,
           cognitiveExtractionProviderId: cognitiveExtractionProviderId || null,
+          cognitiveSessionSummaryEnabled,
           confirmPassword: password
         }
       });
@@ -458,6 +462,21 @@ function ConfigTab() {
               className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
               checked={cognitiveAiMemoryEnabled}
               onChange={(e) => setCognitiveAiMemoryEnabled(e.target.checked)}
+            />
+          </label>
+          <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+            <div>
+              <div className="text-[13px] font-medium text-white/80">对话结束后总结该会话的记忆</div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
+                一场对话闲置 20 分钟后，把它产生的记忆碎片交给审核模型收拢成几条要点；碎片可逆归档，要点保留清单和数字。
+                同时把它和其它已存记忆比对：重复的不再记一条，说法有差别就走演化取代旧版本。
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+              checked={cognitiveSessionSummaryEnabled}
+              onChange={(e) => setCognitiveSessionSummaryEnabled(e.target.checked)}
             />
           </label>
           <div>

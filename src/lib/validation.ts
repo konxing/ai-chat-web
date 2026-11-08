@@ -106,7 +106,8 @@ export const adminConfigSchema = z.object({
   maxUploadMB: z.number().int().min(1).max(320).optional(),
   maintenanceNotice: z.string().max(500).optional(),
   cognitiveAiMemoryEnabled: z.boolean().optional(),
-  cognitiveExtractionProviderId: z.string().uuid().nullable().optional()
+  cognitiveExtractionProviderId: z.string().uuid().nullable().optional(),
+  cognitiveSessionSummaryEnabled: z.boolean().optional()
 });
 
 /**
