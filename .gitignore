@@ -25,3 +25,6 @@ deploy/nginx/ssl/*
 *.crt
 tsconfig.tsbuildinfo
 next-env.d.ts
+
+# conversation eval anonymized samples (local only)
+scripts/conversation-eval/samples/

@@ -5,7 +5,10 @@
  * 训练/验证/测试分离：本集为固定测试集；候选 prompt 优化须用独立验证集（run.ts --split）。
  */
 export interface SingleScenario { id: string; category: string; prompt: string; noList?: boolean }
-export interface MultiScenario { id: string; category: string; turns: string[] }
+export interface DialogueTurn { role: 'user' | 'assistant'; content: string }
+export interface MultiScenario { id: string; category: string; turns: DialogueTurn[] }
+/** 旧版仅用户输入的样本：标记为"多次用户输入模拟"，不计入连续对话能力评估（任务书 F-02）。 */
+export interface LegacyUserOnly { id: string; category: string; inputs: string[] }
 
 export const SINGLE_SCENARIOS: SingleScenario[] = [
   { id: 's001', category: '普通聊天', prompt: '今天总算把拖了很久的报告写完了。' },
@@ -111,24 +114,130 @@ export const SINGLE_SCENARIOS: SingleScenario[] = [
 ];
 
 export const MULTI_SCENARIOS: MultiScenario[] = [
-  { id: 'm01', category: '连续性', turns: ['我在学Rust。', '它的所有权到底解决什么问题？', '结合我前面说的，给我个学习顺序。'] },
-  { id: 'm02', category: '连续性', turns: ['我想转去做内核方向。', '需要补哪些基础？', '按我的背景排个优先级。'] },
-  { id: 'm03', category: '偏好适配', turns: ['以后不要列这么多点。', '那解释一下缓存雪崩。', '再讲讲穿透。'] },
-  { id: 'm04', category: '偏好适配', turns: ['我喜欢先给结论。', '微服务和单体怎么选？', '那分库分表呢？'] },
-  { id: 'm05', category: '教学递进', turns: ['什么是导数？', '我还是不太懂，举个例子。', '那它和积分什么关系？'] },
-  { id: 'm06', category: '教学递进', turns: ['递归怎么理解？', '给我个生活例子。', '那什么时候不该用递归？'] },
-  { id: 'm07', category: '思维伙伴', turns: '我觉得换个城市状态就会好。|真的吗？|那我该怎么验证？'.split('|') },
-  { id: 'm08', category: '思维伙伴', turns: ['我想辞职创业。', '你觉得我这个想法有什么漏洞？', '帮我列几个要验证的假设。'] },
-  { id: 'm09', category: '情绪承接', turns: ['最近压力很大。', '主要是工作太多。', '嗯，说出来好一点了。'] },
-  { id: 'm10', category: '情绪承接', turns: ['我被批评了，很难受。', '是不是我真的不行？', '我该怎么调整？'] },
-  { id: 'm11', category: '深度递进', turns: ['为什么人会拖延？', '深层机制是什么？', '有没有反例？'] },
-  { id: 'm12', category: '深度递进', turns: ['内卷怎么形成的？', '它和博弈论有什么关系？', '个人能跳出吗？'] },
-  { id: 'm13', category: '事实限定', turns: ['间歇性禁食有效吗？', '证据强吗？', '那我该信哪个？'] },
-  { id: 'm14', category: '事实限定', turns: ['这个新框架成熟吗？', '有独立评测吗？', '生产能用吗？'] },
-  { id: 'm15', category: '比较深化', turns: ['Postgres和MySQL怎么选？', '我的场景是高并发写。', '那再考虑运维成本呢？'] },
-  { id: 'm16', category: '比较深化', turns: ['读研还是工作？', '我想做研究。', '但家里希望我早点工作。'] },
-  { id: 'm17', category: '风格切换', turns: ['详细讲讲事务。', '太复杂了，简单点。', '好，再深入一点隔离级别。'] },
-  { id: 'm18', category: '风格切换', turns: ['像老师一样教我闭包。', '给我个例子。', '不要列点，直接说。'] },
-  { id: 'm19', category: '个人历史', turns: ['我的目标是建立能力培养体系。', '结合这个目标，我该先学什么？', '和我之前的习惯偏好一致吗？'] },
-  { id: 'm20', category: '个人历史', turns: ['我之前说想转内核。', '现在有点犹豫。', '结合我的情况帮我理清。'] }
+  { id: 'm01', category: '分享承接', turns: [
+    { role: 'user', content: '今天一个 Bug 修了一天还没好。' },
+    { role: 'assistant', content: '修一天还没好，挺耗人的。是那种越查越乱的感觉吗？' },
+    { role: 'user', content: '对，就是越查越乱。' },
+    { role: 'assistant', content: '那先停一下也行。要不要说说卡在哪一步，我陪你捋？' },
+    { role: 'user', content: '算了，先聊聊别的。' } ] },
+  { id: 'm02', category: '用户纠正', turns: [
+    { role: 'user', content: '最近状态不好。' },
+    { role: 'assistant', content: '我给你几个调整作息的建议吧：第一…' },
+    { role: 'user', content: '不是，我只是想聊聊，不要给方案。' },
+    { role: 'assistant', content: '好，那就不给方案。你想从哪说起？' },
+    { role: 'user', content: '就是觉得做什么都没劲。' } ] },
+  { id: 'm03', category: '技术深入', turns: [
+    { role: 'user', content: '日志显示 KNET 没收到包，排查思路？' },
+    { role: 'assistant', content: '先确认抓包点：tcpdump 看网卡有没有包，再往协议栈上层查。' },
+    { role: 'user', content: '网卡有包，但应用没收到。' },
+    { role: 'assistant', content: '那查 socket 绑定和过滤：确认端口/地址匹配，再看有没有 iptables/nft 丢弃。' },
+    { role: 'user', content: '如果是容器里呢？' } ] },
+  { id: 'm04', category: '观点冲突', turns: [
+    { role: 'user', content: '我觉得学习已经没用了。' },
+    { role: 'assistant', content: '听起来你对"学了没用上"很失望。是最近有什么让你这么觉得？' },
+    { role: 'user', content: '学了那么多，工作还是那样。' },
+    { role: 'assistant', content: '短期看不到回报确实磨人。不过"没用"和"还没用上"是两回事，你更接近哪种？' },
+    { role: 'user', content: '可能还没用上吧。' } ] },
+  { id: 'm05', category: '教学递进', turns: [
+    { role: 'user', content: '什么是导数？' },
+    { role: 'assistant', content: '导数是瞬时变化率，比如某一刻的速度。' },
+    { role: 'user', content: '我还是不太懂，举个例子。' },
+    { role: 'assistant', content: '开车时速度表显示的就是导数；平均速度是总路程除时间。' },
+    { role: 'user', content: '那它和积分什么关系？' } ] },
+  { id: 'm06', category: '连续性', turns: [
+    { role: 'user', content: '我在学 Rust。' },
+    { role: 'assistant', content: 'Rust 不错。你学到哪了？' },
+    { role: 'user', content: '所有权还没搞懂。' },
+    { role: 'assistant', content: '所有权核心是"每个值只有一个主人"，离开作用域就释放。' },
+    { role: 'user', content: '结合我前面说的，给我个学习顺序。' } ] },
+  { id: 'm07', category: '偏好适配', turns: [
+    { role: 'user', content: '以后不要列这么多点。' },
+    { role: 'assistant', content: '好，那我尽量用连贯的话说。' },
+    { role: 'user', content: '那解释一下缓存雪崩。' },
+    { role: 'assistant', content: '雪崩是大量缓存同时失效，请求全压到数据库。可以给过期时间加随机抖动。' },
+    { role: 'user', content: '再讲讲穿透。' } ] },
+  { id: 'm08', category: '分享承接', turns: [
+    { role: 'user', content: '终于把报告写完了！' },
+    { role: 'assistant', content: '恭喜收尾！松了口气吧。' },
+    { role: 'user', content: '是啊，拖太久了。' },
+    { role: 'assistant', content: '拖久了完成那一刻特别爽。接下来打算歇歇还是继续？' },
+    { role: 'user', content: '先歇两天。' } ] },
+  { id: 'm09', category: '用户纠正', turns: [
+    { role: 'user', content: '这个接口怎么设计？' },
+    { role: 'assistant', content: '你可以考虑 REST：GET/POST/PUT…' },
+    { role: 'user', content: '你理解错了，我问的是幂等怎么保证。' },
+    { role: 'assistant', content: '明白，幂等可以用唯一请求 ID + 去重表，或乐观锁版本号。' },
+    { role: 'user', content: '乐观锁具体怎么做？' } ] },
+  { id: 'm10', category: '技术深入', turns: [
+    { role: 'user', content: 'Linux 网络栈里包是怎么从网卡到应用的？' },
+    { role: 'assistant', content: '网卡 DMA 到 ring buffer，硬中断触发 NAPI poll，经协议栈到 socket 队列。' },
+    { role: 'user', content: 'NAPI 解决什么问题？' },
+    { role: 'assistant', content: '中断风暴：高流量时关中断改轮询，降低 CPU 开销。' },
+    { role: 'user', content: '那 GRO 呢？' } ] },
+  { id: 'm11', category: '观点冲突', turns: [
+    { role: 'user', content: '远程办公肯定比坐班好。' },
+    { role: 'assistant', content: '对自律的人是。但协作密集的团队可能反而低效，你的团队是哪种？' },
+    { role: 'user', content: '我们协作挺多的。' },
+    { role: 'assistant', content: '那混合制可能比全远程更适合你们。' },
+    { role: 'user', content: '有道理。' } ] },
+  { id: 'm12', category: '连续性', turns: [
+    { role: 'user', content: '我想转去做内核方向。' },
+    { role: 'assistant', content: '内核方向不错。你现在做什么？' },
+    { role: 'user', content: '做路由协议维护。' },
+    { role: 'assistant', content: '那网络子系统是你的切入点，比从零开始顺。' },
+    { role: 'user', content: '按我的背景排个优先级。' } ] },
+  { id: 'm13', category: '事实限定', turns: [
+    { role: 'user', content: '间歇性禁食有效吗？' },
+    { role: 'assistant', content: '有研究显示对减重有一定效果，但证据质量不一。' },
+    { role: 'user', content: '证据强吗？' },
+    { role: 'assistant', content: '多为小样本短期试验，长期硬终点证据不足。' },
+    { role: 'user', content: '那我该信哪个？' } ] },
+  { id: 'm14', category: '教学递进', turns: [
+    { role: 'user', content: '递归怎么理解？' },
+    { role: 'assistant', content: '递归是函数调用自己，把大问题拆成同构小问题。' },
+    { role: 'user', content: '给我个生活例子。' },
+    { role: 'assistant', content: '查字典：查一个词又遇到生词，再查，直到都认识，再逐层返回。' },
+    { role: 'user', content: '那什么时候不该用递归？' } ] },
+  { id: 'm15', category: '比较深化', turns: [
+    { role: 'user', content: 'Postgres 和 MySQL 怎么选？' },
+    { role: 'assistant', content: '看场景：复杂查询/JSON/扩展选 Postgres，简单高并发读 MySQL 也够。' },
+    { role: 'user', content: '我的场景是高并发写。' },
+    { role: 'assistant', content: '高并发写两者都行，但 Postgres 的 MVCC 和索引组织在高写入下要注意 vacuum。' },
+    { role: 'user', content: '那再考虑运维成本呢？' } ] },
+  { id: 'm16', category: '分享承接', turns: [
+    { role: 'user', content: '被领导批评了，心里挺难受。' },
+    { role: 'assistant', content: '被批评确实不好受。愿意说说怎么回事吗？' },
+    { role: 'user', content: '就觉得努力没被看见。' },
+    { role: 'assistant', content: '努力没被看见比批评本身更磨人。' },
+    { role: 'user', content: '嗯，就是这样。' } ] },
+  { id: 'm17', category: '风格切换', turns: [
+    { role: 'user', content: '详细讲讲事务。' },
+    { role: 'assistant', content: '事务有 ACID 四性：原子、一致、隔离、持久…' },
+    { role: 'user', content: '太复杂了，简单点。' },
+    { role: 'assistant', content: '事务就是"要么全做要么全不做"的一组操作。' },
+    { role: 'user', content: '好，再深入一点隔离级别。' } ] },
+  { id: 'm18', category: '用户纠正', turns: [
+    { role: 'user', content: '就是上次那个问题。' },
+    { role: 'assistant', content: '你是指之前聊的缓存问题吗？' },
+    { role: 'user', content: '不是，是网络那个。' },
+    { role: 'assistant', content: '好，网络那个。现在进展如何？' },
+    { role: 'user', content: '还是没解决。' } ] },
+  { id: 'm19', category: '观点冲突', turns: [
+    { role: 'user', content: 'AI 很快就会完全取代程序员。' },
+    { role: 'assistant', content: 'AI 会替代部分编码工作，但"完全取代"证据不足，需求定义和判断还在人。' },
+    { role: 'user', content: '但代码都是 AI 写了。' },
+    { role: 'assistant', content: '写代码只是环节之一，理解需求和担责还没法交给 AI。' },
+    { role: 'user', content: '那我该担心吗？' } ] },
+  { id: 'm20', category: '连续性', turns: [
+    { role: 'user', content: '我的目标是建立能力培养体系。' },
+    { role: 'assistant', content: '好目标。你想先从哪类能力入手？' },
+    { role: 'user', content: '问题发现吧。' },
+    { role: 'assistant', content: '可以从每天记录一个"不合理"开始。' },
+    { role: 'user', content: '和我之前的习惯偏好一致吗？' } ] }
+];
+
+/** 旧版仅用户输入：多次用户输入模拟，不计入连续对话能力评估。 */
+export const LEGACY_USER_ONLY: LegacyUserOnly[] = [
+  { id: 'L01', category: '模拟', inputs: ['我在学Rust。', '它的所有权到底解决什么问题？'] },
+  { id: 'L02', category: '模拟', inputs: ['什么是导数？', '举个例子。'] }
 ];
