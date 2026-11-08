@@ -12,6 +12,7 @@ import { getMemoryPolicies, type MemoryContext } from './policy';
 import { deriveProfileCandidates, type ProfileCandidate, type ProfileCandidateSource, type ProfileReflectionSource } from './profile-candidates';
 import { getCognitivePreferences } from './preferences';
 import { listProfileEntries, PROFILE_LIST_MAX_ROWS, type ProfileEntryDto } from './user-profile';
+import { profileCandidateKey, readDismissedProfileKeys } from './profile-dismissed';
 
 /**
  * 画像一屏的读侧组装（任务书 8.2 / 8.3）。
@@ -81,7 +82,16 @@ export async function readProfileScreen(
 ): Promise<ProfileScreen> {
   const entries = await listProfileEntries(userId);
   const candidates = gates.memoryEnabled ? await readCandidates(userId, now, gates, entries) : [];
-  return { entries, entriesCapped: entries.length >= PROFILE_LIST_MAX_ROWS, candidates };
+  // AI 在超时自动裁决里判「丢弃」的建议记在按用户的忽略名单里；建议是派生的，不在这里滤掉
+  // 就等于没处理——下一屏它又摆回用户面前。名单丢了最坏也只是旧建议重新露出来。
+  let visible = candidates;
+  if (candidates.length > 0) {
+    const dismissed = await readDismissedProfileKeys(userId);
+    if (dismissed.size > 0) {
+      visible = candidates.filter((candidate) => !dismissed.has(profileCandidateKey(candidate)));
+    }
+  }
+  return { entries, entriesCapped: entries.length >= PROFILE_LIST_MAX_ROWS, candidates: visible };
 }
 
 async function readCandidates(

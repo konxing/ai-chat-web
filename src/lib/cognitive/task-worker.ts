@@ -10,6 +10,7 @@ import { getCognitivePreferences } from './preferences';
 import { runReflectionSweep } from './reflection-sweep';
 import { runMemoryConsolidation } from './memory-consolidator';
 import { runSessionSummarySweep } from './memory-session-summary';
+import { runAutoConfirmSweep } from './pending-confirmation-sweep';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -118,6 +119,9 @@ export async function runCognitiveWorkerTick(): Promise<number> {
       // 会话结束总结（默认关，后台开关控制）：对话闲置够久后把这一场的碎片收拢成要点，
       // 并与其它已存记忆比对查重/查差别。一轮最多一场，碎片归档后条件自然不成立，不会重复。
       await runSessionSummarySweep(userId);
+      // 待确认自动裁决（后台开关控制，默认开）：记忆候选/决策/画像建议超过 24 小时没处理时
+      // 交给审核模型逐条判保留或丢弃。没有超时条目的用户一次模型都不调。
+      await runAutoConfirmSweep(userId);
     }
     return tasks.length;
   } catch {

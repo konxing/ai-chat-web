@@ -125,6 +125,8 @@
 | `src/lib/cognitive/retrieval-router.ts` | 按需召回路由（Phase 4，默认开）：纯知识/翻译/数学问题判 none、读侧连记忆池都不读；涉及「我」的召回，综合分析判 complex；拿不准保守召回 |
 | `src/lib/cognitive/memory-source-dive.ts` | 记忆溯源展开：措辞明确要细节（具体/详细/展开/有哪些…）时，按命中记忆的 `sourceMessageId` 回原始用户消息取原文，作为第二个注入块交给模型（限本人名下、去重、最多 2 条、8000 字封顶，取不到/解密失败静默跳过，不拖垮记忆块）。普通轮次一条都不多读 |
 | `src/lib/cognitive/memory-session-summary.ts` | 会话结束总结（默认关，后台开关 `cognitiveSessionSummaryEnabled`）：对话闲置 ≥20 分钟且仍有 ≥3 条活跃碎片时，把这一场的碎片交给审核模型收拢成 ≤6 条要点；同时与其它已存记忆比对，重复的填 `duplicateOf` 不落库、有差别的填 `updates` 走演化取代。要点 `origin=inferred`、`chatId=null`（避免同场重复总结），被合并的碎片可逆归档并挂同主题边；只在 worker 扫描里跑，一轮最多一场 |
+| `src/lib/cognitive/pending-confirmation-sweep.ts` | 待确认自动裁决（默认开，开关 `cognitiveAutoConfirmEnabled`）：记忆候选（PENDING）、决策记录（PENDING_CONFIRM）、画像建议超过 24 小时未处理时，一次模型调用逐条判 keep/drop——保留走用户点「记住」的同一条链路，丢弃则拒绝或进入画像忽略名单；模型失败不改任何状态，条目继续等。进程内同一用户每小时至多重试一次 |
+| `src/lib/cognitive/profile-dismissed.ts` | 画像建议的「已忽略」名单（按用户存在 SystemConfig 键里，不建表）：AI 判丢弃的画像建议记在这里，画像读侧据此不再摆出；名单丢失最坏只是旧建议重新露出 |
 | `src/lib/cognitive/memory-consolidator.ts` | 后台巩固（Phase 3，默认关）：同 type+context 高相似度冗余记忆聚簇，最新为主、其余可逆归档 + PART_OF 证据边 |
 | `src/lib/cognitive/memory-decay.ts` | 衰减优先级（Phase 5，默认关）：由新近度+确认+类型稳定派生，只降召回优先级不删历史。**实测降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」关闭**，env COGNITIVE_MEMORY_DECAY=1 才接进读侧 |
 | `src/lib/cognitive/memory-display.ts`（五类记忆） | 六个 `MemoryType` 之上的功能分类：情景（project/decision/emotion）、语义（fact/长期 goal）、程序（preference）、前瞻（带未来说法的 goal）；working 是会话层不入库。纯函数派生，不另存列 |

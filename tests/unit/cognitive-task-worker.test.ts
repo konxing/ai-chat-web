@@ -119,6 +119,12 @@ vi.mock('@/lib/cognitive/reflection-sweep', () => ({
   runReflectionSweep: reflectionSweep
 }));
 
+// 自动裁决扫的是「超时未处理的待确认项」，和这一组断言（每用户各扫一次反思）无关；
+// 换成探针，避免真连库、真调模型。
+vi.mock('@/lib/cognitive/pending-confirmation-sweep', () => ({
+  runAutoConfirmSweep: () => Promise.resolve(null)
+}));
+
 const USER = 'user-a';
 const OTHER = 'user-b';
 const BASE = new Date('2026-11-03T08:00:00.000Z');

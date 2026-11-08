@@ -107,7 +107,8 @@ export const adminConfigSchema = z.object({
   maintenanceNotice: z.string().max(500).optional(),
   cognitiveAiMemoryEnabled: z.boolean().optional(),
   cognitiveExtractionProviderId: z.string().uuid().nullable().optional(),
-  cognitiveSessionSummaryEnabled: z.boolean().optional()
+  cognitiveSessionSummaryEnabled: z.boolean().optional(),
+  cognitiveAutoConfirmEnabled: z.boolean().optional()
 });
 
 /**

@@ -13,6 +13,8 @@ export interface SystemSettings {
   cognitiveExtractionProviderId: string | null;
   /** 会话结束总结开关：对话闲置够久后把这一场记忆碎片收拢成要点，并与其它记忆查重。 */
   cognitiveSessionSummaryEnabled: boolean;
+  /** 待确认自动裁决：记忆候选/决策/画像建议超过 24 小时没处理，交给审核模型判保留或丢弃。 */
+  cognitiveAutoConfirmEnabled: boolean;
 }
 
 const DEFAULTS: SystemSettings = {
@@ -23,7 +25,9 @@ const DEFAULTS: SystemSettings = {
   maintenanceNotice: '',
   cognitiveAiMemoryEnabled: false,
   cognitiveExtractionProviderId: null,
-  cognitiveSessionSummaryEnabled: false
+  cognitiveSessionSummaryEnabled: false,
+  // 用户口径：待确认的东西一天没处理就交给 AI 定。默认开，后台可以关。
+  cognitiveAutoConfirmEnabled: true
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -34,11 +38,17 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'maintenanceNotice',
   'cognitiveAiMemoryEnabled',
   'cognitiveExtractionProviderId',
-  'cognitiveSessionSummaryEnabled'
+  'cognitiveSessionSummaryEnabled',
+  'cognitiveAutoConfirmEnabled'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
-  if (key === 'registrationOpen' || key === 'cognitiveAiMemoryEnabled' || key === 'cognitiveSessionSummaryEnabled') {
+  if (
+    key === 'registrationOpen' ||
+    key === 'cognitiveAiMemoryEnabled' ||
+    key === 'cognitiveSessionSummaryEnabled' ||
+    key === 'cognitiveAutoConfirmEnabled'
+  ) {
     return Boolean(value) as SystemSettings[K];
   }
   if (key === 'maxUploadMB') {

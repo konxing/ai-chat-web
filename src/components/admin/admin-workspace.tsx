@@ -306,6 +306,7 @@ function ConfigTab() {
   const [cognitiveAiMemoryEnabled, setCognitiveAiMemoryEnabled] = useState(false);
   const [cognitiveExtractionProviderId, setCognitiveExtractionProviderId] = useState('');
   const [cognitiveSessionSummaryEnabled, setCognitiveSessionSummaryEnabled] = useState(false);
+  const [cognitiveAutoConfirmEnabled, setCognitiveAutoConfirmEnabled] = useState(true);
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -322,6 +323,7 @@ function ConfigTab() {
           cognitiveAiMemoryEnabled: boolean;
           cognitiveExtractionProviderId: string | null;
           cognitiveSessionSummaryEnabled: boolean;
+          cognitiveAutoConfirmEnabled: boolean;
         };
         providers: ProviderDto[];
       }>('/api/admin/config');
@@ -333,6 +335,7 @@ function ConfigTab() {
       setCognitiveAiMemoryEnabled(data.settings.cognitiveAiMemoryEnabled);
       setCognitiveExtractionProviderId(data.settings.cognitiveExtractionProviderId ?? '');
       setCognitiveSessionSummaryEnabled(data.settings.cognitiveSessionSummaryEnabled);
+      setCognitiveAutoConfirmEnabled(data.settings.cognitiveAutoConfirmEnabled);
       setProviders(data.providers);
     } catch (err) {
       setError(errorMessage(err));
@@ -363,6 +366,7 @@ function ConfigTab() {
           cognitiveAiMemoryEnabled,
           cognitiveExtractionProviderId: cognitiveExtractionProviderId || null,
           cognitiveSessionSummaryEnabled,
+          cognitiveAutoConfirmEnabled,
           confirmPassword: password
         }
       });
@@ -478,6 +482,22 @@ function ConfigTab() {
               className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
               checked={cognitiveSessionSummaryEnabled}
               onChange={(e) => setCognitiveSessionSummaryEnabled(e.target.checked)}
+            />
+          </label>
+          <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+            <div>
+              <div className="text-[13px] font-medium text-white/80">待确认超过 24 小时交给 AI 裁决</div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
+                记忆候选、决策记录、画像建议超过 24 小时没被用户处理时，交给审核模型逐条判「保留/丢弃」：
+                保留的记忆候选直接入库、决策标记确认、画像建议写进画像；丢弃的拒绝或不再出现。
+                模型不可用时不处理，条目继续等。
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+              checked={cognitiveAutoConfirmEnabled}
+              onChange={(e) => setCognitiveAutoConfirmEnabled(e.target.checked)}
             />
           </label>
           <div>
