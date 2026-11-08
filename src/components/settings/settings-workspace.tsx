@@ -20,6 +20,7 @@ import {
   Network,
   Plus,
   Scale,
+  Activity,
   Shield,
   ShieldCheck,
   SlidersHorizontal,
@@ -49,6 +50,7 @@ import { TimelinePanel } from './timeline-panel';
 import { MemoryGraphPanel } from './memory-graph-panel';
 import { ReflectionPanel } from './reflection-panel';
 import { ProfilePanel } from './profile-panel';
+import { CapabilityPanel } from './capability-panel';
 import { CognitiveOverviewPanel, type OverviewTarget } from './cognitive-overview-panel';
 
 interface AccountUser {
@@ -93,6 +95,7 @@ type Tab =
   | 'decisions'
   | 'reflections'
   | 'userModel'
+  | 'capabilities'
   | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
@@ -359,6 +362,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['decisions', '决策', Scale],
               ['reflections', '洞察', Lightbulb],
               ['userModel', '画像', Fingerprint],
+              ['capabilities', '能力成长', Activity],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -772,6 +776,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'reflections' ? <ReflectionPanel /> : null}
 
           {tab === 'userModel' ? <ProfilePanel /> : null}
+
+          {tab === 'capabilities' ? <CapabilityPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

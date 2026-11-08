@@ -249,7 +249,19 @@ export async function deleteChat(chatId: string, userId: string): Promise<void> 
   if (attachments.length) {
     await prisma.attachment.deleteMany({ where: { id: { in: attachments.map((a) => a.id) } } });
   }
-  await prisma.chat.delete({ where: { id: chatId } });
+  // CapabilityEvidence may reference messages in this chat. Deletion cascades those evidence
+  // rows, but derived numerical snapshots need explicit invalidation in the same transaction.
+  await prisma.$transaction(async (tx) => {
+    const linked = await tx.capabilityEvidence.findMany({
+      where: { userId, source: { chatId } },
+      select: { dimensionId: true }
+    });
+    const ids = [...new Set(linked.map((row) => row.dimensionId))];
+    if (ids.length > 0) {
+      await tx.capabilitySnapshot.deleteMany({ where: { userId, dimensionId: { in: ids } } });
+    }
+    await tx.chat.delete({ where: { id: chatId, userId } });
+  });
   const { unlinkAttachmentFile } = await import('./files');
   for (const attachment of attachments) {
     await unlinkAttachmentFile(attachment).catch(() => undefined);
