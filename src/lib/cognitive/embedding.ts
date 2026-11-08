@@ -80,7 +80,12 @@ function validate(vector: unknown, model: string): number[] {
  * 把一段文本算成向量并加密。任何一步不对都抛 `ApiError`——调用方是后台任务，
  * 它该把这一条记忆照常留着，而不是让一趟可选的增益把写入带倒。
  */
-export async function embedMemoryText(userId: string, memoryId: string, text: string): Promise<StoredVector> {
+export async function embedMemoryText(
+  userId: string,
+  memoryId: string,
+  text: string,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {}
+): Promise<StoredVector> {
   // 候选范围与挑法沿用语音转写那一条：本人私有加全局、只要启用的，按能力挑第一条。
   const rows = await prisma.aiProvider.findMany({
     where: {
@@ -106,7 +111,8 @@ export async function embedMemoryText(userId: string, memoryId: string, text: st
       Accept: 'application/json'
     },
     body: JSON.stringify({ model, input: text }),
-    timeoutMs: TIMEOUT_MS
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? TIMEOUT_MS
   });
   try {
     if (!safe.response.ok) {

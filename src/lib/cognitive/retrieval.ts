@@ -242,3 +242,39 @@ export function rankMemoriesHybrid<T extends Vectorizable>(
 
   return fused.slice(0, limit).map((entry) => entry.memory);
 }
+
+
+/**
+ * 证据门槛检索（可选 v2）：只有文本相关或语义相似的记忆才进入提示词。
+ *
+ * legacy rankMemories / rankMemoriesHybrid 保持原样，方便离线评测和一键回退。
+ * 两个阈值刻意不是「模型概率」：词法是查询 IDF 覆盖比例，语义是同模型余弦。
+ * 阈值应依据真实标注集调优；未获得实测增益前 v2 默认关闭。
+ */
+export const RETRIEVAL_V2_KEYWORD_MIN = 0.18;
+export const RETRIEVAL_V2_COSINE_MIN = 0.78;
+
+export function rankMemoriesWithEvidence<T extends Vectorizable>(
+  query: string,
+  memories: readonly T[],
+  options: { limit?: number; queryVector?: NumericVector | null } = {}
+): T[] {
+  const limit = options.limit ?? memories.length;
+  if (limit <= 0 || memories.length === 0) return [];
+  const queryVector = options.queryVector;
+  const keywordScores = scoreByKeyword(query, memories);
+  const eligible = keywordScores
+    .filter(({ memory, score }) => {
+      if (score >= RETRIEVAL_V2_KEYWORD_MIN) return true;
+      return (
+        queryVector != null &&
+        memory.vector != null &&
+        memory.vector.length === queryVector.length &&
+        cosine(queryVector, memory.vector) >= RETRIEVAL_V2_COSINE_MIN
+      );
+    })
+    .map(({ memory }) => memory);
+
+  if (eligible.length === 0) return [];
+  return rankMemoriesHybrid(query, queryVector, eligible, { limit });
+}

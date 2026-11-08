@@ -22,7 +22,8 @@ import { CONTEXT_LABELS, ORIGIN_LABELS, TYPE_LABELS, describeValidRange } from '
 import { createMemory, listMemories, reviseMemory, attachMemoryVector } from './memories';
 import { resolveDefaultProvider } from '@/lib/providers';
 import { expandRelatedMemories, RELATION_TYPE_LABELS, type RelatedMemoryHit } from './relations';
-import { embedMemoryText } from './embedding';
+import { embedMemoryText, vectorFromRow } from './embedding';
+import { findStoredMemoryVectors } from './memory-vectors';
 import { assessMemories, recordEvidenceOutsideTransaction } from './evidence';
 import { excludedHashes, exclusionHash } from './exclusions';
 import { log } from '@/lib/logger';
@@ -30,7 +31,7 @@ import { getMemoryPolicies } from './policy';
 import type { MemoryContext, MemoryPolicy } from './policy';
 import type { Confidence } from './confidence';
 import { getCognitivePreferences, type EmotionTransparency } from './preferences';
-import { rankMemories, rankMemoriesHybrid, scoreByKeyword, type NumericVector } from './retrieval';
+import { rankMemories, rankMemoriesHybrid, rankMemoriesWithEvidence, scoreByKeyword, type NumericVector } from './retrieval';
 import { decayPriority, memoryDecayEnabled } from './memory-decay';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
@@ -101,6 +102,62 @@ function dedupeKey(text: string): string {
   return text.replace(/\s+/g, '').toLowerCase();
 }
 
+/**
+ * 可选的混合检索查询臂：不增加表结构，也不改变原来的记忆存储格式。
+ * 只有已经存在加密向量时才请求 Embedding；无模型、超时、失败全部退回关键词。
+ * 整条查询臂上限 650ms，留出认知模块 1000ms 截止中的读取与渲染时间。
+ * 不在日志里记录用户正文或向量。
+ */
+async function optionalSemanticQuery(
+  userId: string,
+  query: string,
+  rows: readonly MemoryDto[]
+): Promise<{ queryVector?: NumericVector; vectors?: ReadonlyMap<string, NumericVector> }> {
+  if (
+    process.env.COGNITIVE_RETRIEVAL_V2 !== '1' ||
+    process.env.COGNITIVE_HYBRID_RETRIEVAL !== '1' ||
+    rows.length === 0
+  ) return {};
+
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      resolve(null);
+    }, 650);
+  });
+  try {
+    const attempt = async () => {
+      const stored = await findStoredMemoryVectors(userId, rows.map((row) => row.id));
+      if (stored.size === 0 || controller.signal.aborted) return null;
+      // 复用写侧的模型选择及向量校验；临时 ID 只用于 AES-GCM AAD，不写数据库。
+      const ephemeralId = 'retrieval-query';
+      const embedded = await embedMemoryText(userId, ephemeralId, query, {
+        signal: controller.signal,
+        timeoutMs: 650
+      });
+      if (controller.signal.aborted) return null;
+      const queryVector = vectorFromRow(embedded.ciphertext, userId, ephemeralId);
+      const vectors = new Map<string, NumericVector>();
+      for (const [id, entry] of stored) {
+        // 不同模型即使维度碰巧相同也不得混算余弦。
+        if (entry.model === embedded.model && entry.vector.length === queryVector.length) {
+          vectors.set(id, entry.vector);
+        }
+      }
+      if (vectors.size === 0) return null;
+      return { queryVector, vectors };
+    };
+    return (await Promise.race([attempt(), deadline])) ?? {};
+  } catch {
+    log.warn('cognitive.retrieval_hybrid_fallback', { userId, reason: 'unavailable' });
+    return {};
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   const now = new Date();
   // 按需召回路由（Phase 4）：纯知识/翻译/数学问题不注入个人记忆，连记忆池都不读，省 token。
@@ -117,8 +174,11 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 读失败就让模块失败（manager 隔离），而不是退回默认值替用户改设置。
   const preference = await getCognitivePreferences(turn.userId);
   const emotionTransparency = turn.emotionTransparency ?? 'implicit';
+  const semantic = await optionalSemanticQuery(turn.userId, turn.content, rows);
   const memories = selectMemoryCandidates({
     query: turn.content,
+    queryVector: semantic.queryVector,
+    vectors: semantic.vectors,
     rows,
     policies,
     chatId: turn.chatId,
@@ -233,6 +293,13 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
   const usable = pool.filter((memory) =>
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
+  // 严格相关性检索需要显式开启；无命中时不再以最近的无关记忆补位。
+  if (process.env.COGNITIVE_RETRIEVAL_V2 === '1') {
+    const originals = new Map(usable.map((memory) => [memory.id, memory]));
+    const candidates = usable.map((memory) => ({ ...memory, vector: input.vectors?.get(memory.id) ?? null }));
+    return rankMemoriesWithEvidence(input.query, candidates, { limit, queryVector: input.queryVector })
+      .map((memory) => originals.get(memory.id)!);
+  }
   if (input.queryVector == null) {
     // 衰减排序（Phase 5）默认关：实测它降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」
     // 保持原排序。env COGNITIVE_MEMORY_DECAY=1 才用衰减 tie-break（相关度优先，同分按新近+确认+稳定）。
