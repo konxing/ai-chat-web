@@ -32,6 +32,7 @@ import type { MemoryContext, MemoryPolicy } from './policy';
 import type { Confidence } from './confidence';
 import { getCognitivePreferences, type EmotionTransparency } from './preferences';
 import { rankMemories, rankMemoriesHybrid, rankMemoriesWithEvidence, scoreByKeyword, type NumericVector } from './retrieval';
+import { filterVerifiedMemoryPool } from './memory-verification';
 import { decayPriority, memoryDecayEnabled } from './memory-decay';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
@@ -170,7 +171,11 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 涉及用户自己的事照常召回；拿不准保守召回。路由是纯函数，落在任何数据库读之前。
   if (routeMemoryRetrieval(turn.content).need === 'none') return [];
   // 候选池是当前有效的全部记忆（上限 MEMORY_RETRIEVAL_POOL 行），排序交给关键词召回。
-  const rows = await listMemories(turn.userId, { asOf: now, take: MEMORY_RETRIEVAL_POOL });
+  const rows = await filterVerifiedMemoryPool(
+    turn.userId,
+    await listMemories(turn.userId, { asOf: now, take: MEMORY_RETRIEVAL_POOL }),
+    now
+  );
   if (rows.length === 0) return [];
 
   // 策略表读失败就让这个模块整体失败（manager 会隔离并记一条不含正文的告警）：
