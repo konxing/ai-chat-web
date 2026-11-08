@@ -34,6 +34,7 @@ import { getCognitivePreferences, type EmotionTransparency } from './preferences
 import { rankMemories, rankMemoriesHybrid, rankMemoriesWithEvidence, scoreByKeyword, type NumericVector } from './retrieval';
 import { filterVerifiedMemoryPool } from './memory-verification';
 import { wikiContextBlocks } from './knowledge-wiki';
+import { experienceContextBlocks } from './experience';
 import { decayPriority, memoryDecayEnabled } from './memory-decay';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
@@ -228,6 +229,7 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   if (preference.userModelEnabled && (await strictRelevanceEnabled())) {
     try {
       blocks.push(...(await wikiContextBlocks(turn.userId, turn.content)));
+      blocks.push(...(await experienceContextBlocks(turn.userId, turn.content)));
     } catch {
       log.warn('cognitive.wiki_read_failed', { userId: turn.userId, reason: 'unavailable' });
     }

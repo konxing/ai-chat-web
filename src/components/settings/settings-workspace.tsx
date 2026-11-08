@@ -53,6 +53,7 @@ import { ReflectionPanel } from './reflection-panel';
 import { ProfilePanel } from './profile-panel';
 import { CapabilityPanel } from './capability-panel';
 import { WikiPanel } from './wiki-panel';
+import { ExperiencePanel } from './experience-panel';
 import { CognitiveOverviewPanel, type OverviewTarget } from './cognitive-overview-panel';
 
 interface AccountUser {
@@ -99,6 +100,7 @@ type Tab =
   | 'userModel'
   | 'capabilities'
   | 'wiki'
+  | 'experience'
   | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
@@ -367,6 +369,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['userModel', '画像', Fingerprint],
               ['capabilities', '能力成长', Activity],
               ['wiki', '主题知识库', BookOpen],
+              ['experience', '实践经验库', Lightbulb],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -784,6 +787,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'capabilities' ? <CapabilityPanel /> : null}
 
           {tab === 'wiki' ? <WikiPanel /> : null}
+
+          {tab === 'experience' ? <ExperiencePanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

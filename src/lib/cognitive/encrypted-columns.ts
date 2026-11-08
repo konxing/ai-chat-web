@@ -105,7 +105,10 @@ export const COGNITIVE_ENCRYPTED_COLUMNS: readonly CognitiveEncryptedColumn[] = 
   stringColumn('capabilityEvidence', 'CapabilityEvidence', 'noteCiphertext', 'capability-evidence'),
   stringColumn('interventionRecord', 'InterventionRecord', 'suggestionCiphertext', 'capability-intervention'),
   stringColumn('interventionRecord', 'InterventionRecord', 'feedbackCiphertext', 'capability-intervention'),
-  stringColumn('knowledgePage', 'KnowledgePage', 'titleCiphertext', 'knowledge-page')
+  stringColumn('knowledgePage', 'KnowledgePage', 'titleCiphertext', 'knowledge-page'),
+  stringColumn('experienceNote', 'ExperienceNote', 'titleCiphertext', 'experience-note'),
+  stringColumn('experienceNote', 'ExperienceNote', 'lessonCiphertext', 'experience-note'),
+  stringColumn('experienceNote', 'ExperienceNote', 'validationCiphertext', 'experience-note')
 ];
 
 function columnEntry(model: string, column: string): CognitiveEncryptedColumn {

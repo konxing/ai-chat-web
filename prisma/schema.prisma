@@ -265,6 +265,7 @@ model User {
   memoryVerifications MemoryVerification[]
   dreamingRun DreamingRun?
   knowledgePages KnowledgePage[]
+  experienceNotes ExperienceNote[]
   userProfileEntries  UserProfileEntry[]
   capabilityDimensions CapabilityDimension[]
   capabilityEvidences CapabilityEvidence[]
@@ -617,6 +618,7 @@ model MemoryItem {
   evidences           MemoryEvidence[]
   verification        MemoryVerification?
   wikiCitations       KnowledgeCitation[]
+  experiences         ExperienceNote[]
   /// 这条行作为起点的关系，和作为终点的关系（任务书 2.3）。
   relationsFrom       MemoryRelation[]     @relation("MemoryRelationSource")
   relationsTo         MemoryRelation[]     @relation("MemoryRelationTarget")
@@ -1096,6 +1098,8 @@ model InterventionRecord {
   completedAt DateTime?
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   dimension CapabilityDimension @relation(fields: [dimensionId, userId], references: [id, userId], onDelete: Cascade)
+  experiences ExperienceNote[]
+  @@unique([id, userId])
   @@index([userId, dimensionId, status])
 }
 
@@ -1153,4 +1157,24 @@ model KnowledgeCitation {
   memory MemoryItem @relation(fields: [memoryId,userId], references: [id,userId], onDelete: Cascade)
   @@id([pageId,memoryId])
   @@index([userId,memoryId])
+}
+
+model ExperienceNote {
+  id String @id @default(uuid())
+  userId String
+  sourceMemoryId String?
+  sourceInterventionId String?
+  titleCiphertext String @db.Text
+  lessonCiphertext String @db.Text
+  validationCiphertext String? @db.Text
+  status String @default("DRAFT") @db.VarChar(16)
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memory MemoryItem? @relation(fields: [sourceMemoryId,userId], references: [id,userId], onDelete: Cascade)
+  intervention InterventionRecord? @relation(fields: [sourceInterventionId,userId], references: [id,userId], onDelete: Cascade)
+  @@index([userId,status,updatedAt])
+  @@index([userId,sourceMemoryId])
+  @@index([userId,sourceInterventionId])
 }

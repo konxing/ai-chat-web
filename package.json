@@ -17,6 +17,7 @@
     "backup": "node scripts/backup.mjs",
     "logs:prune": "tsx scripts/prune-logs.ts",
     "eval:cognitive": "tsx scripts/cognitive-eval/run.ts",
+    "eval:cognitive:reliability": "tsx scripts/cognitive-eval/reliability.ts",
     "restore": "node scripts/restore.mjs",
     "test": "vitest run tests/unit",
     "test:unit": "vitest run tests/unit",
