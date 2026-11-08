@@ -38,7 +38,7 @@ export async function buildConversationIntelligence(input: {
   const content = input.currentContent ?? '';
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
   const understanding = understandDialogue(content);
-  const state = buildConversationState(input.recent ?? [], content);
+  const state = buildConversationState(input.recent ?? [], content, understanding);
   const act = selectResponseAct(understanding, state);
   const [style, version] = await Promise.all([
     getConversationStyle(input.userId).catch(() => null),
@@ -56,7 +56,9 @@ export async function buildConversationIntelligence(input: {
   const v2 = (input.engineVersion ?? 'legacy') === 'dialogue-v2';
   // P4 两臂：legacy 用旧规划累加+单轮示例；dialogue-v2 用单一回应动作+多轮示例。
   const actText = v2
-    ? `【本轮回应动作】${ACT_TEXT[act.primary]}` + (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '')
+    ? `【本轮回应动作】${ACT_TEXT[act.primary]}` +
+      (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '') +
+      (act.contextNote ? `\n${act.contextNote}` : '')
     : plan.planText;
   const examplesText = v2
     ? ([renderDialogueExamples(selectDialogueExamples(understanding.dialogueAct)), renderExamples(selectExamples(mode.mode, mode.secondary))].filter(Boolean).join('\n') || null)

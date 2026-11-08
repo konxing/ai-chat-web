@@ -17,6 +17,8 @@ export interface ActSelection {
   primary: ResponseAct;
   secondary: ResponseAct | null;
   rationale: string;
+  /** v1.3：来自修复账本/约束账本的当轮补充说明（注入提示词，非用户隐私全文）。 */
+  contextNote?: string;
 }
 
 export const ACT_TEXT: Record<ResponseAct, string> = {
@@ -31,13 +33,27 @@ export const ACT_TEXT: Record<ResponseAct, string> = {
 };
 
 export function selectResponseAct(u: DialogueUnderstanding, state: ConversationState): ActSelection {
-  // 纠错优先：用户纠正后必须修复，不继续推方案/长报告。
-  if (u.needsRepair || state.recentCorrection) {
-    return { primary: 'CORRECT_COURSE', secondary: null, rationale: '用户纠正上轮理解' };
+  // 约束账本：本轮仍有效的用户直接约束，作为补充说明注入（不覆盖安全/事实）。
+  const constraintNote = state.activeConstraints.length
+    ? '本轮遵守用户明确要求：' + state.activeConstraints.map((c) => c.content).join('；') + '。'
+    : undefined;
+
+  // 纠错优先：用户纠正后必须修复，按修复账本的正确期待调整，不继续推方案/长报告。
+  const repair = state.currentRepair;
+  if (u.needsRepair || repair || state.recentCorrection) {
+    const note = repair?.correctedExpectation
+      ? (repair.type === 'TOPIC' ? repair.correctedExpectation : `修复方向：${repair.correctedExpectation}`)
+      : '按用户纠正调整，不重复原错误路径。';
+    return { primary: 'CORRECT_COURSE', secondary: null, rationale: '用户纠正上轮理解', contextNote: [note, constraintNote].filter(Boolean).join(' ') };
   }
   // 防止连环追问：上轮已问且未答，本轮不再追问。
   const avoidAsk = state.openLoop !== null;
 
+  const base = selectBaseAct(u, state, avoidAsk);
+  return constraintNote ? { ...base, contextNote: constraintNote } : base;
+}
+
+function selectBaseAct(u: DialogueUnderstanding, state: ConversationState, avoidAsk: boolean): ActSelection {
   switch (u.dialogueAct) {
     case 'VENT':
     case 'SHARE_PROGRESS':
@@ -59,7 +75,7 @@ export function selectResponseAct(u: DialogueUnderstanding, state: ConversationS
     default: {
       // UNCLEAR：低置信不必然追问；用户明显要直接答案时先给初步回答并说明假设。
       if (u.intentConfidence === 'low' && !avoidAsk && state.topic === null) {
-        return { primary: 'ASK_ONE_CLARIFICATION', secondary: null, rationale: ' truly 模糊且无上下文' };
+        return { primary: 'ASK_ONE_CLARIFICATION', secondary: null, rationale: 'truly 模糊且无上下文' };
       }
       return { primary: 'ANSWER', secondary: null, rationale: '模糊但先给有用初步回答' };
     }
