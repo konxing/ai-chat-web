@@ -1116,6 +1116,9 @@ model MemoryVerification {
   updatedAt  DateTime @updatedAt
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   memory MemoryItem @relation(fields: [memoryId, userId], references: [id, userId], onDelete: Cascade)
+  // Prisma requires the complete composite foreign-key fields to be unique for a 1:1 relation.
+  // memoryId is also unique on its own; the additional composite index retains strict user ownership.
+  @@unique([memoryId, userId])
   @@index([userId, status, expiresAt])
 }
 
