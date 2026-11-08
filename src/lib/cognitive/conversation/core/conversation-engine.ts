@@ -5,6 +5,7 @@ import { detectConversationMode, type ModeDetection } from '../mode/mode-detecto
 import { modeInstruction } from '../mode/conversation-mode';
 import { planResponse, type ResponsePlan } from '../planning/response-planner';
 import { selectExamples, renderExamples } from '../style/style-examples';
+import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 
 /**
  * 对话智能层入口。组合全局原则 + 用户风格 + 生效提示词版本 + 当前交流模式，产出一段 system 块。
@@ -47,6 +48,7 @@ export async function buildConversationIntelligence(input: {
     style: effectiveStyle,
     versionContent: version?.content ?? null,
     modeText,
+    knowledgeText: renderKnowledgePolicy(mode.mode),
     planText: plan.planText,
     examplesText: renderExamples(selectExamples(mode.mode, mode.secondary))
   });
