@@ -263,6 +263,7 @@ model User {
   reflectionCitations ReflectionCitation[]
   memoryAccessTurns   MemoryAccessTurn[]
   memoryVerifications MemoryVerification[]
+  dreamingRun DreamingRun?
   userProfileEntries  UserProfileEntry[]
   capabilityDimensions CapabilityDimension[]
   capabilityEvidences CapabilityEvidence[]
@@ -1110,4 +1111,17 @@ model MemoryVerification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   memory MemoryItem @relation(fields: [memoryId, userId], references: [id, userId], onDelete: Cascade)
   @@index([userId, status, expiresAt])
+}
+
+model DreamingRun {
+  userId String @id
+  nextRunAt DateTime @default(now())
+  lastRunAt DateTime?
+  leaseUntil DateTime?
+  leaseToken String? @db.VarChar(64)
+  checkedCount Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([nextRunAt, leaseUntil])
 }

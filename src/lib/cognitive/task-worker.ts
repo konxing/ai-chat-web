@@ -11,6 +11,7 @@ import { runReflectionSweep } from './reflection-sweep';
 import { runMemoryConsolidation } from './memory-consolidator';
 import { runSessionSummarySweep } from './memory-session-summary';
 import { runAutoConfirmSweep } from './pending-confirmation-sweep';
+import { pollIdleDreaming } from './dreaming';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -123,6 +124,9 @@ export async function runCognitiveWorkerTick(): Promise<number> {
       // 交给审核模型逐条判保留或丢弃。没有超时条目的用户一次模型都不调。
       await runAutoConfirmSweep(userId);
     }
+    // Unlike message-triggered work, this poll also inspects idle conversations.
+    // Per-user DB lease protects concurrent workers; failures remain nonfatal.
+    await pollIdleDreaming().catch(() => log.warn('cognitive.dreaming_poll_failed', { reason: 'unavailable' }));
     return tasks.length;
   } catch {
     // 只记事件名：驱动的报错原文里会带上失败的字段值。
