@@ -27,6 +27,8 @@ interface FeedbackRule {
   scope: PreferenceScope;
   adjustments: Partial<ConversationStyle>;
   topic?: string;
+  /** 立场类偏好（主动/克制）本身即长期指令，无需"以后"标记。 */
+  durable?: boolean;
 }
 
 const RULES: FeedbackRule[] = [
@@ -38,8 +40,8 @@ const RULES: FeedbackRule[] = [
   { re: /以后.*深入|以后.*解释底层|技术问题.*底层原理|以后.*技术.*原理/, scope: 'GLOBAL', adjustments: { knowledgeDepth: 'high' }, topic: '技术' },
   { re: /以后.*不要列点|一直.*别列点|总是.*不要列表/, scope: 'GLOBAL', adjustments: { structure: 'minimal' } },
   { re: /不要.*列.*点|别列点|不要.*列表|少用列表/, scope: 'GLOBAL', adjustments: { structure: 'minimal' } },
-  { re: /主动指出.*错误|指出我的问题|别光赞同|不要一味附和/, scope: 'GLOBAL', adjustments: { proactivity: 'high' } },
-  { re: /多夸夸|亲切一点/, scope: 'GLOBAL', adjustments: { restraint: 'medium' } },
+  { re: /主动指出.*错误|指出我的问题|别光赞同|不要一味附和/, scope: 'GLOBAL', adjustments: { proactivity: 'high' }, durable: true },
+  { re: /多夸夸|亲切一点/, scope: 'GLOBAL', adjustments: { restraint: 'medium' }, durable: true },
   { re: /以后.*数学.*循序渐进|学数学.*一步步/, scope: 'TASK', adjustments: { structure: 'dynamic' }, topic: '数学' }
 ];
 
@@ -57,8 +59,8 @@ export function extractStyleFeedback(content: string): StyleFeedback | null {
   }
   for (const rule of RULES) {
     if (rule.re.test(content)) {
-      // 无持续标记的 GLOBAL 命中降级为候选（不自动持久化），交由用户确认。
-      const scope = rule.scope === 'GLOBAL' && !DURABLE_MARKER.test(content) ? 'CONTEXT' : rule.scope;
+      // 无持续标记且非固有长期的 GLOBAL 命中降级为候选（不自动持久化），交由用户确认。
+      const scope = rule.scope === 'GLOBAL' && !rule.durable && !DURABLE_MARKER.test(content) ? 'CONTEXT' : rule.scope;
       return { scope, adjustments: rule.adjustments, topic: rule.topic };
     }
   }
