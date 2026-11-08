@@ -423,7 +423,12 @@ export async function buildConversation(input: {
     if (await conversationLayerEnabled()) {
       const intelligence = await buildConversationIntelligence({
         userId: input.userId,
-        currentContent: input.currentContent
+        currentContent: input.currentContent,
+        // P1：只读最近 ≤6 轮真实消息构建短生命周期状态，不读其他用户历史。
+        recent: trimmed.slice(-6).map((m) => ({
+          role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),
+          content: decryptMessage(m)
+        }))
       });
       if (intelligence.block.text) messages.push({ role: 'system', content: intelligence.block.text });
     }
