@@ -31,17 +31,18 @@ export async function buildConversationIntelligence(input: {
   recentDeep?: boolean;
   hasPersonalMemory?: boolean;
   recent?: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
+  providerName?: string;
 }): Promise<ConversationIntelligence> {
-  const [style, version] = await Promise.all([
-    getConversationStyle(input.userId).catch(() => null),
-    getActivePromptVersion().catch(() => null)
-  ]);
-  const effectiveStyle = style ?? (await import('../core/conversation-policy')).DEFAULT_CONVERSATION_STYLE;
   const content = input.currentContent ?? '';
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
   const understanding = understandDialogue(content);
   const state = buildConversationState(input.recent ?? [], content);
   const act = selectResponseAct(understanding, state);
+  const [style, version] = await Promise.all([
+    getConversationStyle(input.userId).catch(() => null),
+    getActivePromptVersion({ mode: mode.mode, provider: input.providerName }).catch(() => null)
+  ]);
+  const effectiveStyle = style ?? (await import('../core/conversation-policy')).DEFAULT_CONVERSATION_STYLE;
   const plan = planResponse({
     mode: mode.mode,
     content,

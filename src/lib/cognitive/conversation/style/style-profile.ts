@@ -44,7 +44,7 @@ export async function getConversationStyle(userId: string): Promise<Conversation
   return sanitizeStyle(raw);
 }
 
-export async function setConversationStyle(userId: string, style: Partial<ConversationStyle>): Promise<ConversationStyle> {
+export async function setConversationStyle(userId: string, style: Partial<ConversationStyle>, source = 'user'): Promise<ConversationStyle> {
   const current = await getConversationStyle(userId);
   const next = sanitizeStyle({ ...current, ...style });
   await prisma.systemConfig.upsert({
@@ -52,5 +52,27 @@ export async function setConversationStyle(userId: string, style: Partial<Conver
     create: { key: styleSettingKey(userId), value: next as unknown as Prisma.InputJsonValue },
     update: { value: next as unknown as Prisma.InputJsonValue }
   });
+  await prisma.systemConfig.upsert({
+    where: { key: styleMetaKey(userId) },
+    create: { key: styleMetaKey(userId), value: { updatedAt: new Date().toISOString(), source } as unknown as Prisma.InputJsonValue },
+    update: { value: { updatedAt: new Date().toISOString(), source } as unknown as Prisma.InputJsonValue }
+  });
   return next;
+}
+
+/** P3：偏好元数据（来源/最近修改），供偏好页展示与撤销。 */
+export function styleMetaKey(userId: string): string {
+  return `conversationStyleMeta:${userId}`;
+}
+export async function getConversationStyleMeta(userId: string): Promise<{ updatedAt: string | null; source: string | null }> {
+  const raw = await getRawSystemSetting(styleMetaKey(userId)).catch(() => null);
+  if (!raw || typeof raw !== 'object') return { updatedAt: null, source: null };
+  const obj = raw as Record<string, unknown>;
+  return { updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : null, source: typeof obj.source === 'string' ? obj.source : null };
+}
+
+/** P3：恢复默认=删除本人风格与元数据键，回到 DEFAULT_CONVERSATION_STYLE。 */
+export async function resetConversationStyle(userId: string): Promise<ConversationStyle> {
+  await prisma.systemConfig.deleteMany({ where: { key: { in: [styleSettingKey(userId), styleMetaKey(userId)] } } });
+  return { ...DEFAULT_CONVERSATION_STYLE };
 }

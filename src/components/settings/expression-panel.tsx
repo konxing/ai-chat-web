@@ -27,12 +27,14 @@ export function ExpressionPanel() {
   const { push } = useToast();
   const [loading, setLoading] = useState(true);
   const [style, setStyle] = useState<Style | null>(null);
+  const [meta, setMeta] = useState<{ updatedAt: string | null; source: string | null }>({ updatedAt: null, source: null });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ style: Style }>('/api/account/conversation-style');
+      const data = await apiFetch<{ style: Style; meta: { updatedAt: string | null; source: string | null } }>('/api/account/conversation-style');
       setStyle(data.style);
+      setMeta(data.meta ?? { updatedAt: null, source: null });
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -41,6 +43,20 @@ export function ExpressionPanel() {
   }, [push]);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function reset() {
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ style: Style }>('/api/account/conversation-style', { method: 'DELETE' });
+      setStyle(data.style);
+      setMeta({ updatedAt: null, source: null });
+      push('已恢复默认表达偏好');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function set(key: keyof Style, value: string) {
     if (!style) return;
@@ -68,6 +84,11 @@ export function ExpressionPanel() {
       <p className="mt-1 text-[12.5px] text-white/40">
         只调整回答的表达方式，不影响事实正确性与安全规则。也可以在对话里直接说"以后不要列点/深入一点"，系统会学习。
       </p>
+      <div className="mt-2 flex items-center gap-3 text-[11.5px] text-white/35">
+        <span>来源：{meta.source ?? '默认'}</span>
+        <span>最近修改：{meta.updatedAt ? meta.updatedAt.slice(0, 10) : '—'}</span>
+        <button type="button" className="btn-ghost" disabled={busy} onClick={() => void reset()}>恢复默认</button>
+      </div>
       <div className="mt-4 space-y-4">
         {OPTIONS.map((opt) => (
           <div key={opt.key}>
