@@ -4,6 +4,7 @@ import { buildConversationPrompt, type BuiltConversationPrompt } from '../prompt
 import { detectConversationMode, type ModeDetection } from '../mode/mode-detector';
 import { modeInstruction } from '../mode/conversation-mode';
 import { planResponse, type ResponsePlan } from '../planning/response-planner';
+import { selectExamples, renderExamples } from '../style/style-examples';
 
 /**
  * 对话智能层入口。组合全局原则 + 用户风格 + 生效提示词版本 + 当前交流模式，产出一段 system 块。
@@ -46,7 +47,8 @@ export async function buildConversationIntelligence(input: {
     style: effectiveStyle,
     versionContent: version?.content ?? null,
     modeText,
-    planText: plan.planText
+    planText: plan.planText,
+    examplesText: renderExamples(selectExamples(mode.mode, mode.secondary))
   });
   return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan };
 }
