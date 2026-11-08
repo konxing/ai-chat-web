@@ -421,7 +421,10 @@ export async function buildConversation(input: {
   // 读失败回落默认，不阻断对话。默认不增加模型调用。
   try {
     if (await conversationLayerEnabled()) {
-      const intelligence = await buildConversationIntelligence({ userId: input.userId });
+      const intelligence = await buildConversationIntelligence({
+        userId: input.userId,
+        currentContent: input.currentContent
+      });
       if (intelligence.block.text) messages.push({ role: 'system', content: intelligence.block.text });
     }
   } catch {
