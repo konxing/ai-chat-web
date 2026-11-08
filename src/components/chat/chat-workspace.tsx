@@ -1356,7 +1356,7 @@ const MessageBubble = memo(function MessageBubble({
   };
   if (isUser) {
     return (
-      <div className={cn('flex justify-end gap-3', optimistic && 'opacity-60')}>
+      <div className={cn('group flex justify-end gap-3', optimistic && 'opacity-60')}>
         <div className="max-w-[85%] sm:max-w-[75%]">
           {message.attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap justify-end gap-2">
@@ -1393,7 +1393,17 @@ const MessageBubble = memo(function MessageBubble({
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
             </div>
           ) : null}
-          <div className="mt-1 text-right text-[10px] text-white/20">{messageTime(message.createdAt)}</div>
+          <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-white/20">
+            <button
+              type="button"
+              onClick={() => void copy()}
+              className="rounded p-1 text-white/25 transition hover:bg-white/5 hover:text-white/60"
+              aria-label="复制这条消息"
+            >
+              {copied ? <Check className="h-3 w-3 text-aurora-300" /> : <Copy className="h-3 w-3" />}
+            </button>
+            <span>{messageTime(message.createdAt)}</span>
+          </div>
         </div>
       </div>
     );
