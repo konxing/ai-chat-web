@@ -1282,6 +1282,14 @@ function withEmotionType() {
   };
 }
 
+/** 把技术项目情境改成「先问再记」，用来测 AI 审核开着时的决定权归属。 */
+function withConfirmation() {
+  return {
+    ...DEFAULT_MEMORY_POLICIES,
+    technicalProject: { ...DEFAULT_MEMORY_POLICIES.technicalProject, requireConfirmation: true }
+  };
+}
+
 describe('情绪总开关 emotionEnabled：写侧闸门与引擎读侧闸门（片U）', () => {
   it('闸门关着时情绪句一行都不落，也不进待确认候选——今天线上就是这个形状', async () => {
     db.memoryEnabled = true;
@@ -1504,6 +1512,29 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
 
     expect(db.reviewProviders).toEqual(['p-1', 'p-fallback']);
     expect(db.creates.map((row) => row.content)).toEqual(['我在用 Next.js 15 和 Prisma']);
+  });
+
+  it('AI 审核开着时「先问再记」不再问用户：审核认可就直接落库', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [{ text: '我在用 Prisma', type: 'project' }];
+    db.policies = withConfirmation();
+
+    await write('我在用 Prisma。');
+
+    expect(db.proposals).toEqual([]);
+    expect(db.creates.map((row) => row.content)).toEqual(['我在用 Prisma']);
+  });
+
+  it('AI 审核关着时仍按用户策略先问：决定权回到用户那边', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = false;
+    db.policies = withConfirmation();
+
+    await write('我在用 Prisma。');
+
+    expect(db.proposals).toHaveLength(1);
+    expect(db.creates).toEqual([]);
   });
 
   it('开了审核就把活跃记忆读一次给模型指认，且复用那次读、不再读第二遍', async () => {

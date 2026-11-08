@@ -362,7 +362,12 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // null = 这一轮根本没问模型；数字 = 问过，这是它给的条数（0 就是「这一轮不值得长期记」）。
   // 只记条数，正文一个字都不进日志（任务书 5.5）。没有这一行，「为什么这句没记住」只能靠猜。
   let reviewedCount: number | null = null;
-  if (worthReviewing && (await aiMemoryExtractionEnabled())) {
+  // AI 审核开着时，「要不要记」这个判断已经交给模型了：策略里的「先问再记」不再转成
+  // 待确认候选去问用户——审核结论就是那个判断依据（用户明确要求「别让我来判断」）。
+  // 关着时行为不变：仍按用户策略先问。敏感情境的「不持久化」是硬闸，在两个分支之前就拦掉了。
+  let aiGateOn = false;
+  if (worthReviewing) aiGateOn = await aiMemoryExtractionEnabled();
+  if (worthReviewing && aiGateOn) {
     existing = await listMemories(turn.userId, { includeSuperseded: true });
     const active = existing.filter((memory) => memory.supersededAt === null);
     let reviewed: MemoryCandidate[] | null = null;
@@ -477,7 +482,13 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
 
     // 「先问再记」问出来的是一句**还没被用户答应**的话，所以它不写记忆行、也不进向量：
     // 它进的是另一张表。这里断了才是错的——那句话会凭空消失，用户的策略空转（片M 修的就是这个）。
-    if (plan.decision === 'ASK_CONFIRM') {
+    // 但 AI 审核开着时这条不再适用：审核模型已经就该不该记做了一次判断，把同一件事再拿去问用户，
+    // 就是用户明确拒绝的那种「让我来判断」。审核认可的直接落库（策略的类型/持久化闸门仍在前）。
+    const decision = plan.decision === 'ASK_CONFIRM' && aiGateOn ? 'WRITE' : plan.decision;
+    if (plan.decision === 'ASK_CONFIRM' && aiGateOn) {
+      log.info('cognitive.ask_confirm_delegated_to_ai', { userId: turn.userId });
+    }
+    if (decision === 'ASK_CONFIRM') {
       // 超额的「先问再记」逐条跳过就行：break 会连后面本该 WRITE 落库的候选一起丢掉。
       if (proposed >= MEMORY_WRITE_MAX_PER_TURN) continue;
       await proposeCandidate({
@@ -493,7 +504,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       proposed += 1;
       continue;
     }
-    if (plan.decision !== 'WRITE' && plan.decision !== 'UPDATE') continue;
+    if (decision !== 'WRITE' && decision !== 'UPDATE') continue;
 
     const entry = {
       userId: turn.userId,
@@ -506,7 +517,7 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
       precision: frame?.precision ?? ('unknown' as const),
       validFrom: frame?.validFrom ?? null
     };
-    if (plan.decision === 'WRITE') {
+    if (decision === 'WRITE') {
       // 记忆行和它的同主题边同生共死：边只是派生，但一条刚落库的记忆在记忆网络里孤立着，
       // 用户看到的就是「系统又没把它和以前的事连起来」。关系写入放在 createMemory 的事务里。
       const created = await createMemory(
