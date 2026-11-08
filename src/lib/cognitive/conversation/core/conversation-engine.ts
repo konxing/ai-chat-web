@@ -4,7 +4,7 @@ import { buildConversationPrompt, type BuiltConversationPrompt } from '../prompt
 import { detectConversationMode, type ModeDetection } from '../mode/mode-detector';
 import { modeInstruction } from '../mode/conversation-mode';
 import { planResponse, type ResponsePlan } from '../planning/response-planner';
-import { selectExamples, renderExamples } from '../style/style-examples';
+import { selectExamples, renderExamples, selectDialogueExamples, renderDialogueExamples } from '../style/style-examples';
 import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
 import { buildConversationState, type ConversationState } from '../state/conversation-state';
@@ -53,13 +53,17 @@ export async function buildConversationIntelligence(input: {
   // P1：用单一回应动作替代固定累加策略；先承接再展开。
   const actText = `【本轮回应动作】${ACT_TEXT[act.primary]}` +
     (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '');
+  const examplesText = [
+    renderDialogueExamples(selectDialogueExamples(understanding.dialogueAct)),
+    renderExamples(selectExamples(mode.mode, mode.secondary))
+  ].filter(Boolean).join('\n') || null;
   const block = buildConversationPrompt({
     style: effectiveStyle,
     versionContent: version?.content ?? null,
     modeText,
     knowledgeText: renderKnowledgePolicy(mode.mode),
     planText: actText,
-    examplesText: renderExamples(selectExamples(mode.mode, mode.secondary))
+    examplesText
   });
   return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act };
 }

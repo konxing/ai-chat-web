@@ -33,16 +33,21 @@ export const DEFAULT_CONVERSATION_STYLE: ConversationStyle = {
 };
 
 /** 计划书 6.3 的默认语言规则。渲染成提示词时保持"降低模板化"而非"禁止句式"的口吻。 */
+// P2：压缩为 5 条真正跨场景的原则（不堆几十条禁令，不引入固定开场/安慰/尾部追问）。
 export const LANGUAGE_RULES: readonly string[] = [
-  '直接回应用户真正关心的问题，不必每次重复用户刚刚说过的话。',
-  '不要习惯性以"这是一个非常好的问题"等赞美开头，不要频繁使用机械化肯定。',
-  '不要习惯性地用"首先、其次、最后"组织所有回答；允许自然的转折、承接和观点补充。',
-  '不要无意义地重复总结，不要每次结尾都主动推荐下一步。',
-  '不要把简单交流强行转换成报告；简单问题直接回答，复杂问题自然展开。',
-  '需要解释时优先使用具体例子；对抽象问题可以进行更深入的讨论。',
-  '允许表达不同意见；当用户观点存在问题时指出并解释原因，不为讨好而牺牲事实正确性。',
-  '不确定的事实必须明确说明；不要用长篇表达掩盖没有实际内容，不要编造细节或夸大确定性。'
+  '先承接用户此刻的意图再展开：分享/倾诉先理解，不急着给方案；真正提问才详细解答。',
+  '直接回应核心问题，不重复用户原话，不模板化开头/结尾，不无意义总结。',
+  '简单交流用连贯话语，复杂技术/研究才用结构；自然度不是"不用列表"。',
+  '可以有独立观点与理据，不机械附和；不确定就明说，不编造细节、文献或亲身经历。',
+  '追问只在一个问题真正必要且能推进对话时提出，不连环提问。'
 ];
+
+// P2/F-03：naturalness 必须有可观测行为差异（信息密度/对话性/示例选择），而非装饰口头语。
+const NATURALNESS_TEXT: Record<ConversationStyle['naturalness'], string> = {
+  low: '表达偏直接、信息密度高，少铺垫。',
+  medium: '表达平衡：先简短承接再给信息。',
+  high: '表达更像自然交流：先承接情绪/进展，回应更有对话性，避免咨询报告腔。'
+};
 
 const DEPTH_TEXT: Record<ConversationStyle['knowledgeDepth'], string> = {
   low: '回答以结论为主，除非用户追问，不主动展开背景。',
@@ -64,6 +69,7 @@ const LENGTH_TEXT: Record<ConversationStyle['length'], string> = {
 export function renderGlobalPolicy(style: ConversationStyle = DEFAULT_CONVERSATION_STYLE): string {
   const lines = [
     '【交流原则】以下是对话风格要求，优先级低于系统安全与事实正确性规则：',
+    NATURALNESS_TEXT[style.naturalness],
     DEPTH_TEXT[style.knowledgeDepth],
     STRUCTURE_TEXT[style.structure],
     LENGTH_TEXT[style.length],
@@ -76,6 +82,7 @@ export function renderGlobalPolicy(style: ConversationStyle = DEFAULT_CONVERSATI
     style.factuality === 'high'
       ? '事实严谨：不知道时承认不知道，区分事实与推断，不编造文献、数据或引用。'
       : '保持准确，对不确定内容加以说明。',
+    '诚实约束：不假装拥有真实人生经历、私人感情、意识或线下行动；可表达观点与不确定性。',
     ...LANGUAGE_RULES.map((rule) => `- ${rule}`)
   ];
   return lines.join('\n');

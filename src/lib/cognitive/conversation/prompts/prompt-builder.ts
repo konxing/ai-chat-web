@@ -35,13 +35,14 @@ export function buildConversationPrompt(input: {
   maxChars?: number;
 }): BuiltConversationPrompt {
   const budget = input.maxChars ?? CONVERSATION_PROMPT_MAX_CHARS;
-  // 顺序即优先级；裁剪从低优先级（末尾）开始。
+  // P2/F-07：先决策必要部分再分配预算。优先级：核心原则 > 当轮回应动作 > 少量示例 > 模式/知识(通用)。
+  // 超预算时先省略通用重复的模式/知识说明，而非总是裁掉示例。
   const ordered: PromptPart[] = [
     { name: 'global-policy', text: input.versionContent?.trim() || renderGlobalPolicy(input.style) },
-    ...(input.modeText ? [{ name: 'mode', text: input.modeText }] : []),
-    ...(input.knowledgeText ? [{ name: 'knowledge', text: input.knowledgeText }] : []),
     ...(input.planText ? [{ name: 'plan', text: input.planText }] : []),
-    ...(input.examplesText ? [{ name: 'examples', text: input.examplesText }] : [])
+    ...(input.examplesText ? [{ name: 'examples', text: input.examplesText }] : []),
+    ...(input.modeText ? [{ name: 'mode', text: input.modeText }] : []),
+    ...(input.knowledgeText ? [{ name: 'knowledge', text: input.knowledgeText }] : [])
   ];
 
   const kept: PromptPart[] = [];

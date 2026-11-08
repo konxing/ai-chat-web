@@ -1,4 +1,5 @@
 import type { ConversationMode } from '../mode/conversation-mode';
+import type { DialogueAct } from '../understanding/dialogue-act';
 
 /**
  * 示例对话库（Phase 4，借鉴 SillyTavern Example Dialogues）。
@@ -88,6 +89,57 @@ export function renderExamples(examples: readonly StyleExample[]): string | null
   const lines = ['【表达示例·仅示范风格，不要照抄内容】'];
   for (const e of examples) {
     lines.push(`用户：${e.user}\n助手：${e.assistant}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * P2：3-5 轮短真实结构模拟示例，覆盖纠正/话题转折/分享进展/分歧/不愿被指导。
+ * 示例不得冒充用户实际历史；每轮只选与当前话语行为接近的 0-2 组，限制 token。
+ */
+export interface DialogueExample {
+  id: string;
+  acts: DialogueAct[];
+  turns: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+
+export const DIALOGUE_EXAMPLES: readonly DialogueExample[] = [
+  { id: 'd1', acts: ['SHARE_PROGRESS', 'VENT'], turns: [
+    { role: 'user', content: '今天一个 Bug 修了一天还没好。' },
+    { role: 'assistant', content: '修一天还没好，挺耗人的。是越查越乱那种吗？' },
+    { role: 'user', content: '对，就是越查越乱。' },
+    { role: 'assistant', content: '那先停一下也行。想捋的时候我陪你。' } ] },
+  { id: 'd2', acts: ['CORRECT_ASSISTANT'], turns: [
+    { role: 'user', content: '最近状态不好。' },
+    { role: 'assistant', content: '我给你几个调整建议吧。' },
+    { role: 'user', content: '不是，我只是想聊聊，不要给方案。' },
+    { role: 'assistant', content: '好，不给方案。你想从哪说起？' } ] },
+  { id: 'd3', acts: ['EXPLORE_OPINION', 'CHALLENGE'], turns: [
+    { role: 'user', content: '我觉得学习已经没用了。' },
+    { role: 'assistant', content: '听起来你对"学了没用上"很失望。是最近有什么让你这么觉得？' },
+    { role: 'user', content: '学了那么多，工作还是那样。' },
+    { role: 'assistant', content: '短期看不到回报确实磨人。不过"没用"和"还没用上"是两回事。' } ] },
+  { id: 'd4', acts: ['ASK_EXPLANATION'], turns: [
+    { role: 'user', content: '这个 Bug 为什么复现不了？' },
+    { role: 'assistant', content: '复现不了通常是环境或时序差异。先对比触发时的输入和状态。' },
+    { role: 'user', content: '日志显示 KNET 没收到包。' },
+    { role: 'assistant', content: '那先抓包确认网卡有没有包，再往协议栈上层查。' } ] },
+  { id: 'd5', acts: ['ACKNOWLEDGE', 'SHARE_EXPERIENCE'], turns: [
+    { role: 'user', content: '终于把报告写完了！' },
+    { role: 'assistant', content: '恭喜收尾！松了口气吧。' },
+    { role: 'user', content: '是啊，拖太久了。' },
+    { role: 'assistant', content: '拖久了完成那一刻特别爽。打算歇歇还是继续？' } ] }
+];
+
+export function selectDialogueExamples(act: DialogueAct): DialogueExample[] {
+  return DIALOGUE_EXAMPLES.filter((e) => e.acts.includes(act)).slice(0, 2);
+}
+
+export function renderDialogueExamples(examples: readonly DialogueExample[]): string | null {
+  if (examples.length === 0) return null;
+  const lines = ['【多轮示例·仅示范承接/纠正/分歧的风格，非用户真实历史】'];
+  for (const e of examples) {
+    lines.push(e.turns.map((t) => `${t.role === 'user' ? '用户' : '助手'}：${t.content}`).join('\n'));
   }
   return lines.join('\n');
 }
