@@ -1,5 +1,6 @@
 import type { DialogueUnderstanding } from '../understanding/dialogue-act';
 import type { ConversationState } from '../state/conversation-state';
+import { decideQuestion, type QuestionDecision } from './question-budget';
 
 /**
  * 回应动作选择（P1/P2，修复 F-06）。一次选最有价值的 primaryResponseAct + 0-1 次动作，
@@ -19,6 +20,8 @@ export interface ActSelection {
   rationale: string;
   /** v1.3：来自修复账本/约束账本的当轮补充说明（注入提示词，非用户隐私全文）。 */
   contextNote?: string;
+  /** v1.3 B2：追问价值预算判定（供诊断/评测，非用户隐私全文）。 */
+  question?: QuestionDecision;
 }
 
 export const ACT_TEXT: Record<ResponseAct, string> = {
@@ -32,7 +35,7 @@ export const ACT_TEXT: Record<ResponseAct, string> = {
   SUGGEST_ACTION: '在用户明确要行动建议时给出可执行下一步。'
 };
 
-export function selectResponseAct(u: DialogueUnderstanding, state: ConversationState): ActSelection {
+export function selectResponseAct(u: DialogueUnderstanding, state: ConversationState, content = ''): ActSelection {
   // 约束账本：本轮仍有效的用户直接约束，作为补充说明注入（不覆盖安全/事实）。
   const constraintNote = state.activeConstraints.length
     ? '本轮遵守用户明确要求：' + state.activeConstraints.map((c) => c.content).join('；') + '。'
@@ -50,7 +53,14 @@ export function selectResponseAct(u: DialogueUnderstanding, state: ConversationS
   const avoidAsk = state.openLoop !== null;
 
   const base = selectBaseAct(u, state, avoidAsk);
-  return constraintNote ? { ...base, contextNote: constraintNote } : base;
+  // B2 追问价值预算：抑制非必要澄清；分享/已知信息不追问；仅 ESSENTIAL 才问一个。
+  const question = decideQuestion({ content, understanding: u, state });
+  let primary = base.primary;
+  if (primary === 'ASK_ONE_CLARIFICATION' && question.responseMove !== 'ASK_ONE') {
+    primary = 'ANSWER';
+  }
+  const merged: ActSelection = { ...base, primary, question };
+  return constraintNote ? { ...merged, contextNote: constraintNote } : merged;
 }
 
 function selectBaseAct(u: DialogueUnderstanding, state: ConversationState, avoidAsk: boolean): ActSelection {

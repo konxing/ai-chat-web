@@ -39,7 +39,7 @@ export async function buildConversationIntelligence(input: {
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
   const understanding = understandDialogue(content);
   const state = buildConversationState(input.recent ?? [], content, understanding);
-  const act = selectResponseAct(understanding, state);
+  const act = selectResponseAct(understanding, state, content);
   const [style, version] = await Promise.all([
     getConversationStyle(input.userId).catch(() => null),
     getActivePromptVersion({ mode: mode.mode, provider: input.providerName }).catch(() => null)
