@@ -353,7 +353,13 @@ async function writeMemory(turn: CognitiveTurn): Promise<void> {
   // 模型不可用/超时/输出不像数组/挑出来的全不是原话 → 回退规则候选（宁可按旧办法记着，
   // 也不因为审核环节坏掉就清空记忆）。
   // 先判纯函数再读配置和记忆表：纯寒暄的轮次仍然除了偏好行什么都不读——和没开 AI 时一样。
-  const worthReviewing = ruleCandidates.length > 0 || directives.length > 0 || isReviewWorthwhile(turn.content);
+  // 纯知识/翻译/数学题也在这里一并放过：读侧已经有同一套判据（need === 'none' 时连记忆都不读），
+  // 写侧复用它，这类轮次连审核调用都不发——模型看一眼回 [] 纯属白花。规则候选和「记住…」命令
+  // 不受这条影响：词表命中说明句子里有用户自己的陈述，照旧交给审核。
+  const worthReviewing =
+    ruleCandidates.length > 0 ||
+    directives.length > 0 ||
+    (routeMemoryRetrieval(turn.content).need !== 'none' && isReviewWorthwhile(turn.content));
   // 按 recordedAt 倒序，所以匹配池里的第一条就是最近一次说法。这里不按保留期过滤：过期只是
   // 「不再进对话」，行还在库里，用户改口就该落在那一行上；把过期行剔出匹配池只会让同一件事多存一条。
   // includeSuperseded 同理：用户改口后旧版本被取代，但他哪天原话重说一遍时，旧版本必须还在

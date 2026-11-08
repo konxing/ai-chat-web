@@ -1537,6 +1537,40 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
     expect(db.creates).toEqual([]);
   });
 
+  it('纯知识/数学题不花审核调用：读侧同一套判据前置跳过', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+
+    await write('1加1等于几');
+
+    expect(db.reviewCalls).toBe(0);
+    expect(db.creates).toEqual([]);
+    expect(db.proposals).toEqual([]);
+  });
+
+  it('做题类问法同样跳过，但句子里带「我」的照旧审核', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+
+    await write('这个积分题怎么做');
+    expect(db.reviewCalls).toBe(0);
+
+    db.aiReviewed = [{ text: '我住在杭州', type: 'fact' }];
+    await write('我住在杭州。');
+    expect(db.reviewCalls).toBe(1);
+  });
+
+  it('「记住…」命令不因判据被判成知识题而漏审', async () => {
+    db.memoryEnabled = true;
+    db.aiEnabled = true;
+    db.aiReviewed = [];
+
+    await write('记住：1加1等于2');
+
+    // 指令句一定走审核闸门（或者按命令直落），不会被"纯知识"判据吞掉。
+    expect(db.reviewCalls).toBe(1);
+  });
+
   it('开了审核就把活跃记忆读一次给模型指认，且复用那次读、不再读第二遍', async () => {
     db.memoryEnabled = true;
     db.aiEnabled = true;

@@ -455,7 +455,7 @@ function ConfigTab() {
             <div>
               <div className="text-[13px] font-medium text-white/80">启用 AI 记忆审核</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
-                每轮至多调用一次模型（「好的」「嗯嗯」这类零信息应答前置跳过），跑在后台任务里，不阻塞正常聊天。
+                每轮至多调用一次模型（「好的」「嗯嗯」这类零信息应答、以及纯知识/翻译/数学题前置跳过），跑在后台任务里，不阻塞正常聊天。
               </div>
             </div>
             <input
