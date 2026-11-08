@@ -15,6 +15,10 @@ export interface SystemSettings {
   cognitiveSessionSummaryEnabled: boolean;
   /** 待确认自动裁决：记忆候选/决策/画像建议超过 24 小时没处理，交给审核模型判保留或丢弃。 */
   cognitiveAutoConfirmEnabled: boolean;
+  /** 检索与整理增强（合并开关）：严格相关性检索 + 混合语义检索 + 衰减排序 + 记忆巩固。默认关。 */
+  cognitiveRetrievalEnhanced: boolean;
+  /** 上下文增强（合并开关）：记忆溯源展开 + 能力观察注入。默认开（保住溯源展开）。 */
+  cognitiveContextEnhanced: boolean;
 }
 
 const DEFAULTS: SystemSettings = {
@@ -27,7 +31,9 @@ const DEFAULTS: SystemSettings = {
   cognitiveExtractionProviderId: null,
   cognitiveSessionSummaryEnabled: false,
   // 用户口径：待确认的东西一天没处理就交给 AI 定。默认开，后台可以关。
-  cognitiveAutoConfirmEnabled: true
+  cognitiveAutoConfirmEnabled: true,
+  cognitiveRetrievalEnhanced: false,
+  cognitiveContextEnhanced: true
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -39,7 +45,9 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'cognitiveAiMemoryEnabled',
   'cognitiveExtractionProviderId',
   'cognitiveSessionSummaryEnabled',
-  'cognitiveAutoConfirmEnabled'
+  'cognitiveAutoConfirmEnabled',
+  'cognitiveRetrievalEnhanced',
+  'cognitiveContextEnhanced'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
@@ -47,7 +55,9 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
     key === 'registrationOpen' ||
     key === 'cognitiveAiMemoryEnabled' ||
     key === 'cognitiveSessionSummaryEnabled' ||
-    key === 'cognitiveAutoConfirmEnabled'
+    key === 'cognitiveAutoConfirmEnabled' ||
+    key === 'cognitiveRetrievalEnhanced' ||
+    key === 'cognitiveContextEnhanced'
   ) {
     return Boolean(value) as SystemSettings[K];
   }

@@ -39,6 +39,12 @@ import { proposeCandidate } from './memory-candidates';
 import { resolveTemporalFrame } from './temporal';
 import { routeMemoryRetrieval } from './retrieval-router';
 import {
+  decayRankingEnabled,
+  hybridRetrievalEnabled,
+  sourceDiveEnabled,
+  strictRelevanceEnabled
+} from './cognitive-flags';
+import {
   composeSourceExcerpt,
   fetchSourceExcerpts,
   selectSourceMessageIds,
@@ -114,8 +120,8 @@ async function optionalSemanticQuery(
   rows: readonly MemoryDto[]
 ): Promise<{ queryVector?: NumericVector; vectors?: ReadonlyMap<string, NumericVector> }> {
   if (
-    process.env.COGNITIVE_RETRIEVAL_V2 !== '1' ||
-    process.env.COGNITIVE_HYBRID_RETRIEVAL !== '1' ||
+    !(await strictRelevanceEnabled()) ||
+    !(await hybridRetrievalEnabled()) ||
     rows.length === 0
   ) return {};
 
@@ -185,7 +191,9 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     now,
     emotionTransparency,
     emotionEnabled: turn.emotionEnabled,
-    limit: preference.memoryReadLimit
+    limit: preference.memoryReadLimit,
+    strictRelevance: await strictRelevanceEnabled(),
+    decayRanking: await decayRankingEnabled()
   });
   // 关联扩展是 associationEnabled 的运行时读者：关着时连关系表都不问。
   // 扩展目标只从这一轮已经取回的可见池里出，所以不会把失效行捞回上下文。
@@ -215,7 +223,7 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 「这 24 个习惯具体是什么」这种问题摘要装不下。这时按命中记忆的 sourceMessageId 回到原始
   // 用户消息，把原文取回来作为第二块注入。只在措辞明确要细节时做，普通轮次一条都不多读；
   // 取源失败只记一条告警，上面的记忆块照常生效（溯源是增益，不是前置条件）。
-  if (blocks.length > 0 && wantsSourceDive(turn.content)) {
+  if (blocks.length > 0 && wantsSourceDive(turn.content) && (await sourceDiveEnabled())) {
     const ids = selectSourceMessageIds(memories);
     if (ids.length > 0) {
       try {
@@ -270,6 +278,10 @@ export interface MemorySelectionInput {
    * 越界值按边界收，不让一个坏值把提示词预算放大。
    */
   limit?: number;
+  /** 严格相关性检索（合并开关读好传入）。不传回落 env，评测 Harness 行为不变。 */
+  strictRelevance?: boolean;
+  /** 衰减排序 tie-break（合并开关读好传入）。不传回落 env。 */
+  decayRanking?: boolean;
 }
 
 /**
@@ -294,7 +306,8 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
     isMemoryUsable(memory, { policies: input.policies, chatId: input.chatId, now: input.now })
   );
   // 严格相关性检索需要显式开启；无命中时不再以最近的无关记忆补位。
-  if (process.env.COGNITIVE_RETRIEVAL_V2 === '1') {
+  // 开关由调用方（readMemory）从合并开关读好传进来；评测 Harness 不传时回落 env，行为不变。
+  if (input.strictRelevance ?? process.env.COGNITIVE_RETRIEVAL_V2 === '1') {
     const originals = new Map(usable.map((memory) => [memory.id, memory]));
     const candidates = usable.map((memory) => ({ ...memory, vector: input.vectors?.get(memory.id) ?? null }));
     return rankMemoriesWithEvidence(input.query, candidates, { limit, queryVector: input.queryVector })
@@ -303,7 +316,7 @@ export function selectMemoryCandidates(input: MemorySelectionInput): MemoryDto[]
   if (input.queryVector == null) {
     // 衰减排序（Phase 5）默认关：实测它降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」
     // 保持原排序。env COGNITIVE_MEMORY_DECAY=1 才用衰减 tie-break（相关度优先，同分按新近+确认+稳定）。
-    if (!memoryDecayEnabled()) return rankMemories(input.query, usable, { limit });
+    if (!(input.decayRanking ?? memoryDecayEnabled())) return rankMemories(input.query, usable, { limit });
     const scored = scoreByKeyword(input.query, usable);
     scored.sort(
       (left, right) =>

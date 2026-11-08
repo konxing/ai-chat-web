@@ -307,6 +307,8 @@ function ConfigTab() {
   const [cognitiveExtractionProviderId, setCognitiveExtractionProviderId] = useState('');
   const [cognitiveSessionSummaryEnabled, setCognitiveSessionSummaryEnabled] = useState(false);
   const [cognitiveAutoConfirmEnabled, setCognitiveAutoConfirmEnabled] = useState(true);
+  const [cognitiveRetrievalEnhanced, setCognitiveRetrievalEnhanced] = useState(false);
+  const [cognitiveContextEnhanced, setCognitiveContextEnhanced] = useState(true);
   const [providers, setProviders] = useState<ProviderDto[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -324,6 +326,8 @@ function ConfigTab() {
           cognitiveExtractionProviderId: string | null;
           cognitiveSessionSummaryEnabled: boolean;
           cognitiveAutoConfirmEnabled: boolean;
+          cognitiveRetrievalEnhanced: boolean;
+          cognitiveContextEnhanced: boolean;
         };
         providers: ProviderDto[];
       }>('/api/admin/config');
@@ -336,6 +340,8 @@ function ConfigTab() {
       setCognitiveExtractionProviderId(data.settings.cognitiveExtractionProviderId ?? '');
       setCognitiveSessionSummaryEnabled(data.settings.cognitiveSessionSummaryEnabled);
       setCognitiveAutoConfirmEnabled(data.settings.cognitiveAutoConfirmEnabled);
+      setCognitiveRetrievalEnhanced(data.settings.cognitiveRetrievalEnhanced);
+      setCognitiveContextEnhanced(data.settings.cognitiveContextEnhanced);
       setProviders(data.providers);
     } catch (err) {
       setError(errorMessage(err));
@@ -367,6 +373,8 @@ function ConfigTab() {
           cognitiveExtractionProviderId: cognitiveExtractionProviderId || null,
           cognitiveSessionSummaryEnabled,
           cognitiveAutoConfirmEnabled,
+          cognitiveRetrievalEnhanced,
+          cognitiveContextEnhanced,
           confirmPassword: password
         }
       });
@@ -498,6 +506,36 @@ function ConfigTab() {
               className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
               checked={cognitiveAutoConfirmEnabled}
               onChange={(e) => setCognitiveAutoConfirmEnabled(e.target.checked)}
+            />
+          </label>
+          <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+            <div>
+              <div className="text-[13px] font-medium text-white/80">检索与整理增强</div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
+                一个开关控制四项：严格相关性检索（无命中不拿无关记忆补位）、混合语义检索（向量臂）、
+                记忆衰减排序、记忆巩固（同义冗余归档）。默认关；打开后四项一起生效。
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+              checked={cognitiveRetrievalEnhanced}
+              onChange={(e) => setCognitiveRetrievalEnhanced(e.target.checked)}
+            />
+          </label>
+          <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+            <div>
+              <div className="text-[13px] font-medium text-white/80">上下文增强</div>
+              <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
+                一个开关控制两项：记忆溯源展开（追问细节时回原始对话取原文）、能力观察注入对话。
+                默认开（保住溯源展开）；能力观察只有你在能力面板启用了维度才会真正注入。
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+              checked={cognitiveContextEnhanced}
+              onChange={(e) => setCognitiveContextEnhanced(e.target.checked)}
             />
           </label>
           <div>

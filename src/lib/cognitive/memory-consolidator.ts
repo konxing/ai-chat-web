@@ -3,6 +3,7 @@ import { log } from '@/lib/logger';
 import { archiveMemory, listMemories, type MemoryDto } from './memories';
 import { normalizeForMatch } from './normalize';
 import { recordConsolidationRelation } from './relations';
+import { consolidationEnabled } from './cognitive-flags';
 
 /**
  * 记忆巩固（混合式记忆升级 Phase 3，借鉴 LangMem 的后台 consolidation）。
@@ -83,7 +84,7 @@ export interface ConsolidationOutcome {
 
 /** 后台跑一轮巩固。关着时一个库都不读；任何一步失败只记 id，不抛给 worker。 */
 export async function runMemoryConsolidation(userId: string): Promise<ConsolidationOutcome> {
-  if (!memoryConsolidationEnabled()) return { groups: 0, archived: 0 };
+  if (!(await consolidationEnabled())) return { groups: 0, archived: 0 };
   const outcome: ConsolidationOutcome = { groups: 0, archived: 0 };
   try {
     const memories = await listMemories(userId);

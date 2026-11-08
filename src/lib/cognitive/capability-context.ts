@@ -3,11 +3,12 @@ import { decryptString } from '@/lib/crypto';
 import { cognitiveColumnAad } from './encrypted-columns';
 import { scoreByKeyword } from './retrieval';
 import { analyzeCapability } from './capability-analysis';
+import { capabilityContextEnabled } from './cognitive-flags';
 import type { CognitiveBlock } from './manager';
 
 /** Read-only, gated personal capability context. Never treats task averages as intelligence scores. */
 export async function capabilityContextBlocks(userId: string, query: string): Promise<CognitiveBlock[]> {
-  if (process.env.COGNITIVE_CAPABILITY_CONTEXT !== '1') return [];
+  if (!(await capabilityContextEnabled())) return [];
   const rows = await prisma.capabilityDimension.findMany({
     where: { userId, enabled: true }, orderBy: { createdAt: 'desc' }, take: 40
   });
