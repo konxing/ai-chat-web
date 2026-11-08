@@ -1514,7 +1514,7 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
     expect(db.creates.map((row) => row.content)).toEqual(['我在用 Next.js 15 和 Prisma']);
   });
 
-  it('AI 审核开着时「先问再记」不再问用户：审核认可就直接落库', async () => {
+  it('AI 审核开启也遵守用户的先问再记策略，不越权落库', async () => {
     db.memoryEnabled = true;
     db.aiEnabled = true;
     db.aiReviewed = [{ text: '我在用 Prisma', type: 'project' }];
@@ -1522,8 +1522,8 @@ describe('写侧：AI 记忆审核是闸门（默认关）', () => {
 
     await write('我在用 Prisma。');
 
-    expect(db.proposals).toEqual([]);
-    expect(db.creates.map((row) => row.content)).toEqual(['我在用 Prisma']);
+    expect(db.proposals).toHaveLength(1);
+    expect(db.creates).toEqual([]);
   });
 
   it('AI 审核关着时仍按用户策略先问：决定权回到用户那边', async () => {
