@@ -9,6 +9,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * 它们各自的行为在 cognitive-memories、cognitive-memory-policy、cognitive-preferences 里已经测过，
  * 这里要测的是把它们串起来的那段决策与渲染。
  */
+
+/** New read-side augmentations are covered separately; preserve legacy wiring fixtures here. */
+vi.mock('@/lib/cognitive/memory-verification', () => ({
+  filterVerifiedMemoryPool: (_userId: string, rows: unknown[]) => Promise.resolve(rows)
+}));
+vi.mock('@/lib/cognitive/knowledge-wiki', () => ({
+  wikiContextBlocks: () => Promise.resolve([])
+}));
+vi.mock('@/lib/cognitive/experience', () => ({
+  experienceContextBlocks: () => Promise.resolve([])
+}));
+
 const db = vi.hoisted(() => ({
   memoryEnabled: false,
   memoryWritePaused: false,

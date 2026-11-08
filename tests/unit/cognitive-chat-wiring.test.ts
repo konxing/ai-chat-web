@@ -8,6 +8,18 @@ import { toOutboundTexts } from './outbound-message';
  * 开关关着不出现、读失败也不能把对话带下水。
  * 这一片只测「链路通不通」，决策与渲染在 cognitive-memory-module.test.ts 里已经钉过。
  */
+
+/** New read-side augmentations are covered separately; preserve legacy wiring fixtures here. */
+vi.mock('@/lib/cognitive/memory-verification', () => ({
+  filterVerifiedMemoryPool: (_userId: string, rows: unknown[]) => Promise.resolve(rows)
+}));
+vi.mock('@/lib/cognitive/knowledge-wiki', () => ({
+  wikiContextBlocks: () => Promise.resolve([])
+}));
+vi.mock('@/lib/cognitive/experience', () => ({
+  experienceContextBlocks: () => Promise.resolve([])
+}));
+
 const db = vi.hoisted(() => ({
   memoryEnabled: false,
   rows: [] as Array<Record<string, unknown>>,

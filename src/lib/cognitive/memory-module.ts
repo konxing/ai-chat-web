@@ -225,13 +225,29 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     now
   );
   const blocks = renderMemoryBlock(memories, confidence, emotionTransparency, related);
-  // Only user-confirmed Wiki pages can contribute; opt-in profile and admin retrieval gates apply.
+  // Optional knowledge sources must not consume the main memory module's 1-second deadline.
+  // Resolve in parallel; late/failed enrichment is discarded without affecting base recall.
   if (preference.userModelEnabled && (await strictRelevanceEnabled())) {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      blocks.push(...(await wikiContextBlocks(turn.userId, turn.content)));
-      blocks.push(...(await experienceContextBlocks(turn.userId, turn.content)));
+      const enriched = await Promise.race([
+        Promise.allSettled([
+          wikiContextBlocks(turn.userId, turn.content),
+          experienceContextBlocks(turn.userId, turn.content)
+        ]),
+        new Promise<null>((resolve) => {
+          timeout = setTimeout(() => resolve(null), 120);
+        })
+      ]);
+      if (enriched !== null) {
+        for (const result of enriched) {
+          if (result.status === 'fulfilled') blocks.push(...result.value);
+        }
+      }
     } catch {
-      log.warn('cognitive.wiki_read_failed', { userId: turn.userId, reason: 'unavailable' });
+      log.warn('cognitive.knowledge_enrichment_failed', { userId: turn.userId });
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
