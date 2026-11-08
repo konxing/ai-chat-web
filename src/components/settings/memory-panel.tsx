@@ -58,7 +58,7 @@ interface ChainEntry {
 }
 
 /** 一屏只开一个展开区，所以这些形态得是一份类型：加一栏只许改一处。 */
-type PanelKind = 'edit' | 'archive' | 'retract' | 'history' | 'purge' | 'evidence';
+type PanelKind = 'edit' | 'archive' | 'retract' | 'history' | 'purge' | 'evidence' | 'verification';
 
 type Panel = { kind: PanelKind; id: string } | null;
 
@@ -112,6 +112,9 @@ export function MemoryPanel() {
   const [removingId, setRemovingId] = useState('');
 
   const [panel, setPanel] = useState<Panel>(null);
+  const [verifyStatus, setVerifyStatus] = useState<'UNVERIFIED' | 'VERIFIED' | 'DISPUTED' | 'REFUTED'>('UNVERIFIED');
+  const [verifyVolatility, setVerifyVolatility] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
+  const [verifyExpires, setVerifyExpires] = useState('');
   const [chain, setChain] = useState<ChainEntry[]>([]);
   const [chainBusy, setChainBusy] = useState(false);
 
@@ -242,6 +245,42 @@ export function MemoryPanel() {
     close();
     setPanel({ kind, id: memory.id });
     return true;
+  }
+
+  async function openVerification(memory: MemoryDto) {
+    if (!reopen('verification', memory)) return;
+    try {
+      const data = await apiFetch<{
+        verification: { status: 'UNVERIFIED' | 'VERIFIED' | 'DISPUTED' | 'REFUTED';
+          volatility: 'LOW' | 'MEDIUM' | 'HIGH'; expiresAt: string | null }
+      }>(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}/verification`);
+      setVerifyStatus(data.verification.status);
+      setVerifyVolatility(data.verification.volatility);
+      setVerifyExpires(data.verification.expiresAt?.slice(0, 10) ?? '');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+      close();
+    }
+  }
+
+  async function saveVerification(memory: MemoryDto) {
+    setBusyId(memory.id);
+    try {
+      await apiFetch(`/api/account/cognitive/memories/${encodeURIComponent(memory.id)}/verification`, {
+        method: 'PATCH',
+        json: {
+          status: verifyStatus, volatility: verifyVolatility,
+          expiresAt: verifyExpires ? new Date(verifyExpires + 'T23:59:59Z').toISOString() : null
+        }
+      });
+      push('记忆核验状态已更新');
+      close();
+      await load();
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusyId('');
+    }
   }
 
   async function openHistory(memory: MemoryDto) {
@@ -629,6 +668,7 @@ export function MemoryPanel() {
             const isHistory = panel?.kind === 'history' && panel.id === memory.id;
             const isPurge = panel?.kind === 'purge' && panel.id === memory.id;
             const isEvidence = panel?.kind === 'evidence' && panel.id === memory.id;
+            const isVerification = panel?.kind === 'verification' && panel.id === memory.id;
             const band = confidence[memory.id]?.band;
             // 再巩固标记和访问次数：服务端没给条目就是「没算过 / 没带过」，界面不许自己补。
             const flags = reviews[memory.id] ?? [];
@@ -753,6 +793,13 @@ export function MemoryPanel() {
                     </button>
                     <button
                       type="button"
+                      className="btn-ghost !px-2.5 !py-1.5 !text-[12px]"
+                      onClick={() => void openVerification(memory)}
+                    >
+                      <Scale className="h-3.5 w-3.5" /> 核验状态
+                    </button>
+                    <button
+                      type="button"
                       className="btn-ghost !px-2.5 !py-1.5 !text-[12px] hover:text-red-300"
                       onClick={() => reopen('purge', memory)}
                     >
@@ -760,6 +807,40 @@ export function MemoryPanel() {
                     </button>
                   </div>
                 </div>
+
+                {isVerification ? (
+                  <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
+                    <p className="text-xs text-white/50">只影响这一条记忆的使用。标记为有争议、已证伪或过期后，不再注入聊天。</p>
+                    <label className="block space-y-1 text-xs text-white/70">
+                      <span>核验状态</span>
+                      <select className="field" value={verifyStatus}
+                        onChange={(e) => setVerifyStatus(e.target.value as typeof verifyStatus)}>
+                        <option value="UNVERIFIED">待核验</option>
+                        <option value="VERIFIED">我已核验</option>
+                        <option value="DISPUTED">存在争议</option>
+                        <option value="REFUTED">已经证伪</option>
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-xs text-white/70">
+                      <span>变化频率</span>
+                      <select className="field" value={verifyVolatility}
+                        onChange={(e) => setVerifyVolatility(e.target.value as typeof verifyVolatility)}>
+                        <option value="LOW">低（长期稳定）</option>
+                        <option value="MEDIUM">中（可能变化）</option>
+                        <option value="HIGH">高（需要经常重新确认）</option>
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-xs text-white/70">
+                      <span>有效期截止（可选）</span>
+                      <input type="date" className="field" value={verifyExpires}
+                        onChange={(e) => setVerifyExpires(e.target.value)} />
+                    </label>
+                    <button type="button" className="btn-primary"
+                      disabled={busyId === memory.id} onClick={() => void saveVerification(memory)}>
+                      保存核验状态
+                    </button>
+                  </div>
+                ) : null}
 
                 {isEdit ? (
                   <div className="mt-3 space-y-2.5 border-t border-white/[0.06] pt-3">
