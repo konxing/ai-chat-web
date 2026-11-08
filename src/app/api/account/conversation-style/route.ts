@@ -1,0 +1,33 @@
+import { z } from 'zod';
+import { api, readJson } from '@/lib/http';
+import { requireUser } from '@/lib/auth';
+import { getConversationStyle, setConversationStyle } from '@/lib/cognitive/conversation/style/style-profile';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const styleSchema = z.object({
+  knowledgeDepth: z.enum(['low', 'medium', 'high']).optional(),
+  naturalness: z.enum(['low', 'medium', 'high']).optional(),
+  structure: z.enum(['minimal', 'dynamic', 'rich']).optional(),
+  proactivity: z.enum(['low', 'medium', 'high']).optional(),
+  restraint: z.enum(['low', 'medium', 'high']).optional(),
+  length: z.enum(['short', 'dynamic', 'long']).optional(),
+  factuality: z.enum(['standard', 'high']).optional()
+});
+
+/** 普通用户查看/修改自己的表达偏好（严格隔离，只动本人）。 */
+export async function GET(req: Request) {
+  return api(async () => {
+    const { user } = await requireUser(req);
+    return { style: await getConversationStyle(user.id) };
+  });
+}
+
+export async function PUT(req: Request) {
+  return api(async () => {
+    const { user } = await requireUser(req);
+    const patch = styleSchema.parse(await readJson(req));
+    return { style: await setConversationStyle(user.id, patch) };
+  });
+}

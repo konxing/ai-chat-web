@@ -46,6 +46,7 @@ import { IpRulesTab } from '@/components/admin/ip-rules-tab';
 import { LogsTab } from '@/components/admin/logs-tab';
 import { ModelsTab } from '@/components/admin/models-tab';
 import { StorageTab } from '@/components/admin/storage-tab';
+import { ConversationTab } from '@/components/admin/conversation-tab';
 
 type Tab =
   | 'overview'
@@ -57,7 +58,8 @@ type Tab =
   | 'audit'
   | 'access'
   | 'storage'
-  | 'service';
+  | 'service'
+  | 'conversation';
 
 const NAV: Array<{ key: Tab; label: string; icon: typeof Gauge; group: string }> = [
   { key: 'overview', label: '安全概览', icon: Gauge, group: '总览' },
@@ -68,6 +70,7 @@ const NAV: Array<{ key: Tab; label: string; icon: typeof Gauge; group: string }>
   { key: 'access', label: '访问日志', icon: FileClock, group: '访问控制' },
   { key: 'models', label: '全局模型', icon: Bot, group: '系统' },
   { key: 'config', label: '系统配置', icon: Settings2, group: '系统' },
+  { key: 'conversation', label: '对话智能', icon: Settings2, group: '系统' },
   { key: 'storage', label: '存储与备份', icon: HardDrive, group: '系统' },
   { key: 'service', label: '服务状态', icon: Server, group: '系统' }
 ];
@@ -163,6 +166,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
           {tab === 'access' ? <LogsTab mode="access" /> : null}
           {tab === 'models' ? <ModelsTab /> : null}
           {tab === 'config' ? <ConfigTab /> : null}
+          {tab === 'conversation' ? <ConversationTab /> : null}
           {tab === 'storage' ? <StorageTab /> : null}
           {tab === 'service' ? <ServiceTab /> : null}
         </div>

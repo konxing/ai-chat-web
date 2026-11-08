@@ -253,3 +253,12 @@ curl -sS -X DELETE \
   程序只应看 `error.code`。
 - 向量相关状态（`NO_EMBEDDING_MODEL`、`EMBEDDING_FAILED`）只影响召回质量，
   不影响聊天与记忆的读写；没有可用端点时自动降级为关键词检索。
+
+## 对话智能层
+
+- `GET /api/account/conversation-style`：返回本人表达偏好 `{style}`（知识深度/长度/结构/主动/克制/自然/事实）。
+- `PUT /api/account/conversation-style`：修改本人表达偏好（部分字段），只影响表达，不影响事实/安全。
+- `GET /api/admin/conversation`：OWNER。返回 `{enabled, defaultStyle, versions, activeVersion}`（Prompt Inspector 数据）。
+- `PATCH /api/admin/conversation`：OWNER+密码。`{enabled, confirmPassword}` 开关对话智能层。
+- `POST /api/admin/conversation`：OWNER+密码。`{action:'candidate',content}` 新增候选版本（不生效）；
+  `{action:'activate',id}` 激活/回滚版本。候选须评测后才能激活。

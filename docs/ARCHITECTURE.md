@@ -128,6 +128,25 @@
 | `src/lib/cognitive/pending-confirmation-sweep.ts` | 待确认自动裁决（默认开，开关 `cognitiveAutoConfirmEnabled`）：记忆候选（PENDING）、决策记录（PENDING_CONFIRM）、画像建议超过 24 小时未处理时，一次模型调用逐条判 keep/drop——保留走用户点「记住」的同一条链路，丢弃则拒绝或进入画像忽略名单；模型失败不改任何状态，条目继续等。进程内同一用户每小时至多重试一次 |
 | `src/lib/cognitive/profile-dismissed.ts` | 画像建议的「已忽略」名单（按用户存在 SystemConfig 键里，不建表）：AI 判丢弃的画像建议记在这里，画像读侧据此不再摆出；名单丢失最坏只是旧建议重新露出 |
 | `src/lib/cognitive/cognitive-flags.ts` | 实验功能合并开关（后台两个开关，env 兜底）：「检索与整理增强」一次控制严格相关性/混合语义/衰减排序/记忆巩固（默认关）；「上下文增强」一次控制溯源展开/能力观察注入（默认开，保住溯源）。后台配置优先、没配置时各自回落原 env |
+
+## 对话智能层（Conversational Intelligence Layer）
+
+目录 `src/lib/cognitive/conversation/`，复用现有聊天调用链（`buildConversation`→`streamChatCompletion`），
+不新增独立服务/数据库/运行环境。总开关 `conversationLayerEnabled`（默认关，后台「对话智能」页/env 打开）。
+
+- `core/conversation-policy.ts`：全局交流原则 + 14 条语言规则（降低模板化，不禁止句式）。
+- `mode/`：八模式定义 + 规则式检测器（当前会话明确要求优先；零 LLM 调用；允许多模式共存）。
+- `planning/`：Response Planner 轻量策略（九策略组合），产出内部 plan，不展示、不额外调用模型。
+- `style/`：用户表达偏好（按用户隔离存 SystemConfig）+ 示例对话库（每轮只注入当前模式 ≤2 条）。
+- `knowledge/`：跨领域/因果/多视角/整合 + 证据约束（不编造引用），只在该深入的模式注入。
+- `learning/`：只学明确表达反馈（GLOBAL 持久化、TEMPORARY 不写库），不凭点赞/次数推断。
+- `quality/`：轻量程序检查（模板/重复/无必要总结/违反格式），供评测统计，不拦截。
+- `prompts/`：Prompt Builder（优先级组合+字符预算）+ 版本化（候选须评测才激活、可回滚）。
+
+提示词优先级：系统安全/事实 > 全局原则 > 用户风格 > 模式 > 知识 > 规划 > 示例 > 个人记忆 > 历史。
+成本控制：默认单次生成；模式/规划/质量全为程序规则；对话块字符预算 1600，示例超预算先裁剪。
+评测：`scripts/conversation-eval/`（100 单轮+20 多轮固定集、匿名成对盲测、LLM-as-judge、token 统计）。
+实测对强模型（deepseek）该层无显著增益，故默认关；价值在模板化重的弱模型。详见 docs/CONVERSATION_LAYER.md 与 CONVERSATION_EVAL_REPORT.md。
 | `src/lib/cognitive/memory-consolidator.ts` | 后台巩固（Phase 3，默认关）：同 type+context 高相似度冗余记忆聚簇，最新为主、其余可逆归档 + PART_OF 证据边 |
 | `src/lib/cognitive/memory-decay.ts` | 衰减优先级（Phase 5，默认关）：由新近度+确认+类型稳定派生，只降召回优先级不删历史。**实测降召回（Recall@8 0.7274→0.7181），按「无实测收益不默认启用」关闭**，env COGNITIVE_MEMORY_DECAY=1 才接进读侧 |
 | `src/lib/cognitive/memory-display.ts`（五类记忆） | 六个 `MemoryType` 之上的功能分类：情景（project/decision/emotion）、语义（fact/长期 goal）、程序（preference）、前瞻（带未来说法的 goal）；working 是会话层不入库。纯函数派生，不另存列 |
