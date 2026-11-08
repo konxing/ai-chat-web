@@ -24,6 +24,8 @@ import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
 import { recordMemoryAccess } from '@/lib/cognitive/access';
 import { enqueueCognitiveTask } from '@/lib/cognitive/task-queue';
+import { conversationLayerEnabled } from '@/lib/cognitive/cognitive-flags';
+import { learnConversationPreference } from '@/lib/cognitive/conversation/learning/preference-extractor';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -187,6 +189,11 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           sourceMessageId: userMessage.id,
           memoryIds: citedMemoryIds
         });
+        // 对话智能层 Phase 6：从用户这轮的明确表达反馈学习长期风格（仅 GLOBAL 持久化）。
+        // 异步、不阻塞、失败静默；开关关着时一次都不跑。
+        if (await conversationLayerEnabled().catch(() => false)) {
+          void learnConversationPreference(user.id, content).catch(() => undefined);
+        }
       } catch (err) {
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';
         const code = err instanceof ApiError ? err.code : 'AI_ERROR';
