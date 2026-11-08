@@ -36,7 +36,10 @@ export type CognitiveAadPurpose =
   | 'decision'
   | 'decision-outcome'
   | 'reflection'
-  | 'user-profile';
+  | 'user-profile'
+  | 'capability-dimension'
+  | 'capability-evidence'
+  | 'capability-intervention';
 
 export type CognitiveAadCoord = {
   purpose: CognitiveAadPurpose;

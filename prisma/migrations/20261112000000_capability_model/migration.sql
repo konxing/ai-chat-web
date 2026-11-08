@@ -1,0 +1,20 @@
+
+CREATE TABLE "CapabilityDimension" ("id" TEXT NOT NULL,"userId" TEXT NOT NULL,"key" VARCHAR(64) NOT NULL,"titleCiphertext" TEXT NOT NULL,"goalCiphertext" TEXT,"enabled" BOOLEAN NOT NULL DEFAULT true,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,CONSTRAINT "CapabilityDimension_pkey" PRIMARY KEY ("id"));
+CREATE UNIQUE INDEX "CapabilityDimension_id_userId_key" ON "CapabilityDimension"("id","userId");
+CREATE UNIQUE INDEX "CapabilityDimension_userId_key_key" ON "CapabilityDimension"("userId","key");
+CREATE INDEX "CapabilityDimension_userId_enabled_idx" ON "CapabilityDimension"("userId","enabled");
+ALTER TABLE "CapabilityDimension" ADD CONSTRAINT "CapabilityDimension_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE TABLE "CapabilityEvidence" ("id" TEXT NOT NULL,"userId" TEXT NOT NULL,"dimensionId" TEXT NOT NULL,"sourceMessageId" TEXT,"kind" VARCHAR(24) NOT NULL,"score" DOUBLE PRECISION,"noteCiphertext" TEXT NOT NULL,"observedAt" TIMESTAMP(3) NOT NULL,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "CapabilityEvidence_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "CapabilityEvidence_userId_dimensionId_observedAt_idx" ON "CapabilityEvidence"("userId","dimensionId","observedAt");
+CREATE INDEX "CapabilityEvidence_sourceMessageId_idx" ON "CapabilityEvidence"("sourceMessageId");
+ALTER TABLE "CapabilityEvidence" ADD CONSTRAINT "CapabilityEvidence_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CapabilityEvidence" ADD CONSTRAINT "CapabilityEvidence_dimensionId_userId_fkey" FOREIGN KEY ("dimensionId","userId") REFERENCES "CapabilityDimension"("id","userId") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CapabilityEvidence" ADD CONSTRAINT "CapabilityEvidence_sourceMessageId_fkey" FOREIGN KEY ("sourceMessageId") REFERENCES "Message"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE TABLE "CapabilitySnapshot" ("id" TEXT NOT NULL,"userId" TEXT NOT NULL,"dimensionId" TEXT NOT NULL,"estimate" DOUBLE PRECISION,"confidence" DOUBLE PRECISION NOT NULL,"sampleCount" INTEGER NOT NULL,"trend" DOUBLE PRECISION,"calculatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,CONSTRAINT "CapabilitySnapshot_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "CapabilitySnapshot_userId_dimensionId_calculatedAt_idx" ON "CapabilitySnapshot"("userId","dimensionId","calculatedAt");
+ALTER TABLE "CapabilitySnapshot" ADD CONSTRAINT "CapabilitySnapshot_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CapabilitySnapshot" ADD CONSTRAINT "CapabilitySnapshot_dimensionId_userId_fkey" FOREIGN KEY ("dimensionId","userId") REFERENCES "CapabilityDimension"("id","userId") ON DELETE CASCADE ON UPDATE CASCADE;
+CREATE TABLE "InterventionRecord" ("id" TEXT NOT NULL,"userId" TEXT NOT NULL,"dimensionId" TEXT NOT NULL,"suggestionCiphertext" TEXT NOT NULL,"source" VARCHAR(24) NOT NULL,"status" VARCHAR(24) NOT NULL DEFAULT 'PROPOSED',"feedbackCiphertext" TEXT,"effectiveness" DOUBLE PRECISION,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL,"completedAt" TIMESTAMP(3),CONSTRAINT "InterventionRecord_pkey" PRIMARY KEY ("id"));
+CREATE INDEX "InterventionRecord_userId_dimensionId_status_idx" ON "InterventionRecord"("userId","dimensionId","status");
+ALTER TABLE "InterventionRecord" ADD CONSTRAINT "InterventionRecord_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "InterventionRecord" ADD CONSTRAINT "InterventionRecord_dimensionId_userId_fkey" FOREIGN KEY ("dimensionId","userId") REFERENCES "CapabilityDimension"("id","userId") ON DELETE CASCADE ON UPDATE CASCADE;

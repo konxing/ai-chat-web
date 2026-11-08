@@ -263,6 +263,10 @@ model User {
   reflectionCitations ReflectionCitation[]
   memoryAccessTurns   MemoryAccessTurn[]
   userProfileEntries  UserProfileEntry[]
+  capabilityDimensions CapabilityDimension[]
+  capabilityEvidences CapabilityEvidence[]
+  capabilitySnapshots CapabilitySnapshot[]
+  interventionRecords InterventionRecord[]
   attachments         Attachment[]
   loginLogs           LoginLog[]
   auditLogs           AuditLog[]           @relation("AuditActor")
@@ -334,6 +338,7 @@ model Message {
   accessTurns MemoryAccessTurn[] @relation("MemoryAccessTurnSource")
   decisions   DecisionRecord[]   @relation("DecisionSource")
   outcomes    DecisionOutcome[]  @relation("OutcomeSource")
+  capabilityEvidences CapabilityEvidence[] @relation("CapabilityEvidenceSource")
 
   @@index([chatId, createdAt])
 }
@@ -1024,4 +1029,67 @@ model UserProfileEntry {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, confirmedAt])
+}
+
+model CapabilityDimension {
+  id String @id @default(uuid())
+  userId String
+  key String @db.VarChar(64)
+  titleCiphertext String @db.Text
+  goalCiphertext String? @db.Text
+  enabled Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evidences CapabilityEvidence[]
+  snapshots CapabilitySnapshot[]
+  interventions InterventionRecord[]
+  @@unique([id, userId])
+  @@unique([userId, key])
+  @@index([userId, enabled])
+}
+model CapabilityEvidence {
+  id String @id @default(uuid())
+  userId String
+  dimensionId String
+  sourceMessageId String?
+  kind String @db.VarChar(24)
+  score Float?
+  noteCiphertext String @db.Text
+  observedAt DateTime
+  createdAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dimension CapabilityDimension @relation(fields: [dimensionId, userId], references: [id, userId], onDelete: Cascade)
+  source Message? @relation("CapabilityEvidenceSource", fields: [sourceMessageId], references: [id], onDelete: Cascade)
+  @@index([userId, dimensionId, observedAt])
+  @@index([sourceMessageId])
+}
+model CapabilitySnapshot {
+  id String @id @default(uuid())
+  userId String
+  dimensionId String
+  estimate Float?
+  confidence Float
+  sampleCount Int
+  trend Float?
+  calculatedAt DateTime @default(now())
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dimension CapabilityDimension @relation(fields: [dimensionId, userId], references: [id, userId], onDelete: Cascade)
+  @@index([userId, dimensionId, calculatedAt])
+}
+model InterventionRecord {
+  id String @id @default(uuid())
+  userId String
+  dimensionId String
+  suggestionCiphertext String @db.Text
+  source String @db.VarChar(24)
+  status String @default("PROPOSED") @db.VarChar(24)
+  feedbackCiphertext String? @db.Text
+  effectiveness Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dimension CapabilityDimension @relation(fields: [dimensionId, userId], references: [id, userId], onDelete: Cascade)
+  @@index([userId, dimensionId, status])
 }
