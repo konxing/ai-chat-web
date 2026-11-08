@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseSummaryPoints,
   planSummary,
+  canAutoReviseSummary,
   SESSION_SUMMARY_MAX_POINTS,
   SESSION_SUMMARY_MAX_TEXT
 } from '@/lib/cognitive/memory-session-summary';
@@ -100,5 +101,18 @@ describe('planSummary：重复并、超出上限、归档清单', () => {
     const plan = planSummary(points);
     expect(plan.create).toHaveLength(SESSION_SUMMARY_MAX_POINTS);
     expect(plan.rejected).toBe(2);
+  });
+});
+
+describe('AI summary revision safety', () => {
+  it('never treats user-authored or confirmed memories as freely replaceable', () => {
+    expect(canAutoReviseSummary({ origin: 'explicit', confirmedAt: null, supersededAt: null })).toBe(false);
+    expect(canAutoReviseSummary({ origin: 'userConfirmed', confirmedAt: '2026-11-01', supersededAt: null })).toBe(false);
+    expect(canAutoReviseSummary({ origin: 'inferred', confirmedAt: '2026-11-01', supersededAt: null })).toBe(false);
+  });
+  it('only supersedes live, unconfirmed system summaries', () => {
+    expect(canAutoReviseSummary({ origin: 'inferred', confirmedAt: null, supersededAt: null })).toBe(true);
+    expect(canAutoReviseSummary({ origin: 'inferred', confirmedAt: null, supersededAt: '2026-11-01' })).toBe(false);
+    expect(canAutoReviseSummary(undefined)).toBe(false);
   });
 });

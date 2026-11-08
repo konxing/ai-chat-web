@@ -170,6 +170,15 @@ export function planSummary(points: readonly SummaryPoint[]): SummaryPlan {
   return { create, duplicates, archive: [...archive], rejected };
 }
 
+/**
+ * Background summaries must not supersede what the user said or confirmed.
+ * Only earlier, unconfirmed AI summaries can be replaced automatically.
+ */
+export function canAutoReviseSummary(previous: Pick<MemoryDto, 'origin' | 'confirmedAt' | 'supersededAt'> | undefined): boolean {
+  return Boolean(previous && previous.origin === 'inferred' &&
+    previous.confirmedAt === null && previous.supersededAt === null);
+}
+
 export interface SessionSummaryOutcome {
   created: number;
   updated: number;
@@ -236,15 +245,18 @@ export async function summarizeChatMemories(
   }
 
   const fragmentById = new Map(fragments.map((memory) => [memory.id, memory]));
-  const related = plan.archive
-    .map((id) => fragmentById.get(id))
-    .filter((memory): memory is MemoryDto => Boolean(memory))
-    .map((memory) => ({ id: memory.id, content: memory.content, context: memory.context }));
-
+  const otherById = new Map(others.map((memory) => [memory.id, memory]));
+  // Only archive source fragments after the corresponding summary was persisted successfully.
+  const safelySummarized = new Set<string>();
   let created = 0;
   let updated = 0;
   for (const point of plan.create) {
     if (point.updates) {
+      const previous = otherById.get(point.updates);
+      if (!canAutoReviseSummary(previous)) {
+        // The model can propose a correction, but cannot overwrite user-asserted or confirmed facts.
+        continue;
+      }
       try {
         await reviseMemory({
           previousId: point.updates,
@@ -252,19 +264,23 @@ export async function summarizeChatMemories(
           content: point.text,
           type: point.type,
           origin: 'inferred',
-          // 会话总结带进出处：这次演化不是用户当场改口，而是系统归纳出「说法有差别」。
           chatId: null,
           sourceMessageId: null,
           reason: 'session_summary'
         });
         updated += 1;
-        continue;
+        for (const id of point.merges) safelySummarized.add(id);
       } catch {
-        // 目标行已被取代或不存在：退回新建，别把这条要点丢掉。
+        // A concurrent revision is not permission to manufacture a second replacement.
       }
+      continue;
     }
     const context: MemoryContext =
       fragmentById.get(point.merges[0])?.context ?? 'general';
+    const related = point.merges
+      .map((id) => fragmentById.get(id))
+      .filter((memory): memory is MemoryDto => Boolean(memory))
+      .map((memory) => ({ id: memory.id, content: memory.content, context: memory.context }));
     await createMemory(
       {
         userId,
@@ -279,10 +295,11 @@ export async function summarizeChatMemories(
       related
     );
     created += 1;
+    for (const id of point.merges) safelySummarized.add(id);
   }
 
   let archived = 0;
-  for (const id of plan.archive) {
+  for (const id of safelySummarized) {
     if (await archiveMemory(id, userId)) archived += 1;
   }
 
