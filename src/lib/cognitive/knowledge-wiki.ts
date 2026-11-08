@@ -131,13 +131,12 @@ export async function wikiContextBlocks(userId: string, query: string): Promise<
     take: 20, orderBy: { updatedAt: 'desc' }
   });
   if (!pages.length) return [];
-  const decoded = pages.map((page) => ({
-    page, title: decryptString(page.titleCiphertext, titleAad(userId, page.id))
-  }));
+  const decoded = pages.map((page) => {
+    const title = decryptString(page.titleCiphertext, titleAad(userId, page.id));
+    return { page, title, content: title, recordedAt: page.updatedAt.toISOString() };
+  });
   const context = classifyContext(query).winner;
-  const scored = scoreByKeyword(query, decoded.map(({ page, title }) => ({
-    page, title, content: title, recordedAt: page.updatedAt.toISOString()
-  })));
+  const scored = scoreByKeyword(query, decoded);
   const relevant = scored.filter((r) => r.score > 0.14).slice(0, 2).map((r) => r.memory);
   if (!relevant.length) {
     const found = decoded.find(({ page }) => page.topicKey === context);
