@@ -18,7 +18,7 @@ import type { AiMessage, ChatContentPart } from './ai';
 import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager';
 import { ensureCognitiveModules } from './cognitive/memory-module';
 import { buildConversationIntelligence } from './cognitive/conversation/core/conversation-engine';
-import { conversationLayerEnabled } from './cognitive/cognitive-flags';
+import { conversationLayerEnabled, conversationEngineVersionFor } from './cognitive/cognitive-flags';
 
 export interface ChatSummary {
   id: string;
@@ -424,6 +424,8 @@ export async function buildConversation(input: {
       const intelligence = await buildConversationIntelligence({
         userId: input.userId,
         currentContent: input.currentContent,
+        providerName: input.provider.name,
+        engineVersion: await conversationEngineVersionFor(input.userId),
         // P1：只读最近 ≤6 轮真实消息构建短生命周期状态，不读其他用户历史。
         recent: trimmed.slice(-6).map((m) => ({
           role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),

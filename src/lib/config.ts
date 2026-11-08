@@ -21,6 +21,8 @@ export interface SystemSettings {
   cognitiveContextEnhanced: boolean;
   /** 对话智能层总开关：默认关，打开后才在 system 里注入交流原则/模式/风格块。 */
   conversationLayerEnabled: boolean;
+  /** P4：对话引擎版本两臂。legacy=旧规则累加；dialogue-v2=话语行为/状态/回应动作。默认 legacy，可灰度。 */
+  conversationEngineVersion: 'legacy' | 'dialogue-v2';
 }
 
 const DEFAULTS: SystemSettings = {
@@ -36,7 +38,8 @@ const DEFAULTS: SystemSettings = {
   cognitiveAutoConfirmEnabled: true,
   cognitiveRetrievalEnhanced: false,
   cognitiveContextEnhanced: true,
-  conversationLayerEnabled: false
+  conversationLayerEnabled: false,
+  conversationEngineVersion: 'legacy'
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -51,7 +54,8 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'cognitiveAutoConfirmEnabled',
   'cognitiveRetrievalEnhanced',
   'cognitiveContextEnhanced',
-  'conversationLayerEnabled'
+  'conversationLayerEnabled',
+  'conversationEngineVersion'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
@@ -72,6 +76,9 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
   }
   if (key === 'defaultProviderId' || key === 'cognitiveExtractionProviderId') {
     return (typeof value === 'string' && value.length > 0 ? value : null) as SystemSettings[K];
+  }
+  if (key === 'conversationEngineVersion') {
+    return (value === 'dialogue-v2' ? 'dialogue-v2' : 'legacy') as SystemSettings[K];
   }
   return (typeof value === 'string' ? value : DEFAULTS[key]) as SystemSettings[K];
 }

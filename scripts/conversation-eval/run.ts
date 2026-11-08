@@ -33,6 +33,10 @@ function arg(name: string, fallback: number): number {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? Number(process.argv[i + 1]) || fallback : fallback;
 }
+function strArg(name: string, fallback: string): string {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] ?? fallback : fallback;
+}
 function hasFlag(name: string): boolean { return process.argv.includes(`--${name}`); }
 
 // 可复现随机（mulberry32）。
@@ -57,8 +61,8 @@ async function generate(provider: Awaited<ReturnType<typeof resolveDefaultProvid
   return { text, input, output, ms: Date.now() - t0 };
 }
 
-async function layerSystemFor(content: string, history: DialogueTurn[]): Promise<string> {
-  const intel = await buildConversationIntelligence({ userId: OWNER, currentContent: content, recentDeep: history.length > 2 });
+async function layerSystemFor(content: string, history: DialogueTurn[], engineVersion: 'legacy' | 'dialogue-v2'): Promise<string> {
+  const intel = await buildConversationIntelligence({ userId: OWNER, currentContent: content, recentDeep: history.length > 2, recent: history, engineVersion });
   return BASE_SYSTEM + '\n\n' + intel.block.text;
 }
 
@@ -75,10 +79,11 @@ async function main() {
   const multiLimit = arg('multi', 4);
   const seed = arg('seed', 42);
   const doJudge = hasFlag('judge');
+  const engine = strArg('engine', 'legacy') === 'dialogue-v2' ? 'dialogue-v2' : 'legacy';
   const rand = rng(seed);
   const provider = await resolveDefaultProvider(OWNER);
   const judgeProvider = doJudge ? provider : null; // 同族评委仅作辅助，报告注明偏差；可换独立模型
-  const runId = `v2-${Date.now().toString(36)}`;
+  const runId = `${engine}-${Date.now().toString(36)}`;
   const sampleDir = new URL(`./samples/${runId}/`, import.meta.url);
   mkdirSync(sampleDir, { recursive: true });
 
@@ -98,7 +103,7 @@ async function main() {
     for (const turn of c.turns) {
       if (turn.role === 'assistant') { baseHist.push(turn); layerHist.push(turn); continue; }
       const baseMsgs = [{ role: 'system' as const, content: BASE_SYSTEM }, ...baseHist, { role: 'user' as const, content: turn.content }];
-      const layerSys = await layerSystemFor(turn.content, layerHist);
+      const layerSys = await layerSystemFor(turn.content, layerHist, engine);
       const layerMsgs = [{ role: 'system' as const, content: layerSys }, ...layerHist, { role: 'user' as const, content: turn.content }];
       baseLast = await generate(provider, baseMsgs);
       layerLast = await generate(provider, layerMsgs);
@@ -149,9 +154,9 @@ async function main() {
   for (const r of results) byCat.set(r.category, [...(byCat.get(r.category) ?? []), r]);
 
   const report = [
-    '# 对话智能层 v2 对照评测报告（P0 重建）',
+    `# 对话智能层对照评测报告（引擎=${engine}）`,
     '',
-    `- 代码版本：见 git HEAD；开关：对话层仅实验臂启用（生产默认 OFF）；Prompt 版本：默认。`,
+    `- 代码版本：见 git HEAD；开关：对话层仅实验臂启用（生产默认 OFF）；引擎臂=${engine}；Prompt 版本：默认。`,
     `- 模型：${provider.name}（${provider.modelId}）；评委：${doJudge ? '同族模型（辅助，有偏差，需人评复核）' : '未启用（仅程序指标）'}；种子=${seed}。`,
     `- 样本：单轮 ${singles.length} + 真实多轮 ${multis.length} = ${results.length}。旧版 8 子样本 5:3 结果**不足以判定提升/退化**（F-10）。`,
     `- 盲测：层 ${layerWins} / 基线 ${baseWins} / 平 ${ties}（n=${judged.length}，小样本，置信区间宽，不作上线依据）。`,
@@ -166,8 +171,9 @@ async function main() {
     '',
     '匿名成对样本存 scripts/conversation-eval/samples/（本地，不含真实用户数据）。人评与独立评委为上线前必需。'
   ].join('\n');
+  writeFileSync(new URL(`../../docs/CONVERSATION_EVAL_REPORT_${engine}.md`, import.meta.url), report);
   writeFileSync(new URL('../../docs/CONVERSATION_EVAL_REPORT.md', import.meta.url), report);
-  console.log('\n报告写入 docs/CONVERSATION_EVAL_REPORT.md');
+  console.log(`\n报告写入 docs/CONVERSATION_EVAL_REPORT_${engine}.md`);
   await prisma.$disconnect();
 }
 

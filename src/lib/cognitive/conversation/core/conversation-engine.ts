@@ -32,6 +32,8 @@ export async function buildConversationIntelligence(input: {
   hasPersonalMemory?: boolean;
   recent?: ReadonlyArray<{ role: 'user' | 'assistant'; content: string }>;
   providerName?: string;
+  /** P4：两臂灰度。legacy=旧规则累加；dialogue-v2=话语行为/状态/回应动作。默认 legacy。 */
+  engineVersion?: 'legacy' | 'dialogue-v2';
 }): Promise<ConversationIntelligence> {
   const content = input.currentContent ?? '';
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
@@ -51,13 +53,14 @@ export async function buildConversationIntelligence(input: {
   });
   const modeText = modeInstruction(mode.mode) +
     (mode.secondary ? `\n同时兼顾：${modeInstruction(mode.secondary)}` : '');
-  // P1：用单一回应动作替代固定累加策略；先承接再展开。
-  const actText = `【本轮回应动作】${ACT_TEXT[act.primary]}` +
-    (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '');
-  const examplesText = [
-    renderDialogueExamples(selectDialogueExamples(understanding.dialogueAct)),
-    renderExamples(selectExamples(mode.mode, mode.secondary))
-  ].filter(Boolean).join('\n') || null;
+  const v2 = (input.engineVersion ?? 'legacy') === 'dialogue-v2';
+  // P4 两臂：legacy 用旧规划累加+单轮示例；dialogue-v2 用单一回应动作+多轮示例。
+  const actText = v2
+    ? `【本轮回应动作】${ACT_TEXT[act.primary]}` + (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '')
+    : plan.planText;
+  const examplesText = v2
+    ? ([renderDialogueExamples(selectDialogueExamples(understanding.dialogueAct)), renderExamples(selectExamples(mode.mode, mode.secondary))].filter(Boolean).join('\n') || null)
+    : renderExamples(selectExamples(mode.mode, mode.secondary));
   const block = buildConversationPrompt({
     style: effectiveStyle,
     versionContent: version?.content ?? null,

@@ -21,6 +21,7 @@ export async function GET(req: Request) {
     const [versions, active] = await Promise.all([listPromptVersions(), getActivePromptVersion()]);
     return {
       enabled: settings.conversationLayerEnabled,
+      engineVersion: settings.conversationEngineVersion,
       defaultStyle: DEFAULT_CONVERSATION_STYLE,
       versions,
       activeVersion: active?.version ?? null
@@ -30,6 +31,7 @@ export async function GET(req: Request) {
 
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
+  engineVersion: z.enum(['legacy', 'dialogue-v2']).optional(),
   confirmPassword: z.string().min(1)
 });
 
@@ -38,11 +40,11 @@ export async function PATCH(req: Request) {
     const { user } = await requireOwner(req);
     const body = patchSchema.parse(await readJson(req));
     await requireOwnerPassword(user.id, body.confirmPassword);
-    const settings = await updateSystemSettings(
-      body.enabled === undefined ? {} : { conversationLayerEnabled: body.enabled },
-      user.id
-    );
-    return { enabled: settings.conversationLayerEnabled };
+    const patch: { conversationLayerEnabled?: boolean; conversationEngineVersion?: 'legacy' | 'dialogue-v2' } = {};
+    if (body.enabled !== undefined) patch.conversationLayerEnabled = body.enabled;
+    if (body.engineVersion !== undefined) patch.conversationEngineVersion = body.engineVersion;
+    const settings = await updateSystemSettings(patch, user.id);
+    return { enabled: settings.conversationLayerEnabled, engineVersion: settings.conversationEngineVersion };
   });
 }
 

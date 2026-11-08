@@ -59,3 +59,14 @@ export function capabilityContextEnabled(): Promise<boolean> {
 export function conversationLayerEnabled(): Promise<boolean> {
   return bundleOrEnv('conversationLayerEnabled', 'COGNITIVE_CONVERSATION_LAYER', false);
 }
+
+/**
+ * P4：对话引擎两臂灰度。默认 legacy；全局 conversationEngineVersion 可设 dialogue-v2；
+ * 按用户键 conversationEngineVersionUser:<userId> 可单独覆盖（小范围灰度），遵守现有权限模型。
+ */
+export async function conversationEngineVersionFor(userId: string): Promise<'legacy' | 'dialogue-v2'> {
+  const perUser = await getRawSystemSetting(`conversationEngineVersionUser:${userId}`).catch(() => null);
+  if (perUser === 'legacy' || perUser === 'dialogue-v2') return perUser;
+  const global = await getRawSystemSetting('conversationEngineVersion').catch(() => null);
+  return global === 'dialogue-v2' ? 'dialogue-v2' : 'legacy';
+}

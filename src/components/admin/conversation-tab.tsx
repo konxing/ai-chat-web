@@ -25,13 +25,15 @@ export function ConversationTab() {
   const [activeVersion, setActiveVersion] = useState<number | null>(null);
   const [candidate, setCandidate] = useState('');
   const [busy, setBusy] = useState(false);
+  const [engineVersion, setEngineVersion] = useState<'legacy' | 'dialogue-v2'>('legacy');
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ enabled: boolean; versions: PromptVersion[]; activeVersion: number | null }>(
+      const data = await apiFetch<{ enabled: boolean; engineVersion: 'legacy' | 'dialogue-v2'; versions: PromptVersion[]; activeVersion: number | null }>(
         '/api/admin/conversation'
       );
       setEnabled(data.enabled);
+      setEngineVersion(data.engineVersion ?? 'legacy');
       setVersions(data.versions);
       setActiveVersion(data.activeVersion);
     } catch (err) {
@@ -42,6 +44,24 @@ export function ConversationTab() {
   }, [push]);
 
   useEffect(() => { void load(); }, [load]);
+
+  async function setEngine(version: 'legacy' | 'dialogue-v2') {
+    const password = await requestPassword('切换对话引擎版本需要验证管理员身份。');
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ engineVersion: 'legacy' | 'dialogue-v2' }>('/api/admin/conversation', {
+        method: 'PATCH',
+        json: { engineVersion: version, confirmPassword: password }
+      });
+      setEngineVersion(data.engineVersion);
+      push(`引擎已切换为 ${data.engineVersion}`);
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function toggle() {
     const password = await requestPassword('修改对话智能开关需要验证管理员身份。');
@@ -121,6 +141,21 @@ export function ConversationTab() {
             onChange={() => void toggle()}
           />
         </label>
+        <div className="mt-4">
+          <label className="label">引擎版本（灰度/回滚）</label>
+          <select
+            className="field"
+            value={engineVersion}
+            disabled={busy}
+            onChange={(e) => void setEngine(e.target.value as 'legacy' | 'dialogue-v2')}
+          >
+            <option value="legacy">legacy（旧规则累加，默认）</option>
+            <option value="dialogue-v2">dialogue-v2（话语行为/状态/回应动作）</option>
+          </select>
+          <p className="mt-1.5 text-[11.5px] text-white/35">
+            默认 legacy；dialogue-v2 需经 A/B 验证非劣后再灰度。按用户覆盖键 conversationEngineVersionUser:&lt;userId&gt; 可小范围开启。回滚=切回 legacy。
+          </p>
+        </div>
       </section>
 
       <section className="panel p-5 sm:p-6">
