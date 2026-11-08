@@ -18,6 +18,7 @@ import {
   LogOut,
   Mail,
   Network,
+  BookOpen,
   Plus,
   Scale,
   Activity,
@@ -51,6 +52,7 @@ import { MemoryGraphPanel } from './memory-graph-panel';
 import { ReflectionPanel } from './reflection-panel';
 import { ProfilePanel } from './profile-panel';
 import { CapabilityPanel } from './capability-panel';
+import { WikiPanel } from './wiki-panel';
 import { CognitiveOverviewPanel, type OverviewTarget } from './cognitive-overview-panel';
 
 interface AccountUser {
@@ -96,6 +98,7 @@ type Tab =
   | 'reflections'
   | 'userModel'
   | 'capabilities'
+  | 'wiki'
   | 'about';
 
 export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
@@ -363,6 +366,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               ['reflections', '洞察', Lightbulb],
               ['userModel', '画像', Fingerprint],
               ['capabilities', '能力成长', Activity],
+              ['wiki', '主题知识库', BookOpen],
               ['about', '安全说明', Lock]
             ] as Array<[Tab, string, typeof UserRound]>
           ).map(([key, label, Icon]) => (
@@ -778,6 +782,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'userModel' ? <ProfilePanel /> : null}
 
           {tab === 'capabilities' ? <CapabilityPanel /> : null}
+
+          {tab === 'wiki' ? <WikiPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

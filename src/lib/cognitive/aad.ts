@@ -39,7 +39,8 @@ export type CognitiveAadPurpose =
   | 'user-profile'
   | 'capability-dimension'
   | 'capability-evidence'
-  | 'capability-intervention';
+  | 'capability-intervention'
+  | 'knowledge-page';
 
 export type CognitiveAadCoord = {
   purpose: CognitiveAadPurpose;

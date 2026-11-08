@@ -33,6 +33,7 @@ import type { Confidence } from './confidence';
 import { getCognitivePreferences, type EmotionTransparency } from './preferences';
 import { rankMemories, rankMemoriesHybrid, rankMemoriesWithEvidence, scoreByKeyword, type NumericVector } from './retrieval';
 import { filterVerifiedMemoryPool } from './memory-verification';
+import { wikiContextBlocks } from './knowledge-wiki';
 import { decayPriority, memoryDecayEnabled } from './memory-decay';
 import { isMemoryUsable } from './retention';
 import { findNearDuplicate, planMemoryWrite } from './write-decision';
@@ -223,6 +224,14 @@ async function readMemory(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
     now
   );
   const blocks = renderMemoryBlock(memories, confidence, emotionTransparency, related);
+  // Only user-confirmed Wiki pages can contribute; opt-in profile and admin retrieval gates apply.
+  if (preference.userModelEnabled && (await strictRelevanceEnabled())) {
+    try {
+      blocks.push(...(await wikiContextBlocks(turn.userId, turn.content)));
+    } catch {
+      log.warn('cognitive.wiki_read_failed', { userId: turn.userId, reason: 'unavailable' });
+    }
+  }
 
   // 追问细节时顺藤溯源（read-side source dive）：记忆里存的是摘要，读侧整块预算才 1500 字，
   // 「这 24 个习惯具体是什么」这种问题摘要装不下。这时按命中记忆的 sourceMessageId 回到原始

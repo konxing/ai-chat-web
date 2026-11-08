@@ -4,6 +4,7 @@ import { log } from '@/lib/logger';
 import { consolidationEnabled } from './cognitive-flags';
 import { getCognitivePreferences } from './preferences';
 import { runSessionSummarySweep } from './memory-session-summary';
+import { buildWikiDrafts } from './knowledge-wiki';
 
 export const DREAMING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const DREAMING_LEASE_MS = 120_000;
@@ -66,6 +67,8 @@ export async function runDreamingSweep(userId: string): Promise<{ ran: boolean; 
     // The summary feature has its own administrator gate, memory preference
     // gate and idle threshold. No extra model calls when disabled.
     await runSessionSummarySweep(userId);
+    // Build only unconfirmed index drafts; reviewed pages are never silently overwritten.
+    await buildWikiDrafts(userId);
   } catch {
     failed = true;
     log.warn('cognitive.dreaming_failed', { userId, reason: 'sweep_failed' });

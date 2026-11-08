@@ -264,6 +264,7 @@ model User {
   memoryAccessTurns   MemoryAccessTurn[]
   memoryVerifications MemoryVerification[]
   dreamingRun DreamingRun?
+  knowledgePages KnowledgePage[]
   userProfileEntries  UserProfileEntry[]
   capabilityDimensions CapabilityDimension[]
   capabilityEvidences CapabilityEvidence[]
@@ -615,6 +616,7 @@ model MemoryItem {
   replacedByEdges     MemoryRevision[]     @relation("MemoryRevisionPrevious")
   evidences           MemoryEvidence[]
   verification        MemoryVerification?
+  wikiCitations       KnowledgeCitation[]
   /// 这条行作为起点的关系，和作为终点的关系（任务书 2.3）。
   relationsFrom       MemoryRelation[]     @relation("MemoryRelationSource")
   relationsTo         MemoryRelation[]     @relation("MemoryRelationTarget")
@@ -1124,4 +1126,31 @@ model DreamingRun {
   updatedAt DateTime @updatedAt
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   @@index([nextRunAt, leaseUntil])
+}
+
+model KnowledgePage {
+  id String @id @default(uuid())
+  userId String
+  topicKey String @db.VarChar(64)
+  titleCiphertext String @db.Text
+  status String @default("DRAFT") @db.VarChar(16)
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  citations KnowledgeCitation[]
+  @@unique([id,userId])
+  @@unique([userId,topicKey])
+  @@index([userId,status])
+}
+
+model KnowledgeCitation {
+  pageId String
+  memoryId String
+  userId String
+  createdAt DateTime @default(now())
+  page KnowledgePage @relation(fields: [pageId,userId], references: [id,userId], onDelete: Cascade)
+  memory MemoryItem @relation(fields: [memoryId,userId], references: [id,userId], onDelete: Cascade)
+  @@id([pageId,memoryId])
+  @@index([userId,memoryId])
 }
