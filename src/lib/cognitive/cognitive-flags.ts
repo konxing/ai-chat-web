@@ -54,3 +54,8 @@ export function sourceDiveEnabled(): Promise<boolean> {
 export function capabilityContextEnabled(): Promise<boolean> {
   return bundleOrEnv('cognitiveContextEnhanced', 'COGNITIVE_CAPABILITY_CONTEXT', false);
 }
+
+/** 对话智能层总开关：默认关，保住现有聊天契约；后台/ env 打开后才注入交流原则块。 */
+export function conversationLayerEnabled(): Promise<boolean> {
+  return bundleOrEnv('conversationLayerEnabled', 'COGNITIVE_CONVERSATION_LAYER', false);
+}

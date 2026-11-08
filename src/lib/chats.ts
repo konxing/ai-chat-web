@@ -17,6 +17,8 @@ import { capabilitiesOf } from './providers';
 import type { AiMessage, ChatContentPart } from './ai';
 import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager';
 import { ensureCognitiveModules } from './cognitive/memory-module';
+import { buildConversationIntelligence } from './cognitive/conversation/core/conversation-engine';
+import { conversationLayerEnabled } from './cognitive/cognitive-flags';
 
 export interface ChatSummary {
   id: string;
@@ -413,6 +415,19 @@ export async function buildConversation(input: {
   // 认知块排在历史之前：它是「关于这位用户的资料」，不是某一轮的发言。
   // 模块内部有截止时间和错误隔离，认知读不出来就等于这段没加上，对话照旧。
   ensureCognitiveModules();
+
+  // 对话智能层（Phase 1）：全局交流原则 + 用户风格 + 生效提示词版本。
+  // 默认关（保住现有聊天契约）；打开后才注入，排在 base system 之后、认知块之前。
+  // 读失败回落默认，不阻断对话。默认不增加模型调用。
+  try {
+    if (await conversationLayerEnabled()) {
+      const intelligence = await buildConversationIntelligence({ userId: input.userId });
+      if (intelligence.block.text) messages.push({ role: 'system', content: intelligence.block.text });
+    }
+  } catch {
+    /* 对话智能层是增益，坏了不影响原有聊天 */
+  }
+
   const cognitive = await runCognitiveReads({
     userId: input.userId,
     chatId: chat.id,

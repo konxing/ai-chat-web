@@ -58,7 +58,7 @@ function source(file: string): string {
 }
 
 describe('覆盖表和 schema 逐列对照', () => {
-  it('认知十二个模型的每个密文列都在表里，表里也没有多余的条目', () => {
+  it('认知十四个模型的每个密文列都在表里，表里也没有多余的条目', () => {
     const schema = source('prisma/schema.prisma');
     const cognitiveModels = [
       'MemoryItem',
@@ -72,7 +72,9 @@ describe('覆盖表和 schema 逐列对照', () => {
       'UserProfileEntry',
       'CapabilityDimension',
       'CapabilityEvidence',
-      'InterventionRecord'
+      'InterventionRecord',
+      'KnowledgePage',
+      'ExperienceNote'
     ];
     const fromSchema: string[] = [];
     let current = '';
@@ -86,7 +88,7 @@ describe('覆盖表和 schema 逐列对照', () => {
 
     // 少一条 = 那一列轮换不到；多一条 = 脚本会去 update 一个不存在的列。
     expect(fromTable).toEqual([...fromSchema].sort());
-    expect(fromTable.length).toBe(30);
+    expect(fromTable.length).toBe(34);
   });
 
   it('写侧的短名和轮换侧的列名查到同一条封口', () => {
@@ -137,7 +139,7 @@ describe('覆盖表和 schema 逐列对照', () => {
   it('只有向量那一列是 Bytes，其余走字符串密文格式', () => {
     const bytes = COGNITIVE_ENCRYPTED_COLUMNS.filter((entry) => entry.kind === 'bytes');
     expect(bytes.map((entry) => `${entry.model}.${entry.column}`)).toEqual(['MemoryItem.embeddingCiphertext']);
-    expect(COGNITIVE_ENCRYPTED_COLUMNS.filter((entry) => entry.kind === 'string')).toHaveLength(29);
+    expect(COGNITIVE_ENCRYPTED_COLUMNS.filter((entry) => entry.kind === 'string')).toHaveLength(33);
   });
 
   it('prisma 的模型键由表给，不在脚本里靠字符串小写猜', () => {

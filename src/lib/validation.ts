@@ -110,7 +110,8 @@ export const adminConfigSchema = z.object({
   cognitiveSessionSummaryEnabled: z.boolean().optional(),
   cognitiveAutoConfirmEnabled: z.boolean().optional(),
   cognitiveRetrievalEnhanced: z.boolean().optional(),
-  cognitiveContextEnhanced: z.boolean().optional()
+  cognitiveContextEnhanced: z.boolean().optional(),
+  conversationLayerEnabled: z.boolean().optional()
 });
 
 /**

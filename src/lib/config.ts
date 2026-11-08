@@ -19,6 +19,8 @@ export interface SystemSettings {
   cognitiveRetrievalEnhanced: boolean;
   /** 上下文增强（合并开关）：记忆溯源展开 + 能力观察注入。默认开（保住溯源展开）。 */
   cognitiveContextEnhanced: boolean;
+  /** 对话智能层总开关：默认关，打开后才在 system 里注入交流原则/模式/风格块。 */
+  conversationLayerEnabled: boolean;
 }
 
 const DEFAULTS: SystemSettings = {
@@ -33,7 +35,8 @@ const DEFAULTS: SystemSettings = {
   // 用户口径：待确认的东西一天没处理就交给 AI 定。默认开，后台可以关。
   cognitiveAutoConfirmEnabled: true,
   cognitiveRetrievalEnhanced: false,
-  cognitiveContextEnhanced: true
+  cognitiveContextEnhanced: true,
+  conversationLayerEnabled: false
 };
 
 const ALLOWED_KEYS = new Set<keyof SystemSettings>([
@@ -47,7 +50,8 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'cognitiveSessionSummaryEnabled',
   'cognitiveAutoConfirmEnabled',
   'cognitiveRetrievalEnhanced',
-  'cognitiveContextEnhanced'
+  'cognitiveContextEnhanced',
+  'conversationLayerEnabled'
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
@@ -57,7 +61,8 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
     key === 'cognitiveSessionSummaryEnabled' ||
     key === 'cognitiveAutoConfirmEnabled' ||
     key === 'cognitiveRetrievalEnhanced' ||
-    key === 'cognitiveContextEnhanced'
+    key === 'cognitiveContextEnhanced' ||
+    key === 'conversationLayerEnabled'
   ) {
     return Boolean(value) as SystemSettings[K];
   }

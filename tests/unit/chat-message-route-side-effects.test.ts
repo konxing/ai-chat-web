@@ -80,6 +80,7 @@ let tables: {
   memoryPolicy: MockTable;
   memoryEvidence: MockTable;
   memoryAccessTurn: MockTable;
+  memoryVerification: MockTable;
 } | undefined;
 
 function cognitiveTables() {
@@ -91,7 +92,10 @@ function cognitiveTables() {
     // 检索访问表（任务书 7.1）。唯一约束照 schema 的 @@unique([sourceMessageId]) 建，
     // 少了这张表，recordMemoryAccess 会把 `undefined.create` 的 TypeError 一起吞进自己的
     // catch，于是下面三条用例能在「访问永远写不进去」的状态下绿着——和 cognitiveTask 那个 delegate 同一个理由。
-    memoryAccessTurn: createTable({ unique: [['sourceMessageId']] })
+    memoryAccessTurn: createTable({ unique: [['sourceMessageId']] }),
+    // 核验状态表（记忆层新 phase）。filterVerifiedMemoryPool 会查它；缺了这张替身表，
+    // 读侧会抛错被 manager 隔离，整块记忆消失，下面「认知块作为第二段 system」就红。
+    memoryVerification: createTable()
   };
   return tables;
 }
@@ -241,6 +245,10 @@ vi.mock('@/lib/prisma', async () => {
       },
       memoryAccessTurn: {
         create: (args: { data: Record<string, any> }) => cognitiveTables().memoryAccessTurn.create(args)
+      },
+      memoryVerification: {
+        findMany: (args: { where?: Record<string, unknown> }) =>
+          cognitiveTables().memoryVerification.findMany(args)
       },
       $transaction: (fn: (inner: typeof tx) => Promise<unknown>) => fn(tx)
     }
