@@ -28,7 +28,7 @@ const SHARING_ACTS = new Set(['SHARE_EXPERIENCE', 'SHARE_PROGRESS', 'VENT', 'EXP
 
 // 需要关键槽位才能完成的任务，及对应缺失检测（保守：只在明确任务且槽位缺失时判 ESSENTIAL）。
 const SLOT_TASKS: Array<{ trigger: RegExp; slot: string; present: RegExp; safeDefault: boolean }> = [
-  { trigger: /预订|订一下|帮我订|买.*票/, slot: '日期/时间', present: /\d{1,2}月|\d{1,2}号|明天|后天|周[一二三四五六日末]|\d{4}-\d{2}/, safeDefault: false },
+  { trigger: /(?:帮我|替我)(?:预订|订|买[^。！？!?]*票)|(?:预订|订)一下/, slot: '日期', present: /\d{1,2}月|\d{1,2}号|明天|后天|周[一二三四五六日末]|\d{4}-\d{2}/, safeDefault: false },
   { trigger: /推荐.*预算|按预算|预算内/, slot: '预算上限', present: /\d+\s*(元|块|万|k|K)|预算\s*\d+/, safeDefault: false },
   { trigger: /帮我.*选|怎么选.*取决于/, slot: '关键约束/偏好', present: /更看重|主要|优先|必须|不能/, safeDefault: true }
 ];
@@ -101,8 +101,9 @@ export function decideQuestion(input: {
     return decision;
   }
 
-  // 真正模糊且无上下文：信息增益中等，可问一个；否则先给有用初步回答。
-  if (u.dialogueAct === 'UNCLEAR' && u.intentConfidence === 'low' && state.topic === null) {
+  // 分类不确定也可能只是在分享。只有明确要求帮忙却没有任务内容时才据此追问。
+  if (state.topic === null && /^(?:能|可以)?帮我(?:一下|个忙)?(?:吗)?[。！!？?]*$/.test(content.trim())) {
+    decision.essentialMissing.push('需要帮忙的具体事项');
     decision.expectedInformationGain = 'medium';
     decision.responseMove = 'ASK_ONE';
     decision.reasonCode = 'ESSENTIAL';

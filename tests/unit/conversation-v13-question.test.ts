@@ -37,14 +37,14 @@ describe('B2 追问价值预算', () => {
     const d = decide('帮我订一张去北京的票。');
     expect(d.responseMove).toBe('ASK_ONE');
     expect(d.reasonCode).toBe('ESSENTIAL');
-    expect(d.essentialMissing).toContain('日期/时间');
+    expect(d.essentialMissing).toContain('日期');
     expect(d.expectedInformationGain).toBe('high');
   });
 
   it('关键信息已给出：不再索取', () => {
     const d = decide('帮我订一张明天去北京的票。');
     expect(d.responseMove).not.toBe('ASK_ONE');
-    expect(d.alreadyKnown).toContain('日期/时间');
+    expect(d.alreadyKnown).toContain('日期');
   });
 
   it('可安全默认的任务：直接完成并披露假设，不抢占回合', () => {
@@ -57,6 +57,7 @@ describe('B2 追问价值预算', () => {
     const d = decide('为什么天空是蓝色的？');
     expect(d.responseMove).toBe('ANSWER_NOW');
     expect(d.reasonCode).toBe('LOW_VALUE');
+    expect(decide('预订火车票要注意什么？').responseMove).toBe('ANSWER_NOW');
   });
 
   it('纠错轮：先修复不追问', () => {
@@ -73,6 +74,26 @@ describe('B2 接入回应动作', () => {
     const act = selectResponseAct(u, state, content);
     expect(act.primary).toBe('ACKNOWLEDGE_AND_EXPLORE');
     expect(act.question?.reasonCode).toBe('SHARING');
+    expect(act.contextNote).toContain('不用问题或邀请来收尾');
+  });
+
+  it('即使识别成建议请求，缺日期的预订也只澄清日期', () => {
+    const content = '帮我订一张去北京的票，你建议怎么办？';
+    const u = understandDialogue(content);
+    const act = selectResponseAct(u, buildConversationState([], content, u), content);
+    expect(act.primary).toBe('ASK_ONE_CLARIFICATION');
+    expect(act.secondary).toBeNull();
+    expect(act.contextNote).toContain('只澄清一项缺失信息：日期');
+  });
+
+  it('没有识别出明确任务时，区分随口分享和明确求助', () => {
+    expect(decide('越想把事情做好，反而越不敢开始。').responseMove).toBe('ANSWER_NOW');
+    expect(decide('能帮我个忙吗？').essentialMissing).toEqual(['需要帮忙的具体事项']);
+  });
+
+  it('个人观察可以自然接话，同一句明确提问仍优先答问题', () => {
+    expect(decide('我最近发现，越想把事情做好，反而越不敢开始。').responseMove).toBe('CONTINUE_WITHOUT_QUESTION');
+    expect(understandDialogue('我最近发现，越想做好越不敢开始，这是为什么？').dialogueAct).toBe('ASK_EXPLANATION');
   });
 
   it('非必要澄清被抑制为直接回答', () => {

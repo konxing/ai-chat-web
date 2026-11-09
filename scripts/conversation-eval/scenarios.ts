@@ -110,7 +110,10 @@ export const SINGLE_SCENARIOS: SingleScenario[] = [
   { id: 's097', category: '创造', prompt: '给一个记账产品想几个差异化点子。' },
   { id: 's098', category: '创造', prompt: '如何把读书笔记变成可复用的知识？' },
   { id: 's099', category: '创造', prompt: '设计一个减少会议时间的机制。' },
-  { id: 's100', category: '创造', prompt: '给社区食堂想几个可持续的运营模式。' }
+  { id: 's100', category: '创造', prompt: '给社区食堂想几个可持续的运营模式。' },
+  { id: 's101', category: '分享观察', prompt: '我最近发现，越想把事情做好，反而越不敢开始。' },
+  { id: 's102', category: '必要澄清', prompt: '我从上海出发，帮我订一张去北京的火车票。' },
+  { id: 's103', category: '信息已给', prompt: '我明天从上海去北京，买高铁票要注意什么？' }
 ];
 
 export const MULTI_SCENARIOS: MultiScenario[] = [

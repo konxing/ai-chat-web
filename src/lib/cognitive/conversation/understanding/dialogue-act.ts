@@ -74,7 +74,7 @@ export function understandDialogue(text: string): DialogueUnderstanding {
   if (/[？?]\s*$/.test(t)) {
     return { topicDomain, dialogueAct: 'ASK_FACT', explicitStyleInstruction, needsRepair: false, intentConfidence: 'medium' };
   }
-  if (/分享|经历|上次我|我曾经/.test(t)) {
+  if (/分享|经历|上次我|我曾经|^我(?:最近|今天|刚刚)?发现/.test(t)) {
     return { topicDomain, dialogueAct: 'SHARE_EXPERIENCE', explicitStyleInstruction, needsRepair: false, intentConfidence: 'medium' };
   }
   return { topicDomain, dialogueAct: 'UNCLEAR', explicitStyleInstruction, needsRepair: false, intentConfidence: 'low' };

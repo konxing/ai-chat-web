@@ -65,7 +65,7 @@ export async function buildConversationIntelligence(input: {
       (act.contextNote ? `\n${act.contextNote}` : '')
     : plan.planText;
   // A.3：v2 每轮最多 1 组多轮示例，按"动作+话题"择优，严格字符预算，带引用诊断；预算不足可完全不注入。
-  const picked = v2 && !switchingTopic
+  const picked = v2 && !switchingTopic && act.primary !== 'ASK_ONE_CLARIFICATION'
     ? selectDialogueExampleFor(understanding.dialogueAct, {
         naturalness: effectiveStyle.naturalness,
         recentText: [content, state.topic ?? ''].join(' ')

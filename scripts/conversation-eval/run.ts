@@ -104,6 +104,14 @@ async function main() {
   const seed = arg('seed', 42);
   const doJudge = hasFlag('judge');
   const engine = strArg('engine', 'legacy') === 'dialogue-v2' ? 'dialogue-v2' : 'legacy';
+  const caseIds = new Set(strArg('cases', '').split(',').map((id) => id.trim()).filter(Boolean));
+  const selectCases = <T extends { id: string }>(items: T[], count: number) =>
+    caseIds.size ? items.filter((item) => caseIds.has(item.id)) : items.slice(0, count);
+  const singleCases = selectCases(SINGLE_SCENARIOS, limit);
+  const multiCases = selectCases(MULTI_SCENARIOS, multiLimit);
+  if (caseIds.size && singleCases.length + multiCases.length !== caseIds.size) {
+    throw new Error('有无法识别的评测场景 ID');
+  }
   const rand = rng(seed);
   const provider = await resolveDefaultProvider(OWNER);
   // v1.3：评委可选不同模型（异族辅助，降低同族自评偏差）；未指定时自动挑一个非默认模型，找不到才回退同族。
@@ -129,8 +137,8 @@ async function main() {
   const latencies: number[] = [];
   let totalIn = 0, totalOut = 0;
 
-  const singles = SINGLE_SCENARIOS.slice(0, limit).map((s) => ({ id: s.id, category: s.category, kind: 'single' as const, turns: [{ role: 'user', content: s.prompt }] as DialogueTurn[] }));
-  const multis = MULTI_SCENARIOS.slice(0, multiLimit).map((m) => ({ id: m.id, category: m.category, kind: 'multi' as const, turns: m.turns }));
+  const singles = singleCases.map((s) => ({ id: s.id, category: s.category, kind: 'single' as const, turns: [{ role: 'user', content: s.prompt }] as DialogueTurn[] }));
+  const multis = multiCases.map((m) => ({ id: m.id, category: m.category, kind: 'multi' as const, turns: m.turns }));
 
   for (const c of [...singles, ...multis]) {
     // 固定回放只生成最后一轮。用户后续话语是针对剧本中的助手回答写的，

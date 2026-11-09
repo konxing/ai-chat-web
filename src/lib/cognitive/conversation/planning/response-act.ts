@@ -65,16 +65,12 @@ export function selectResponseAct(
       : '按用户纠正调整，不重复原错误路径。';
     return { primary: 'CORRECT_COURSE', secondary: null, rationale: '用户纠正上轮理解', contextNote: [note, constraintNote].filter(Boolean).join(' ') };
   }
-  // 防止连环追问：上轮已问且未答，本轮不再追问。
-  const avoidAsk = state.openLoop !== null;
-
-  const base = selectBaseAct(u, state, avoidAsk);
-  // B2 追问价值预算：抑制非必要澄清；分享/已知信息不追问；仅 ESSENTIAL 才问一个。
+  // 追问预算决定动作，也决定传给模型的当轮提示。
   const question = decideQuestion({ content, understanding: u, state });
+  const base: ActSelection = question.responseMove === 'ASK_ONE'
+    ? { primary: 'ASK_ONE_CLARIFICATION', secondary: null, rationale: '完成请求缺少关键信息' }
+    : selectBaseAct(u);
   let primary = base.primary;
-  if (primary === 'ASK_ONE_CLARIFICATION' && question.responseMove !== 'ASK_ONE') {
-    primary = 'ANSWER';
-  }
   // A.5：naturalness 有可观测行为差异。低自然度=偏直接、信息密度高：分享/倾诉不铺陈承接，直接回应。
   if (naturalness === 'low' && primary === 'ACKNOWLEDGE_AND_EXPLORE') {
     primary = 'ANSWER';
@@ -84,12 +80,17 @@ export function selectResponseAct(
     .reverse()
     .find((e) => e.type === 'INTENT' || e.type === 'STYLE');
   const repairNote = priorRepair ? `此前用户纠正过：${priorRepair.correctedExpectation}` : undefined;
-  const notes = [constraintNote, repairNote].filter(Boolean).join(' ');
+  const questionNote = question.responseMove === 'ASK_ONE'
+    ? `本轮只澄清一项缺失信息：${question.essentialMissing[0]}。问完等用户回答。`
+    : question.responseMove === 'CONTINUE_WITHOUT_QUESTION'
+      ? '本轮用观察或观点接住用户的话，说到完整处就停，不用问题或邀请来收尾。'
+      : '直接给出当前能确定的内容，必要时说明假设；不附加可有可无的追问。';
+  const notes = [constraintNote, repairNote, questionNote].filter(Boolean).join(' ');
   const merged: ActSelection = { ...base, primary, question };
   return notes ? { ...merged, contextNote: notes } : merged;
 }
 
-function selectBaseAct(u: DialogueUnderstanding, state: ConversationState, avoidAsk: boolean): ActSelection {
+function selectBaseAct(u: DialogueUnderstanding): ActSelection {
   switch (u.dialogueAct) {
     case 'VENT':
     case 'SHARE_PROGRESS':
@@ -108,12 +109,7 @@ function selectBaseAct(u: DialogueUnderstanding, state: ConversationState, avoid
       return { primary: 'OFFER_PERSPECTIVE', secondary: 'CO_REASON', rationale: '观点讨论，独立看法' };
     case 'CORRECT_ASSISTANT':
       return { primary: 'CORRECT_COURSE', secondary: null, rationale: '纠错' };
-    default: {
-      // UNCLEAR：低置信不必然追问；用户明显要直接答案时先给初步回答并说明假设。
-      if (u.intentConfidence === 'low' && !avoidAsk && state.topic === null) {
-        return { primary: 'ASK_ONE_CLARIFICATION', secondary: null, rationale: 'truly 模糊且无上下文' };
-      }
+    default:
       return { primary: 'ANSWER', secondary: null, rationale: '模糊但先给有用初步回答' };
-    }
   }
 }
