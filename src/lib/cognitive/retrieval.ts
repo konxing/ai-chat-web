@@ -44,7 +44,7 @@ export interface Vectorizable extends Retrievable {
 
 export function tokenize(text: string): string[] {
   const tokens: string[] = [];
-  for (const match of text.toLowerCase().matchAll(TOKEN_PATTERN)) {
+  for (const match of text.normalize('NFKC').toLowerCase().matchAll(TOKEN_PATTERN)) {
     const piece = match[0];
     if (/[a-z0-9]/.test(piece[0]!)) {
       tokens.push(piece);
@@ -93,7 +93,15 @@ export function scoreByKeyword<T extends Retrievable>(
   // 排序在这里没有可说的话。
   if (queryTokens.length === 0) return memories.map((memory) => ({ memory, score: 0 }));
 
-  const documents = memories.map((memory) => new Set(tokenize(memory.content)));
+  const singleHanQueries = queryTokens.filter((token) => /^\p{Script=Han}$/u.test(token));
+  const documents = memories.map((memory) => {
+    const tokens = new Set(tokenize(memory.content));
+    const content = memory.content.normalize('NFKC');
+    for (const token of singleHanQueries) {
+      if (content.includes(token)) tokens.add(token);
+    }
+    return tokens;
+  });
   const documentFrequency = new Map<string, number>();
   for (const document of documents) {
     for (const token of document) documentFrequency.set(token, (documentFrequency.get(token) ?? 0) + 1);
@@ -198,7 +206,7 @@ function sortByCosine<T extends Vectorizable>(
  * 两路分数不在一个量纲上（一边是 0..1 的覆盖率，一边是 -1..1 的夹角），
  * 所以只比名次不比分数：每路给 `1 / (60 + 名次)`，两路相加。
  *
- * 关键词这一路只给 0 分以上的行记名次。这是这函数唯一不显然的地方：
+ * 两路都只给正分的行记名次：
  * 「一个词都没重合」在关键词眼里是「没话说」，不是「排在第 200 名」——
  * 按后者算，最近那条废话会稳定拿到最好的名次，把向量想救的那批
  * （零共享 token 的 gold）原地压死。实测那 44 条未召回的 gold 全靠这一条才进得来。
@@ -223,7 +231,7 @@ export function rankMemoriesHybrid<T extends Vectorizable>(
 
   const cosineRanks = new Map<T, number>();
   sortByCosine(queryVector, memories).forEach((entry, index) => {
-    if (entry.score !== null) cosineRanks.set(entry.memory, index);
+    if (entry.score !== null && entry.score > 0) cosineRanks.set(entry.memory, index);
   });
 
   const fused = memories.map((memory) => {

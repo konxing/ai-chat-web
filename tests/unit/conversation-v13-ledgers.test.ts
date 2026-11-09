@@ -99,6 +99,20 @@ describe('B3 意图与约束账本', () => {
     expect(buildActiveConstraints(recent, '继续')).toHaveLength(0);
   });
 
+  it('单轮语言要求优先，下一轮恢复长期语言要求', () => {
+    const recent = [{ role: 'user' as const, content: '以后用中文回答。' }];
+    const temporary = '这次用英文回答。';
+    expect(buildActiveConstraints(recent, temporary).map((c) => c.content)).toEqual(['用英文回答']);
+    expect(buildActiveConstraints([...recent, { role: 'user', content: temporary }], '继续').map((c) => c.content))
+      .toEqual(['用中文回答']);
+  });
+
+  it('换话题时应用同一条消息里的新要求', () => {
+    const recent = [{ role: 'user' as const, content: '不要列点。' }];
+    expect(buildActiveConstraints(recent, '换个话题，这次用英文回答。').map((c) => c.content))
+      .toEqual(['用英文回答']);
+  });
+
   it('意图账本：分享→goal=share；未解决问题来自 openLoop', () => {
     const intent = buildIntent('SHARE_PROGRESS', 'medium', '你是指缓存问题吗？');
     expect(intent.goal).toBe('share');

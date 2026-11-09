@@ -234,6 +234,25 @@ describe('向量那一路：余弦与混合排序', () => {
     expect(rankMemoriesHybrid('杭州', undefined, rows, { limit: 8 })).toEqual(rankMemories('杭州', rows, { limit: 8 }));
   });
 
+  it('正交、反向和维度不匹配的向量不会给关键词结果加分', () => {
+    const rows = [
+      doc('exact', '杭州', { recordedAt: '2026-11-01T00:00:00.000Z' }),
+      doc('orthogonal', '杭州', { vector: v(0, 1), recordedAt: '2026-10-03T00:00:00.000Z' }),
+      doc('opposite', '杭州', { vector: v(-1, 0), recordedAt: '2026-10-02T00:00:00.000Z' }),
+      doc('mismatch', '杭州', { vector: v(1, 0, 0), recordedAt: '2026-10-01T00:00:00.000Z' })
+    ];
+    expect(rankMemoriesHybrid('杭州', v(1, 0), rows, { limit: 1 })[0]?.id).toBe('exact');
+  });
+
+  it('支持全角关键词和连续中文中的单字查询', () => {
+    const rows = [
+      doc('recent', '周末去公园', { recordedAt: '2026-11-01T00:00:00.000Z' }),
+      doc('match', '我给猫起名叫Ｐｉｘｅｌ', { recordedAt: '2026-10-01T00:00:00.000Z' })
+    ];
+    expect(rankMemories('猫', rows, { limit: 1 })[0]?.id).toBe('match');
+    expect(rankMemories('Pixel', rows, { limit: 1 })[0]?.id).toBe('match');
+  });
+
   it('名额仍是截断的那个数，混合不许把 8 条变成 9 条', () => {
     const rows = Array.from({ length: 12 }, (_, index) =>
       doc(`m${index}`, `说法 ${index}`, {

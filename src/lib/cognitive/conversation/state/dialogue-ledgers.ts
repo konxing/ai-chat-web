@@ -140,13 +140,14 @@ export interface ActiveConstraint {
 
 const CONSTRAINT_MAX_CHARS = 100;
 // 用户直接的格式/范围硬约束（只从用户话语提取）。
-const CONSTRAINT_PATTERNS: Array<{ re: RegExp; content: string }> = [
+const CONSTRAINT_PATTERNS: Array<{ re: RegExp; content: string; group?: string }> = [
   { re: /不要列点|别列点|不要列表|少用列表/, content: '不使用列表/分点' },
   { re: /只讨论原理|只讲原理|先讲原理/, content: '优先讨论原理' },
   { re: /不要长篇|别长篇|不要长篇分析|这次不要分析/, content: '本轮不做长篇分析' },
   { re: /简短些|简短一点|简单点|结论就行|先给结论/, content: '回答简短、先给结论' },
   { re: /不要用外部|不使用外部 ?API|别联网/, content: '不使用外部 API/联网' },
-  { re: /用中文回答|用英文回答/, content: '指定回答语言' }
+  { re: /用中文回答/, content: '用中文回答', group: 'language' },
+  { re: /用英文回答/, content: '用英文回答', group: 'language' }
 ];
 const TEMP_SCOPE_RE = /这次|本轮|当前|先别|先给/;
 const DURABLE_SCOPE_RE = /以后|一直|总是|长期|每次都/;
@@ -159,6 +160,7 @@ const TOPIC_SWITCH_RE = /换个话题|刚才那个不用|不说这个|聊点别�
 export function buildActiveConstraints(recent: readonly Msg[], currentContent: string): ActiveConstraint[] {
   const currentTurnIndex = recent.length;
   const raw: ActiveConstraint[] = [];
+  const groups = new Map<string, string>();
   // 按原始序列索引定位每条用户消息（当前消息位于 recent.length）。
   const indexed: Array<{ text: string; idx: number }> = [];
   recent.forEach((m, i) => { if (m.role === 'user') indexed.push({ text: m.content, idx: i }); });
@@ -174,7 +176,6 @@ export function buildActiveConstraints(recent: readonly Msg[], currentContent: s
     if (TOPIC_SWITCH_RE.test(text)) {
       // 单纯换话题：结束旧话题/会话约束，但保留仍有效的全局明确要求（B3）。
       for (const c of raw) if (c.scope !== 'GLOBAL_CONFIRMED') c.state = 'revised';
-      continue;
     }
     for (const p of CONSTRAINT_PATTERNS) {
       if (!p.re.test(text)) continue;
@@ -185,10 +186,13 @@ export function buildActiveConstraints(recent: readonly Msg[], currentContent: s
           : TOPIC_SCOPE_RE.test(text)
             ? 'THIS_TOPIC'
             : 'THIS_SESSION';
+      if (scope === 'THIS_TURN' && idx !== currentTurnIndex) continue;
       const id = `c${seq++}`;
-      // 同内容的新约束取代旧约束。
-      const prior = raw.find((c) => c.content === p.content && c.state === 'active');
+      const group = p.group ?? p.content;
+      // 同类要求以最新表达为准。历史单轮要求已跳过，不会覆盖长期要求。
+      const prior = raw.find((c) => groups.get(c.id) === group && c.state === 'active');
       if (prior) prior.state = 'revised';
+      groups.set(id, group);
       raw.push({
         id,
         content: p.content.slice(0, CONSTRAINT_MAX_CHARS),
@@ -199,10 +203,6 @@ export function buildActiveConstraints(recent: readonly Msg[], currentContent: s
         supersedes: prior?.id
       });
     }
-  }
-  // THIS_TURN 只在当前轮有效：来源不是当前轮则过期。
-  for (const c of raw) {
-    if (c.scope === 'THIS_TURN' && c.sourceTurnIndex !== currentTurnIndex) c.state = 'expired';
   }
   return raw.filter((c) => c.state === 'active');
 }

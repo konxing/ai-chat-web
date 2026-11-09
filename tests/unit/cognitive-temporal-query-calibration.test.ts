@@ -225,7 +225,7 @@ describe('Temporal Filtering 实测：问侧 1 条、答侧 0 行，这一项量
       withGold: 107,
       recallAt8: 0.7274,
       precisionAt8: 0.097,
-      mrr: 0.5828,
+      mrr: 0.5871,
       forbidden: 0,
       zeroHitProbes: 21
     });

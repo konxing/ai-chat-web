@@ -186,7 +186,7 @@
       "probes": 116,
       "recallAt8": 0.7274,
       "precisionAt8": 0.097,
-      "mrr": 0.5828,
+      "mrr": 0.5871,
       "hitRate": 0.8037,
       "forbiddenInjections": 0,
       "byCategory": {
@@ -222,7 +222,7 @@
         }
       },
       "unmarkedLowConfidence": 0,
-      "avgInjectedChars": 315.5862,
+      "avgInjectedChars": 315.6293,
       "avgInjectedItems": 8,
       "avgNonGoldSlots": 7.2241,
       "unreachableGold": [
@@ -302,7 +302,7 @@
         "id": "mrr",
         "kind": "non-regression",
         "floor": 0.5828,
-        "value": 0.5828,
+        "value": 0.5871,
         "verdict": "PASS"
       },
       {
@@ -3921,14 +3921,14 @@
         "s17-m7"
       ],
       "injected": [
-        "s23-m9",
         "s17-m7",
-        "s3-m3",
+        "s23-m9",
         "s7-m6",
         "s8-m7",
         "s8-m8",
-        "s21-m4",
-        "s21-m8"
+        "s21-m8",
+        "s28-m8",
+        "s6-m5"
       ],
       "hits": [
         "s17-m7"
@@ -3936,9 +3936,9 @@
       "violations": [],
       "recall": 1,
       "precision": 0.125,
-      "reciprocalRank": 0.5,
+      "reciprocalRank": 1,
       "missingLowMark": [],
-      "injectedChars": 299
+      "injectedChars": 304
     },
     {
       "id": "s18-p1",
