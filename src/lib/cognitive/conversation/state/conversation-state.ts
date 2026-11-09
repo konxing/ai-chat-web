@@ -1,7 +1,7 @@
 import type { ResponseAct } from '../planning/response-act';
 import type { DialogueAct, TopicDomain } from '../understanding/dialogue-act';
 import {
-  buildRepairLedger, buildActiveConstraints, buildIntent, buildTopicStack,
+  buildRepairLedger, buildActiveConstraints, buildIntent, buildTopicStack, isTopicSwitch,
   type RepairLedgerEntry, type ActiveConstraint, type ConversationalIntent, type TopicFrame
 } from './dialogue-ledgers';
 
@@ -41,8 +41,11 @@ export function buildConversationState(
   understanding?: { dialogueAct: DialogueAct; intentConfidence: 'low' | 'medium' | 'high'; topicDomain: TopicDomain }
 ): ConversationState {
   const window = recent.slice(-STATE_WINDOW_TURNS);
-  const lastAssistant = [...window].reverse().find((m) => m.role === 'assistant');
-  const lastUserBefore = [...window].reverse().find((m) => m.role === 'user');
+  const latestFirst = [...window].reverse();
+  const priorSwitch = latestFirst.findIndex((m) => m.role === 'user' && isTopicSwitch(m.content));
+  const topicHistory = isTopicSwitch(currentContent) ? [] : priorSwitch < 0 ? latestFirst : latestFirst.slice(0, priorSwitch + 1);
+  const lastAssistant = topicHistory.find((m) => m.role === 'assistant');
+  const lastUserBefore = topicHistory.find((m) => m.role === 'user');
 
   const assistantAsked = lastAssistant ? /[？?]\s*$/.test(lastAssistant.content.trim()) : false;
   const openLoop = assistantAsked && lastAssistant ? lastAssistant.content : null;

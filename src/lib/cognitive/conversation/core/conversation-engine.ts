@@ -57,21 +57,22 @@ export async function buildConversationIntelligence(input: {
   const modeText = modeInstruction(mode.mode) +
     (mode.secondary ? `\n同时兼顾：${modeInstruction(mode.secondary)}` : '');
   const v2 = (input.engineVersion ?? 'legacy') === 'dialogue-v2';
+  const switchingTopic = state.currentRepair?.type === 'TOPIC';
   // P4 两臂：legacy 用旧规划累加+单轮示例；dialogue-v2 用单一回应动作+多轮示例。
-  const actText = v2
+  const actText = v2 || switchingTopic
     ? `【本轮回应动作】${ACT_TEXT[act.primary]}` +
       (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '') +
       (act.contextNote ? `\n${act.contextNote}` : '')
     : plan.planText;
   // A.3：v2 每轮最多 1 组多轮示例，按"动作+话题"择优，严格字符预算，带引用诊断；预算不足可完全不注入。
-  const picked = v2
+  const picked = v2 && !switchingTopic
     ? selectDialogueExampleFor(understanding.dialogueAct, {
         naturalness: effectiveStyle.naturalness,
         recentText: [content, state.topic ?? ''].join(' ')
       })
     : null;
   const exampleDiagnostics: ExampleDiagnostics | null = picked?.diagnostics ?? null;
-  const examplesText = v2
+  const examplesText = switchingTopic ? null : v2
     ? (picked?.example ? renderDialogueExamples([picked.example]) : null)
     : renderExamples(selectExamples(mode.mode, mode.secondary));
   // v1.3：极简对话状态，改善"重复追问/换话题被拉回"；仅 v2 注入。
@@ -79,8 +80,8 @@ export async function buildConversationIntelligence(input: {
   const block = buildConversationPrompt({
     style: effectiveStyle,
     versionContent: version?.content ?? null,
-    modeText,
-    knowledgeText: renderKnowledgePolicy(mode.mode),
+    modeText: switchingTopic ? null : modeText,
+    knowledgeText: switchingTopic ? null : renderKnowledgePolicy(mode.mode),
     planText: actText,
     stateText,
     examplesText

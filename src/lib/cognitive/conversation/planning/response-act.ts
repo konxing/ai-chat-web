@@ -48,9 +48,20 @@ export function selectResponseAct(
 
   // 纠错优先：用户纠正后必须修复，按修复账本的正确期待调整，不继续推方案/长报告。
   const repair = state.currentRepair;
+  if (repair?.type === 'TOPIC') {
+    return {
+      primary: 'ANSWER',
+      secondary: null,
+      rationale: '用户主动换话题',
+      contextNote: [
+        '旧话题到此为止，无需评论、总结或道歉。用户给了新话题就直接回答；还没给就用一句轻松的话接住转场，可以问一句想聊什么，不要猜主题或罗列选项。只有用户请你起话题时才主动起一个。',
+        constraintNote
+      ].filter(Boolean).join(' ')
+    };
+  }
   if (u.needsRepair || repair || state.recentCorrection) {
     const note = repair?.correctedExpectation
-      ? (repair.type === 'TOPIC' ? repair.correctedExpectation : `修复方向：${repair.correctedExpectation}`)
+      ? `修复方向：${repair.correctedExpectation}`
       : '按用户纠正调整，不重复原错误路径。';
     return { primary: 'CORRECT_COURSE', secondary: null, rationale: '用户纠正上轮理解', contextNote: [note, constraintNote].filter(Boolean).join(' ') };
   }
@@ -71,7 +82,7 @@ export function selectResponseAct(
   // B1：纠正后 TTL 内持续抑制重犯错（当前轮已单独处理；此处覆盖后续有限轮）。
   const priorRepair = [...state.repairLedger]
     .reverse()
-    .find((e) => e.type === 'INTENT' || e.type === 'STYLE' || e.type === 'TOPIC');
+    .find((e) => e.type === 'INTENT' || e.type === 'STYLE');
   const repairNote = priorRepair ? `此前用户纠正过：${priorRepair.correctedExpectation}` : undefined;
   const notes = [constraintNote, repairNote].filter(Boolean).join(' ');
   const merged: ActSelection = { ...base, primary, question };

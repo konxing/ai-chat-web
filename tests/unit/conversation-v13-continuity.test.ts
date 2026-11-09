@@ -36,6 +36,32 @@ describe('B1 纠正后在 TTL 内持续抑制重犯错', () => {
 });
 
 describe('v1.3 极简对话状态', () => {
+  it('自然转场停止旧话题的追问和纠正指令，保留长期语言要求', () => {
+    const recent = [
+      { role: 'user' as const, content: '以后用中文回答。' },
+      { role: 'user' as const, content: '我不是来排查，我只是想聊聊。' },
+      { role: 'assistant' as const, content: '那你想聊这个 Bug 的哪一块？' }
+    ];
+    const current = '算了，先聊聊别的。';
+    const u = understandDialogue(current);
+    const state = buildConversationState(recent, current, u);
+    const act = selectResponseAct(u, state, current);
+    expect(state.openLoop).toBeNull();
+    expect(act.primary).toBe('ANSWER');
+    expect(act.contextNote).toContain('无需评论、总结或道歉');
+    expect(act.contextNote).toContain('用中文回答');
+
+    const followup = '为什么冰会浮起来？';
+    const next = buildConversationState([...recent, { role: 'user', content: current }], followup);
+    expect(next.openLoop).toBeNull();
+    expect(next.repairLedger).toEqual([]);
+  });
+
+  it('提到换话题不等于要求换话题', () => {
+    const state = buildConversationState([], '为什么有人总说“换个话题”？');
+    expect(state.currentRepair).toBeNull();
+  });
+
   it('上轮已问未答 → 状态提示不要重复同一个问题', () => {
     const recent = [
       { role: 'user' as const, content: '就是那个问题。' },

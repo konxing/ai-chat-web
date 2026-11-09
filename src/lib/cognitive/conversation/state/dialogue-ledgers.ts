@@ -40,7 +40,12 @@ const EXPLICIT_CORRECT_RE =
 const NORMAL_FOLLOWUP_RE = /^(再深入|再说说|继续|展开|详细|还有呢|然后呢|接着说)/;
 const STYLE_CORRECT_RE = /太机械|别这么官方|不要列点|别列点|太长了|简短些|别这么啰嗦/;
 const FACT_CORRECT_RE = /事实不对|数据错了|不是 \d|年份不对|你记错了|实际上不是/;
-const TOPIC_CORRECT_RE = /换个话题|不说这个|聊点别的|换一个问题/;
+// 只把句首的直接转场当成指令，避免把引用、提问或叙述误判为换题。
+const TOPIC_SWITCH_RE = /^(?:算了[，,。！!\s]*)?(?:那\s*)?(?:我们\s*)?(?:还是\s*)?(?:先\s*)?(?:想\s*)?(?:换(?:个|一个)(?:话题|问题)|不说这个(?:了)?|聊(?:聊|点|些|一下)?别的)(?:吧|好了)?(?=$|[，,。！？!?：:；;\s])/;
+
+export function isTopicSwitch(text: string): boolean {
+  return TOPIC_SWITCH_RE.test(text.trim());
+}
 
 export interface RepairClassification {
   isRepair: boolean;
@@ -55,7 +60,7 @@ export function classifyRepair(text: string): RepairClassification {
   if (NORMAL_FOLLOWUP_RE.test(t) && !EXPLICIT_CORRECT_RE.test(t)) {
     return { isRepair: false, type: 'INTENT', confidence: 'explicit', correctedExpectation: '' };
   }
-  if (TOPIC_CORRECT_RE.test(t)) {
+  if (isTopicSwitch(t)) {
     return { isRepair: true, type: 'TOPIC', confidence: 'explicit', correctedExpectation: '尊重话题转移，不强行拉回原话题。' };
   }
   if (FACT_CORRECT_RE.test(t)) {
@@ -90,6 +95,10 @@ export function buildRepairLedger(recent: readonly Msg[], currentContent: string
     if (m.role !== 'user') return;
     const c = classifyRepair(m.content);
     if (!c.isRepair) return;
+    if (c.type === 'TOPIC') {
+      entries.length = 0;
+      return;
+    }
     entries.push({
       type: c.type,
       userCorrection: m.content.slice(0, CORRECTION_MAX_CHARS),
@@ -101,6 +110,7 @@ export function buildRepairLedger(recent: readonly Msg[], currentContent: string
   });
   const cur = classifyRepair(currentContent);
   if (cur.isRepair) {
+    if (cur.type === 'TOPIC') entries.length = 0;
     entries.push({
       type: cur.type,
       userCorrection: currentContent.slice(0, CORRECTION_MAX_CHARS),
@@ -154,7 +164,6 @@ const DURABLE_SCOPE_RE = /以后|一直|总是|长期|每次都/;
 const TOPIC_SCOPE_RE = /技术问题|数学|编程|这类问题/;
 // 撤销/改口：结束旧约束。明确撤销（含全局）与单纯换话题（保留全局明确要求）分开。
 const EXPLICIT_REVOKE_RE = /撤销|恢复原来的|恢复默认|还是原来|取消刚才/;
-const TOPIC_SWITCH_RE = /换个话题|刚才那个不用|不说这个|聊点别的/;
 
 /** 从最近窗口 + 当前消息重建约束账本，处理改口/撤销/过期。 */
 export function buildActiveConstraints(recent: readonly Msg[], currentContent: string): ActiveConstraint[] {
@@ -173,7 +182,7 @@ export function buildActiveConstraints(recent: readonly Msg[], currentContent: s
       for (const c of raw) c.state = 'revised';
       continue;
     }
-    if (TOPIC_SWITCH_RE.test(text)) {
+    if (isTopicSwitch(text) || /^刚才那个不用/.test(text.trim())) {
       // 单纯换话题：结束旧话题/会话约束，但保留仍有效的全局明确要求（B3）。
       for (const c of raw) if (c.scope !== 'GLOBAL_CONFIRMED') c.state = 'revised';
     }
@@ -243,7 +252,7 @@ export function buildTopicStack(recent: readonly Msg[], currentDomain: string, c
     const d = domainOf(m.content);
     if (d !== 'general' && domains[domains.length - 1] !== d) domains.push(d);
   }
-  const switchTopic = /换个话题|不说这个|聊点别的|换一个问题/.test(currentContent);
+  const switchTopic = isTopicSwitch(currentContent);
   const stack: TopicFrame[] = domains.map((key) => ({ key, status: 'paused' as const }));
   if (switchTopic && stack.length > 0) stack[stack.length - 1].status = 'closed';
   if (currentDomain !== 'general') {
