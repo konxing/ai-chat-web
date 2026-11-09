@@ -128,7 +128,12 @@ export const DIALOGUE_EXAMPLES: readonly DialogueExample[] = [
     { role: 'user', content: '终于把报告写完了！' },
     { role: 'assistant', content: '恭喜收尾！松了口气吧。' },
     { role: 'user', content: '是啊，拖太久了。' },
-    { role: 'assistant', content: '拖久了完成那一刻特别爽。打算歇歇还是继续？' } ] }
+    { role: 'assistant', content: '拖久了完成那一刻特别爽。打算歇歇还是继续？' } ] },
+  { id: 'd6', acts: ['SHARE_PROGRESS', 'SHARE_EXPERIENCE'], turns: [
+    { role: 'user', content: '拖了很久的报告总算写完了。' },
+    { role: 'assistant', content: '拖这么久收尾，松口气吧。是内容难写，还是一直没整块时间？' },
+    { role: 'user', content: '主要是没整块时间。' },
+    { role: 'assistant', content: '那种零碎时间写长东西最磨人。完成了就先别急着想下一件。' } ] }
 ];
 
 export function selectDialogueExamples(act: DialogueAct): DialogueExample[] {
@@ -153,7 +158,7 @@ export const DIALOGUE_EXAMPLE_BUDGET_CHARS = 350;
 
 export interface ExampleDiagnostics {
   selectedId: string | null;
-  reason: 'act-match' | 'over-budget' | 'no-match' | 'low-naturalness';
+  reason: 'act-match' | 'act+topic' | 'over-budget' | 'no-match' | 'low-naturalness';
   chars: number;
   trimmed: boolean;
 }
@@ -162,9 +167,27 @@ function exampleChars(e: DialogueExample): number {
   return e.turns.reduce((s, t) => s + t.content.length + 4, 0); // "用户："/"助手：" 标签各 3-4 字
 }
 
+/** 中文/英文二元组重叠分，衡量示例与近期对话的话题相关度（不存原文，只用于秒选）。 */
+function overlapScore(e: DialogueExample, recentText: string): number {
+  const clean = (s: string) => s.replace(/[\s，。！？、,.!?：:；;"'“”‘’()（）【】\[\]]/g, '');
+  const grams = (s: string) => {
+    const set = new Set<string>();
+    const c = clean(s);
+    for (let i = 0; i < c.length - 1; i++) set.add(c.slice(i, i + 2));
+    return set;
+  };
+  const rec = grams(recentText);
+  let score = 0;
+  for (const t of e.turns) {
+    if (t.role !== 'user') continue;
+    for (const g of grams(t.content)) if (rec.has(g)) score++;
+  }
+  return score;
+}
+
 export function selectDialogueExampleFor(
   act: DialogueAct,
-  opts: { budget?: number; naturalness?: 'low' | 'medium' | 'high' } = {}
+  opts: { budget?: number; naturalness?: 'low' | 'medium' | 'high'; recentText?: string } = {}
 ): { example: DialogueExample | null; diagnostics: ExampleDiagnostics } {
   const budget = opts.budget ?? DIALOGUE_EXAMPLE_BUDGET_CHARS;
   if (opts.naturalness === 'low') {
@@ -174,11 +197,20 @@ export function selectDialogueExampleFor(
   if (candidates.length === 0) {
     return { example: null, diagnostics: { selectedId: null, reason: 'no-match', chars: 0, trimmed: false } };
   }
-  const first = candidates[0];
-  const chars = exampleChars(first);
-  if (chars <= budget) {
-    return { example: first, diagnostics: { selectedId: first.id, reason: 'act-match', chars, trimmed: false } };
+  // 按"动作命中 + 话题相关度"排序，再取第一个符合预算的；预算不足可完全不注入。
+  const ranked = candidates
+    .map((e) => ({ e, score: opts.recentText ? overlapScore(e, opts.recentText) : 0 }))
+    .sort((a, b) => b.score - a.score);
+  let bestOver: number | null = null;
+  for (const { e, score } of ranked) {
+    const chars = exampleChars(e);
+    if (chars <= budget) {
+      return {
+        example: e,
+        diagnostics: { selectedId: e.id, reason: score > 0 ? 'act+topic' : 'act-match', chars, trimmed: false }
+      };
+    }
+    if (bestOver === null) bestOver = chars;
   }
-  // 超预算：按 A.3 可直接不注入，而不是裁掉用户最新消息/事实依据。
-  return { example: null, diagnostics: { selectedId: null, reason: 'over-budget', chars, trimmed: false } };
+  return { example: null, diagnostics: { selectedId: null, reason: 'over-budget', chars: bestOver ?? 0, trimmed: false } };
 }

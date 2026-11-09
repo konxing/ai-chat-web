@@ -36,15 +36,17 @@ export function buildConversationPrompt(input: {
   modeText?: string | null;
   knowledgeText?: string | null;
   planText?: string | null;
+  /** v1.3：极简对话状态（当前话题/上轮已问）；优先于示例与模式/知识。 */
+  stateText?: string | null;
   examplesText?: string | null;
   maxChars?: number;
 }): BuiltConversationPrompt {
   const budget = input.maxChars ?? CONVERSATION_PROMPT_MAX_CHARS;
-  // P2/F-07：先决策必要部分再分配预算。优先级：核心原则 > 当轮回应动作 > 少量示例 > 模式/知识(通用)。
-  // 超预算时先省略通用重复的模式/知识说明，而非总是裁掉示例。
+  // P2/F-07：先决策必要部分再分配预算。优先级：核心原则 > 当轮回应动作 > 对话状态 > 少量示例 > 模式/知识(通用)。
   const ordered: PromptPart[] = [
     { name: 'global-policy', text: input.versionContent?.trim() || renderGlobalPolicy(input.style) },
     ...(input.planText ? [{ name: 'plan', text: input.planText }] : []),
+    ...(input.stateText ? [{ name: 'state', text: input.stateText }] : []),
     ...(input.examplesText ? [{ name: 'examples', text: input.examplesText }] : []),
     ...(input.modeText ? [{ name: 'mode', text: input.modeText }] : []),
     ...(input.knowledgeText ? [{ name: 'knowledge', text: input.knowledgeText }] : [])

@@ -71,3 +71,19 @@ export function buildConversationState(
     topicStack: buildTopicStack(window, domain, currentContent)
   };
 }
+
+const TOPIC_LABEL: Record<string, string> = {
+  technical: '技术', learning: '学习', work: '工作', life: '生活', emotion: '情绪', opinion: '观点'
+};
+
+/**
+ * v1.3：极简对话状态提示（≤~100 字符），只给必要承接信息，不堆状态。
+ * 用于 v2 提示词，改善"上一轮问过又问、换话题被拉回"这类连续性问题。
+ */
+export function renderStateBrief(state: ConversationState): string | null {
+  const parts: string[] = [];
+  const active = [...state.topicStack].reverse().find((f) => f.status === 'active');
+  if (active && TOPIC_LABEL[active.key]) parts.push(`当前话题：${TOPIC_LABEL[active.key]}`);
+  if (state.openLoop) parts.push('上一轮你已提问、用户尚未回答：不要重复同一个问题');
+  return parts.length ? `【对话状态】${parts.join('；')}。` : null;
+}

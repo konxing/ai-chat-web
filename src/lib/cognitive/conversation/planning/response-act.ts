@@ -68,8 +68,14 @@ export function selectResponseAct(
   if (naturalness === 'low' && primary === 'ACKNOWLEDGE_AND_EXPLORE') {
     primary = 'ANSWER';
   }
+  // B1：纠正后 TTL 内持续抑制重犯错（当前轮已单独处理；此处覆盖后续有限轮）。
+  const priorRepair = [...state.repairLedger]
+    .reverse()
+    .find((e) => e.type === 'INTENT' || e.type === 'STYLE' || e.type === 'TOPIC');
+  const repairNote = priorRepair ? `此前用户纠正过：${priorRepair.correctedExpectation}` : undefined;
+  const notes = [constraintNote, repairNote].filter(Boolean).join(' ');
   const merged: ActSelection = { ...base, primary, question };
-  return constraintNote ? { ...merged, contextNote: constraintNote } : merged;
+  return notes ? { ...merged, contextNote: notes } : merged;
 }
 
 function selectBaseAct(u: DialogueUnderstanding, state: ConversationState, avoidAsk: boolean): ActSelection {

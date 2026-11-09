@@ -7,7 +7,7 @@ import { planResponse, type ResponsePlan } from '../planning/response-planner';
 import { selectExamples, renderExamples, selectDialogueExampleFor, renderDialogueExamples, type ExampleDiagnostics } from '../style/style-examples';
 import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
-import { buildConversationState, type ConversationState } from '../state/conversation-state';
+import { buildConversationState, renderStateBrief, type ConversationState } from '../state/conversation-state';
 import { selectResponseAct, ACT_TEXT, type ActSelection } from '../planning/response-act';
 
 /**
@@ -63,18 +63,26 @@ export async function buildConversationIntelligence(input: {
       (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '') +
       (act.contextNote ? `\n${act.contextNote}` : '')
     : plan.planText;
-  // A.3：v2 每轮最多 1 组多轮示例，严格字符预算，带引用诊断；预算不足可完全不注入。
-  const picked = v2 ? selectDialogueExampleFor(understanding.dialogueAct, { naturalness: effectiveStyle.naturalness }) : null;
+  // A.3：v2 每轮最多 1 组多轮示例，按"动作+话题"择优，严格字符预算，带引用诊断；预算不足可完全不注入。
+  const picked = v2
+    ? selectDialogueExampleFor(understanding.dialogueAct, {
+        naturalness: effectiveStyle.naturalness,
+        recentText: [content, state.topic ?? ''].join(' ')
+      })
+    : null;
   const exampleDiagnostics: ExampleDiagnostics | null = picked?.diagnostics ?? null;
   const examplesText = v2
     ? (picked?.example ? renderDialogueExamples([picked.example]) : null)
     : renderExamples(selectExamples(mode.mode, mode.secondary));
+  // v1.3：极简对话状态，改善"重复追问/换话题被拉回"；仅 v2 注入。
+  const stateText = v2 ? renderStateBrief(state) : null;
   const block = buildConversationPrompt({
     style: effectiveStyle,
     versionContent: version?.content ?? null,
     modeText,
     knowledgeText: renderKnowledgePolicy(mode.mode),
     planText: actText,
+    stateText,
     examplesText
   });
   return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act, exampleDiagnostics };

@@ -106,7 +106,21 @@ async function main() {
   const engine = strArg('engine', 'legacy') === 'dialogue-v2' ? 'dialogue-v2' : 'legacy';
   const rand = rng(seed);
   const provider = await resolveDefaultProvider(OWNER);
-  const judgeProvider = doJudge ? provider : null; // 同族评委仅作辅助，报告注明偏差；可换独立模型
+  // v1.3：评委可选不同模型（异族辅助，降低同族自评偏差）；未指定时自动挑一个非默认模型，找不到才回退同族。
+  let judgeProvider = null as Awaited<ReturnType<typeof resolveDefaultProvider>> | null;
+  let judgeIsIndependent = false;
+  if (doJudge) {
+    const wanted = strArg('judge-provider', '');
+    const rows = await prisma.aiProvider.findMany({
+      where: { enabled: true, OR: [{ ownerType: 'GLOBAL' }, { ownerType: 'USER', userId: OWNER }] },
+      orderBy: { createdAt: 'asc' }
+    });
+    const picked = wanted
+      ? rows.find((p) => p.name === wanted || p.id === wanted)
+      : rows.find((p) => p.id !== provider.id);
+    judgeProvider = (picked as unknown as typeof judgeProvider) ?? provider;
+    judgeIsIndependent = judgeProvider!.id !== provider.id;
+  }
   const runId = `${engine}-${Date.now().toString(36)}`;
   const sampleDir = new URL(`./samples/${runId}/`, import.meta.url);
   mkdirSync(sampleDir, { recursive: true });
@@ -197,7 +211,7 @@ async function main() {
     `# 对话智能层对照评测报告（引擎=${engine}）`,
     '',
     `- 代码版本：见 git HEAD；开关：对话层仅实验臂启用（生产默认 OFF）；引擎臂=${engine}；Prompt 版本：默认。`,
-    `- 模型：${provider.name}（${provider.modelId}）；评委：${doJudge ? '同族模型（辅助，有偏差，需人评复核）' : '未启用（仅程序指标）'}；种子=${seed}。`,
+    `- 模型：${provider.name}（${provider.modelId}）；评委：${doJudge ? (judgeIsIndependent ? `独立模型 ${judgeProvider!.name}（${judgeProvider!.modelId}，异族辅助，仍需人评）` : '同族模型（辅助，有偏差，需人评复核）') : '未启用（仅程序指标）'}；种子=${seed}。`,
     `- 样本：单轮 ${singles.length} + 真实多轮 ${multis.length} = ${results.length}。旧版 8 子样本 5:3 结果**不足以判定提升/退化**（F-10）。`,
     `- 盲测：层 ${layerWins} / 基线 ${baseWins} / 平 ${ties}（n=${judged.length}，小样本，置信区间宽，不作上线依据）。`,
     `- templateFlagRate：基线 ${(results.reduce((s, r) => s + r.baseTemplate, 0) / results.length).toFixed(2)} / 层 ${(results.reduce((s, r) => s + r.layerTemplate, 0) / results.length).toFixed(2)}（仅模板症状，非真人感）。`,
