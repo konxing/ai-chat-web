@@ -14,6 +14,7 @@ import {
   describeGraphBudget,
   describeNotAGraph,
   isGraphDrawable,
+  memoryNeighborhood,
   truncateNodeLabel
 } from '@/lib/cognitive/memory-graph-display';
 
@@ -65,6 +66,33 @@ function nodes(count: number) {
 
 /** 画布上那行字的长度上限：这里是**写死的期望**，不是从实现里读回来的数——改成 25 就该让用例红。 */
 const LABEL_MAX = 24;
+
+describe('memoryNeighborhood', () => {
+  it('沿一条边浏览并保留更新方向，不纳入两跳或不可见的节点', () => {
+    const data = graph({
+      nodes: nodes(5),
+      edges: [
+        { from: 'm-0', to: 'm-1', kind: 'update' },
+        { from: 'm-1', to: 'm-2', kind: 'update' },
+        edge('m-3', 'm-1'),
+        edge('m-2', 'm-4'),
+        edge('m-1', 'outside')
+      ]
+    });
+    expect(memoryNeighborhood(data, 'm-1')?.neighbors.map(({ node, label }) => [node.id, label])).toEqual([
+      ['m-0', '更新前的说法'],
+      ['m-2', '更新后的说法'],
+      ['m-3', '同一场对话里说过']
+    ]);
+    expect(memoryNeighborhood(data, 'outside')).toBeNull();
+  });
+
+  it('只有两条记忆时也能解释已有的直接关系', () => {
+    const data = graph({ nodes: nodes(2), edges: [edge('m-0', 'm-1')] });
+    expect(isGraphDrawable(data)).toBe(false);
+    expect(memoryNeighborhood(data, 'm-0')?.neighbors.map(({ node }) => node.id)).toEqual(['m-1']);
+  });
+});
 
 describe('isGraphDrawable — 什么时候才配叫一张图', () => {
   it('有三个以上的点、并且至少一根线，才画 SVG', () => {

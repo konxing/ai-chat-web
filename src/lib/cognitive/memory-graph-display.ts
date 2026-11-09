@@ -1,4 +1,4 @@
-import type { GraphEdgeKind, MemoryGraph } from './memory-graph';
+import type { GraphEdge, GraphEdgeKind, GraphNode, MemoryGraph } from './memory-graph';
 import type { MemoryContext } from './policy';
 
 /**
@@ -37,6 +37,26 @@ export const GRAPH_EDGE_LABELS: Record<GraphEdgeKind, string> = {
   sameChat: '同一场对话里说过',
   coCitation: '同一条洞察里一起提到'
 };
+
+/** 只沿可见图中的一条边走。相邻点之间的边、两跳节点都不属于当前焦点。 */
+export function memoryNeighborhood(graph: Pick<MemoryGraph, 'nodes' | 'edges'>, id: string) {
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  const selected = nodes.get(id);
+  if (!selected) return null;
+
+  const neighbors: { node: GraphNode; edge: GraphEdge; label: string }[] = [];
+  for (const edge of graph.edges) {
+    if (edge.from !== id && edge.to !== id) continue;
+    const outgoing = edge.from === id;
+    const node = nodes.get(outgoing ? edge.to : edge.from);
+    if (!node || node.id === id) continue;
+    const label = edge.kind === 'update'
+      ? outgoing ? '更新后的说法' : '更新前的说法'
+      : GRAPH_EDGE_LABELS[edge.kind];
+    neighbors.push({ node, edge, label });
+  }
+  return { selected, neighbors };
+}
 
 /**
  * 点的颜色 = 主题。这是「同主题不成边」那条判词的另一半：

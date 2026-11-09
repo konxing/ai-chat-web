@@ -12,6 +12,7 @@ import {
   describeGraphBudget,
   describeNotAGraph,
   isGraphDrawable,
+  memoryNeighborhood,
   truncateNodeLabel
 } from '@/lib/cognitive/memory-graph-display';
 import { CONTEXT_LABELS, TYPE_LABELS } from '@/lib/cognitive/memory-display';
@@ -125,15 +126,18 @@ export function MemoryGraphPanel() {
     }
   }
 
+  const focus = useMemo(() => graph && selectedId ? memoryNeighborhood(graph, selectedId) : null, [graph, selectedId]);
   const positions = useMemo(() => {
-    const nodes = graph?.nodes ?? [];
-    return nodes.map((node, index) => {
-      const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1);
-      return { node, x: CENTER + RADIUS * Math.cos(angle), y: CENTER + RADIUS * Math.sin(angle) };
-    });
-  }, [graph]);
+    const nodes = focus ? [focus.selected, ...focus.neighbors.map(({ node }) => node)] : graph?.nodes ?? [];
+    return new Map(nodes.map((node, index) => {
+      if (focus && index === 0) return [node.id, { node, x: CENTER, y: CENTER }];
+      const angle = (Math.PI * 2 * (focus ? index - 1 : index)) / Math.max(focus ? nodes.length - 1 : nodes.length, 1);
+      return [node.id, { node, x: CENTER + RADIUS * Math.cos(angle), y: CENTER + RADIUS * Math.sin(angle) }];
+    }));
+  }, [graph, focus]);
 
-  const selected = graph?.nodes.find((node) => node.id === selectedId) ?? null;
+  const selected = focus?.selected ?? null;
+  const shownEdges = focus ? focus.neighbors.map(({ edge }) => edge) : graph?.edges ?? [];
   const drawable = graph !== null && isGraphDrawable(graph);
   /** 闸门句只在画得出图时摆：画不出来时那句「还不是一张图」已经把同一个条数说过了，两句同时出现就是重复。 */
   const gateNote = graph && drawable ? describeAssociationGate(graph.associationGated) : '';
@@ -170,6 +174,17 @@ export function MemoryGraphPanel() {
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
           {graph ? describeGraphBudget(graph).map((sentence) => <Alert key={sentence} tone="info">{sentence}</Alert>) : null}
           {gateNote ? <Alert tone="info">{gateNote}</Alert> : null}
+          {!loading && graph && graph.nodes.length > 0 ? (
+            <label className="block max-w-[520px]">
+              <span className="label">聚焦一条记忆</span>
+              <select className="field" value={selected?.id ?? ''} onChange={(event) => setSelectedId(event.target.value || null)}>
+                <option value="">全部记忆</option>
+                {graph.nodes.map((node, index) => (
+                  <option key={node.id} value={node.id}>{index + 1}. {truncateNodeLabel(node.content)}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           {loading ? (
             <LoadingBlock label="加载记忆网络" />
@@ -179,11 +194,11 @@ export function MemoryGraphPanel() {
                 viewBox={`0 0 ${CANVAS} ${CANVAS}`}
                 className="w-full max-w-[520px] rounded-xl border border-white/[0.07] bg-white/[0.02]"
                 role="img"
-                aria-label="记忆之间的关系图"
+                aria-label={focus ? '当前记忆的直接关系图' : '记忆之间的关系图'}
               >
-                {graph.edges.map((edge) => {
-                  const from = positions.find((spot) => spot.node.id === edge.from);
-                  const to = positions.find((spot) => spot.node.id === edge.to);
+                {shownEdges.map((edge) => {
+                  const from = positions.get(edge.from);
+                  const to = positions.get(edge.to);
                   if (!from || !to) return null;
                   return (
                     <line
@@ -199,7 +214,7 @@ export function MemoryGraphPanel() {
                     />
                   );
                 })}
-                {positions.map(({ node, x, y }) => (
+                {Array.from(positions.values()).map(({ node, x, y }) => (
                   <g key={node.id} onClick={() => setSelectedId(selectedId === node.id ? null : node.id)}>
                     <circle
                       cx={x}
@@ -246,56 +261,19 @@ export function MemoryGraphPanel() {
                 ))}
               </div>
 
-              <p className="text-[11.5px] text-white/35">点的位置只为了铺开不重叠，不表示任何东西。点一个点看它的完整说法。</p>
-
-              {selected ? (
-                <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-                  <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-white/85">
-                    {selected.content}
-                  </p>
-                  <p className="mt-2 flex flex-wrap gap-1.5">
-                    <span className="chip !px-2 !py-0.5 !text-[10.5px]">{TYPE_LABELS[selected.type]}</span>
-                    <span className="chip !px-2 !py-0.5 !text-[10.5px]">{CONTEXT_LABELS[selected.context]}</span>
-                    {selected.isCurrent ? null : (
-                      <span className="badge badge-amber !px-2 !py-0.5 !text-[10.5px]">已被新说法取代</span>
-                    )}
-                  </p>
-                  {selected.chatId ? (
-                    <p className="mt-2 text-[11.5px] text-white/40">
-                      {chats[selected.chatId] ? (
-                        <Link
-                          href={`/chat/${encodeURIComponent(selected.chatId)}`}
-                          className="inline-block max-w-[260px] truncate align-bottom text-white/45 underline-offset-2 hover:text-white/80 hover:underline"
-                        >
-                          来自：{chats[selected.chatId]}
-                        </Link>
-                      ) : (
-                        <span>来自：原对话已删除</span>
-                      )}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
+              <p className="text-[11.5px] text-white/35">点的位置只为了铺开不重叠，不表示任何东西。选中一点后，只显示和它直接相连的记忆。</p>
             </div>
           ) : (
             <div className="space-y-3">
               <Alert tone="info">{describeNotAGraph(graph.nodes.length, graph.edges.length, graph.associationGated)}</Alert>
-              {/* 画不出图的时候退回列表：条数、内容、主题都在，只是不装成一张网络。 */}
-              {graph.nodes.map((node) => (
-                <div key={node.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-                  <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-white/80">
-                    {node.content}
-                  </p>
-                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10.5px]">
-                    <span
-                      className="inline-block h-2 w-2 rounded-full"
-                      style={{ background: GRAPH_CONTEXT_COLORS[node.context] }}
-                    />
-                    <span className="text-white/40">{CONTEXT_LABELS[node.context]}</span>
-                    {node.isCurrent ? null : <span className="text-white/30">已被新说法取代</span>}
-                  </p>
-                </div>
-              ))}
+              {!selected ? graph.nodes.map((node) => (
+                <button key={node.id} type="button" onClick={() => setSelectedId(node.id)} className="block w-full whitespace-pre-wrap break-words rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left text-[13px] leading-relaxed text-white/80">
+                  <span className="block">{node.content}</span>
+                  <span className="mt-1 block text-[11px] text-white/55">
+                    {CONTEXT_LABELS[node.context]}{node.isCurrent ? '' : ' · 已被新说法取代'}
+                  </span>
+                </button>
+              )) : null}
               {graph.nodes.length === 0 ? (
                 <EmptyState
                   icon={<Share2 className="h-5 w-5" />}
@@ -305,6 +283,51 @@ export function MemoryGraphPanel() {
               ) : null}
             </div>
           )}
+          {!loading && focus && selected ? (
+            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-white/85">
+                {selected.content}
+              </p>
+              <p className="mt-2 flex flex-wrap gap-1.5">
+                <span className="chip !px-2 !py-0.5 !text-[10.5px]">{TYPE_LABELS[selected.type]}</span>
+                <span className="chip !px-2 !py-0.5 !text-[10.5px]">{CONTEXT_LABELS[selected.context]}</span>
+                {selected.isCurrent ? null : (
+                  <span className="badge badge-amber !px-2 !py-0.5 !text-[10.5px]">已被新说法取代</span>
+                )}
+              </p>
+              {selected.chatId ? (
+                <p className="mt-2 text-[11.5px] text-white/40">
+                  {chats[selected.chatId] ? (
+                    <Link
+                      href={`/chat/${encodeURIComponent(selected.chatId)}`}
+                      className="inline-block max-w-[260px] truncate align-bottom text-white/45 underline-offset-2 hover:text-white/80 hover:underline"
+                    >
+                      来自：{chats[selected.chatId]}
+                    </Link>
+                  ) : (
+                    <span>来自：原对话已删除</span>
+                  )}
+                </p>
+              ) : null}
+              <div className="mt-4 border-t border-white/[0.07] pt-3">
+                <h3 className="text-[13px] font-medium text-white">当前视图中的直接关系（{focus.neighbors.length}）</h3>
+                {focus.neighbors.length === 0 ? (
+                  <p className="mt-2 text-[12px] text-white/55">当前视图中没有连到这条记忆的线。</p>
+                ) : (
+                  <ul className="mt-2 space-y-2">
+                    {focus.neighbors.map(({ node, label }) => (
+                      <li key={node.id}>
+                        <button type="button" className="w-full rounded-lg bg-white/[0.04] p-2.5 text-left hover:bg-white/[0.08]" onClick={() => setSelectedId(node.id)}>
+                          <span className="block text-[11px] text-white/55">{label}</span>
+                          <span className="block break-words text-[13px] text-white/85">{node.content}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>
