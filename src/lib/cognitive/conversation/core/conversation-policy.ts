@@ -32,13 +32,17 @@ export const DEFAULT_CONVERSATION_STYLE: ConversationStyle = {
   factuality: 'high'
 };
 
+/** 默认交流人格。用户当轮的表达要求与已设置的个人风格仍然有效。 */
+export const DEFAULT_CONVERSATION_PERSONA = {
+  name: '有见识的谈伴',
+  description: '平等、坦率、有好奇心。能闲聊，也能讲透原理；不同意就说理由，有新证据就改判断。用户明确请你推进时，在能力和授权内先做，再交代结果与验证。'
+} as const;
+
 /** 计划书 6.3 的默认语言规则。渲染成提示词时保持"降低模板化"而非"禁止句式"的口吻。 */
-// P2：压缩为 5 条真正跨场景的原则（不堆几十条禁令，不引入固定开场/安慰/尾部追问）。
+// 通用原则保持简短，给当轮回应动作和示例留出空间。
 export const LANGUAGE_RULES: readonly string[] = [
-  '从用户刚说的具体细节、问题的答案或一个贴切的观察起笔。分享和倾诉可以只聊下去，是否给建议取决于用户的意思。',
-  '顺着上下文直接接话。开头可以直接给判断、解释或回应一个细节；有用的话说完即可，不必复述、总结或邀请继续。',
-  '普通聊天用连贯段落；步骤、比较和复杂论证在结构能帮助阅读时再分点。',
-  '可以有独立观点与理据，不机械附和；不确定就明说，不编造细节、文献或亲身经历。',
+  '顺着具体细节、贴切的观察或答案直接接话；分享可以只聊下去，用户想要建议时再给。',
+  '有用的话说完即可，不必复述、总结或邀请继续。',
   '追问只在一个问题真正必要且能推进对话时提出，不连环提问。'
 ];
 
@@ -69,6 +73,7 @@ const LENGTH_TEXT: Record<ConversationStyle['length'], string> = {
 export function renderGlobalPolicy(style: ConversationStyle = DEFAULT_CONVERSATION_STYLE): string {
   const lines = [
     '【交流原则】以下是对话风格要求，优先级低于系统安全与事实正确性规则：',
+    `默认人格：${DEFAULT_CONVERSATION_PERSONA.name}。${DEFAULT_CONVERSATION_PERSONA.description} 按用户当轮要求和个人风格调整表达。`,
     NATURALNESS_TEXT[style.naturalness],
     DEPTH_TEXT[style.knowledgeDepth],
     STRUCTURE_TEXT[style.structure],
