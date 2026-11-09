@@ -20,7 +20,7 @@ export function AuthShell({
 }) {
   return (
     <main className="relative flex min-h-dvh flex-col lg:grid lg:grid-cols-[1.06fr_1fr]">
-      <section className="relative hidden overflow-hidden border-r border-white/[0.06] lg:flex lg:flex-col lg:justify-between lg:p-12">
+      <section className="relative hidden overflow-hidden border-r border-white/[0.08] bg-[#101923] lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
         <div className="pointer-events-none absolute -left-24 top-1/3 h-96 w-96 rounded-full bg-aurora-400/10 blur-[90px]" />
         <div className="pointer-events-none absolute -right-20 bottom-10 h-72 w-72 rounded-full bg-violet-500/10 blur-[80px]" />
         <Link href="/" className="relative inline-flex items-center gap-3 text-white/80">
@@ -31,16 +31,15 @@ export function AuthShell({
           <div className="mb-7 flex h-16 w-16 items-center justify-center rounded-2xl border border-aurora-400/20 bg-aurora-400/[0.07]">
             <ShieldCheck className="h-7 w-7 text-aurora-300" />
           </div>
-          <h2 className="text-[34px] font-light leading-[1.25] tracking-wide text-white">
-            星海无声，
+          <h2 className="text-[clamp(2.125rem,3.5vw,3.25rem)] font-semibold leading-[1.22] tracking-tight text-white">
+            给家人留一处
             <br />
-            此间自成边界。
+            安心对话的空间。
           </h2>
-          <p className="mt-5 text-sm leading-7 text-white/40">
-            网络层零信任过滤，未经显式授权的请求无法触及边界。
-            存储加密与多维隔离机制，确保每一行对话与凭证，皆锁于无形。
+          <p className="mt-5 max-w-sm text-sm leading-7 text-white/65">
+            只向授权的网络和账号开放。对话与凭证在服务器上加密保存。
           </p>
-          <div className="mt-9 space-y-3 text-[12.5px] text-white/40">
+          <div className="mt-9 space-y-3 text-[12.5px] text-white/60">
             <div className="flex items-center gap-3">
               <Network className="h-4 w-4 text-aurora-400/80" />
               <span>默认拒绝 · IPv4 / IPv6 白名单</span>
@@ -73,7 +72,7 @@ export function AuthShell({
         <div className={`mx-auto w-full ${wide ? 'max-w-[560px]' : 'max-w-[420px]'} animate-fade-up`}>
           <div className="mb-7">
             <h1 className="text-[26px] font-semibold tracking-wide text-white">{title}</h1>
-            <p className="mt-2 text-[13.5px] leading-relaxed text-white/40">{subtitle}</p>
+            <p className="mt-2 text-sm leading-relaxed text-white/60">{subtitle}</p>
           </div>
           <div className="panel p-5 sm:p-7">{children}</div>
           {footer ? <div className="mt-5 text-center text-[12.5px] text-white/35">{footer}</div> : null}

@@ -80,11 +80,11 @@ body::after {
   }
 
   .panel {
-    @apply rounded-2xl border border-white/[0.08] bg-[#0d121c]/80 shadow-[0_24px_60px_-30px_rgba(0,0,0,0.9)] backdrop-blur-xl;
+    @apply rounded-2xl border border-white/10 bg-[#151b25] shadow-[0_16px_44px_-30px_rgba(0,0,0,0.75)];
   }
 
   .field {
-    @apply w-full rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-[15px] text-white outline-none transition placeholder:text-white/25 focus:border-aurora-400/60 focus:ring-2 focus:ring-aurora-400/15 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full rounded-xl border border-white/10 bg-[#0c121b] px-4 py-3 text-[15px] text-white outline-none transition placeholder:text-white/45 focus:border-aurora-400/60 focus:ring-2 focus:ring-aurora-400/15 disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .btn {
@@ -105,6 +105,21 @@ body::after {
 
   .btn-icon {
     @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-transparent text-white/60 transition hover:border-white/10 hover:bg-white/5 hover:text-white;
+  }
+
+  .btn:focus-visible,
+  .btn-icon:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  .chat-surface {
+    background: radial-gradient(ellipse 550px 330px at 50% 10%, rgb(63 224 180 / 0.055), transparent 80%), #0d121b;
+  }
+
+  .chat-composer {
+    background: #171f2b;
+    box-shadow: 0 18px 45px -25px #000b, 0 0 0 1px rgb(255 255 255 / 0.025);
   }
 
   .label {

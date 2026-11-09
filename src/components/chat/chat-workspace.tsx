@@ -14,6 +14,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowDown,
+  ArrowUpRight,
   ArrowUp,
   Bot,
   Check,
@@ -21,6 +22,7 @@ import {
   Copy,
   Download,
   FileText,
+  Lightbulb,
   History,
   LogOut,
   Menu,
@@ -35,6 +37,7 @@ import {
   Shield,
   Square,
   Trash2,
+  Utensils,
   X
 } from 'lucide-react';
 import { apiFetch, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
@@ -103,10 +106,10 @@ function messageTime(value: string): string {
 }
 
 const SUGGESTIONS = [
-  '帮我把这段话写得更温和一些：',
-  '用简单的比喻解释一下量子纠缠',
-  '为明天的家庭晚餐设计一份菜单',
-  '把这份 PDF 的要点总结成清单'
+  { label: '润色文字', detail: '把一段话写得更温和', prompt: '帮我把这段话写得更温和一些：', icon: Pencil },
+  { label: '学个新概念', detail: '用比喻解释量子纠缠', prompt: '用简单的比喻解释一下量子纠缠', icon: Lightbulb },
+  { label: '计划晚餐', detail: '为明天设计家庭菜单', prompt: '为明天的家庭晚餐设计一份菜单', icon: Utensils },
+  { label: '阅读文档', detail: '从 PDF 里提取要点', prompt: '把这份 PDF 的要点总结成清单', icon: FileText }
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'family-ai.sidebar-collapsed';
@@ -895,7 +898,7 @@ export function ChatWorkspace({
   const hasMessages = messages.length > 0 || Boolean(optimisticUser) || Boolean(streamText);
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-transparent">
+    <div className="chat-surface flex h-dvh overflow-hidden">
       {sidebarOpen ? (
         <button
           type="button"
@@ -908,7 +911,7 @@ export function ChatWorkspace({
       <aside
         id="chat-sidebar"
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.07] bg-[#080b12]/95 backdrop-blur-2xl transition-[transform,width,visibility] duration-300 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.08] bg-[#0a0f17] transition-[transform,width,visibility] duration-300 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
           sidebarCollapsed ? 'lg:invisible lg:w-0 lg:max-w-0' : 'lg:visible lg:w-[300px] xl:w-[320px]',
           sidebarOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         )}
@@ -924,11 +927,11 @@ export function ChatWorkspace({
         </div>
 
         <div className="px-3 pt-2">
-          <button type="button" onClick={startNewChat} className="btn-ghost w-full justify-start gap-2 border-white/10 py-2.5 text-[13px]">
+          <button type="button" onClick={startNewChat} className="btn-ghost w-full justify-start gap-2 border-aurora-400/20 bg-aurora-400/[0.07] py-2.5 text-[13px] hover:bg-aurora-400/10">
             <MessageSquarePlus className="h-4 w-4 text-aurora-300" />
             开启新对话
             <span className="ml-auto hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/25 sm:inline">
-              ⌘ K
+              Ctrl / ⌘ K
             </span>
           </button>
         </div>
@@ -946,7 +949,8 @@ export function ChatWorkspace({
           </div>
         </div>
 
-        <div className="mt-3 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="mt-4 flex-1 overflow-y-auto px-2 pb-2">
+          <p className="mb-2 px-3 text-xs font-medium text-white/50">对话历史</p>
           {filteredChats.length === 0 ? (
             <div className="px-3 py-8 text-center text-[12px] leading-relaxed text-white/25">
               {chats.length === 0 ? '还没有对话。\n开始和 AI 聊聊吧。' : '没有匹配的对话'}
@@ -963,14 +967,14 @@ export function ChatWorkspace({
                       aria-current={active ? 'page' : undefined}
                       className={cn(
                         'w-full rounded-lg py-2.5 pl-3 pr-20 text-left transition lg:pr-3 lg:group-hover:pr-16 lg:group-focus-within:pr-16',
-                        active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]'
+                        active ? 'bg-[#1b2831] shadow-[inset_2px_0_0_#4fe0b4]' : 'hover:bg-white/[0.05]'
                       )}
                     >
                       <div className="flex items-center gap-2">
                         <span className={cn('truncate text-[13px]', active ? 'text-white' : 'text-white/70')}>{item.title}</span>
-                        <span className="ml-auto shrink-0 text-[10px] text-white/20">{timeAgo(item.updatedAt)}</span>
+                        <span className="ml-auto shrink-0 text-[10px] text-white/45">{timeAgo(item.updatedAt)}</span>
                       </div>
-                      {item.preview ? <p className="mt-0.5 truncate text-[11px] text-white/30">{item.preview}</p> : null}
+                      {item.preview ? <p className="mt-0.5 truncate text-[11px] text-white/45">{item.preview}</p> : null}
                     </button>
                     <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-[#0b1019]/90 p-0.5 shadow-lg lg:hidden lg:group-hover:flex lg:group-focus-within:flex">
                       <button
@@ -1052,7 +1056,7 @@ export function ChatWorkspace({
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-[#080b12]/55 px-3 backdrop-blur-xl sm:px-4">
+        <header className="flex h-[58px] shrink-0 items-center gap-2 border-b border-white/[0.08] bg-[#0d121b]/90 px-3 backdrop-blur-xl sm:h-16 sm:px-5">
           <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开侧栏" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
             <Menu className="h-4 w-4" />
           </button>
@@ -1067,27 +1071,29 @@ export function ChatWorkspace({
             {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[13.5px] font-medium text-white/85">{chat?.title || '新对话'}</h1>
-            <p className="hidden truncate text-[10.5px] text-white/30 sm:block">
+            <h1 className="truncate text-sm font-semibold text-white/90">{chat?.title || '新对话'}</h1>
+            <p className="hidden truncate text-[11px] text-white/50 sm:block">
               {selectedProvider ? `${selectedProvider.name} · ${selectedProvider.modelId}` : '尚未选择模型'}
             </p>
           </div>
-          <div className="relative flex items-center gap-1.5">
-            <select
-              aria-label="选择模型"
-              value={selectedProviderId}
-              onChange={(e) => void changeModel(e.target.value)}
-              disabled={providers.length === 0 || sending}
-              className="max-w-[190px] appearance-none rounded-lg border border-white/10 bg-white/[0.04] py-1.5 pl-2.5 pr-7 text-[11.5px] text-white/70 outline-none transition hover:border-white/20 disabled:opacity-40 sm:max-w-[240px]"
-            >
-              {providers.length === 0 ? <option value="">未配置模型</option> : null}
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id} className="bg-[#0c111b]">
-                  {provider.name} · {provider.modelId}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-white/30" />
+          <div className="flex shrink-0 items-center gap-1.5">
+            <div className="relative flex items-center">
+              <select
+                aria-label="选择模型"
+                value={selectedProviderId}
+                onChange={(e) => void changeModel(e.target.value)}
+                disabled={providers.length === 0 || sending}
+                className="max-w-[42vw] appearance-none rounded-full border border-white/10 bg-white/[0.05] py-2 pl-3 pr-8 text-xs text-white/80 outline-none transition hover:border-white/25 focus-visible:ring-2 focus-visible:ring-aurora-400/60 disabled:opacity-45 sm:max-w-[240px]"
+              >
+                {providers.length === 0 ? <option value="">未配置模型</option> : null}
+                {providers.map((provider) => (
+                  <option key={provider.id} value={provider.id} className="bg-[#0c111b]">
+                    {provider.name} · {provider.modelId}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-white/30" />
+            </div>
             <Link href="/settings" className="btn-icon hidden sm:inline-flex" aria-label="设置">
               <Settings className="h-4 w-4" />
             </Link>
@@ -1106,21 +1112,21 @@ export function ChatWorkspace({
         ) : null}
 
         <div ref={scrollRef} className="relative flex-1 overflow-y-auto scroll-smooth" onScroll={onMessagesScroll}>
-          <div className="mx-auto w-full max-w-3xl px-4 pb-8 pt-6 sm:px-6">
+          <div className={cn('mx-auto w-full max-w-3xl px-4 sm:px-6', hasMessages ? 'pb-8 pt-6' : 'flex min-h-full flex-col py-2')}>
             {!hasMessages ? (
-              <div className="flex min-h-[calc(100dvh-16rem)] flex-col items-center justify-center text-center">
-                <div className="relative mb-6 flex h-16 w-16 items-center justify-center">
-                  <div className="absolute inset-0 rounded-full bg-aurora-400/20 blur-xl" />
-                  <BrandMark size={56} />
+              <div className="flex flex-1 flex-col items-center justify-center py-3 text-center">
+                <div className="relative mb-4 flex h-14 w-14 items-center justify-center sm:h-16 sm:w-16">
+                  <div className="absolute inset-0 rounded-full bg-aurora-400/15 blur-2xl" />
+                  <BrandMark size={52} />
                 </div>
-                <h2 className="text-[24px] font-light tracking-wide text-white sm:text-[28px]">
+                <h2 className="max-w-full break-words text-[clamp(1.5rem,5vw,2.25rem)] font-semibold tracking-tight text-white">
                   {greeting()}，{user.displayName || user.username}
                 </h2>
-                <p className="mt-2 max-w-md text-[13px] leading-relaxed text-white/35">
-                  输入问题开始对话，支持文档、图片和模型切换。
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-white/60">
+                  今天想聊点什么？
                 </p>
                 {providers.length === 0 ? (
-                  <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-[12.5px] text-amber-200/80">
+                  <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-2.5 text-[12.5px] text-amber-200/80">
                     尚未配置可用模型。请前往{' '}
                     <Link href="/settings?tab=models" className="underline">
                       设置 · 模型
@@ -1128,18 +1134,23 @@ export function ChatWorkspace({
                     添加，或联系管理员。
                   </div>
                 ) : null}
-                <div className="mt-8 grid w-full max-w-xl grid-cols-1 gap-2 sm:grid-cols-2">
-                  {SUGGESTIONS.map((suggestion) => (
+                <div className="mt-5 grid w-full max-w-xl grid-cols-2 gap-2 sm:gap-3">
+                  {SUGGESTIONS.map(({ label, detail, prompt, icon: Icon }) => (
                     <button
-                      key={suggestion}
+                      key={label}
                       type="button"
                       onClick={() => {
-                        setDraft(suggestion);
+                        setDraft(prompt);
                         textareaRef.current?.focus();
                       }}
-                      className="rounded-xl border border-white/[0.07] bg-white/[0.025] px-3.5 py-3 text-left text-[12.5px] leading-relaxed text-white/45 transition hover:border-aurora-400/25 hover:bg-aurora-400/[0.05] hover:text-white/75"
+                      className="group min-w-0 rounded-xl border border-white/10 bg-[#151c27] p-3 text-left transition hover:border-aurora-400/40 hover:bg-[#1a2932] focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400 sm:px-4"
                     >
-                      {suggestion}
+                      <span className="mb-1.5 flex items-center justify-between text-aurora-300">
+                        <Icon className="h-4 w-4" aria-hidden="true" />
+                        <ArrowUpRight className="hidden h-3.5 w-3.5 text-white/35 group-hover:text-aurora-300 sm:block" aria-hidden="true" />
+                      </span>
+                      <span className="block text-sm font-medium text-white/90">{label}</span>
+                      <span className="mt-0.5 block text-xs leading-relaxed text-white/60">{detail}</span>
                     </button>
                   ))}
                 </div>
@@ -1262,7 +1273,7 @@ export function ChatWorkspace({
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
-              className="rounded-2xl border border-white/[0.09] bg-[#0d121c]/90 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)] backdrop-blur-xl transition focus-within:border-aurora-400/30 focus-within:ring-2 focus-within:ring-aurora-400/10"
+              className="chat-composer rounded-[22px] border border-white/[0.12] transition focus-within:border-aurora-400/45 focus-within:ring-2 focus-within:ring-aurora-400/10"
             >
               <textarea
                 ref={textareaRef}
@@ -1273,7 +1284,7 @@ export function ChatWorkspace({
                 onKeyDown={onComposerKeyDown}
                 rows={1}
                 placeholder={selectedProvider ? `给 ${selectedProvider.name} 发消息…` : '尚未配置模型，仍可先输入内容'}
-                className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-[15px] leading-relaxed text-white/90 outline-none placeholder:text-white/25"
+                className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-white/95 outline-none placeholder:text-white/50"
                 disabled={sending}
               />
               <div className="flex items-center gap-1 px-2 pb-2 pt-1">
@@ -1448,7 +1459,7 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           ) : null}
           {message.content ? (
-            <div className="rounded-2xl rounded-br-md border border-aurora-400/15 bg-aurora-400/[0.09] px-4 py-3 text-[14.5px] leading-relaxed text-white/90">
+            <div className="rounded-[20px] rounded-br-md border border-aurora-400/15 bg-[#1c302f] px-4 py-3 text-[15px] leading-relaxed text-white/95">
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
             </div>
           ) : null}
@@ -1473,15 +1484,15 @@ const MessageBubble = memo(function MessageBubble({
         <Bot className="h-3.5 w-3.5 text-aurora-300" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="mb-1.5 flex items-center gap-2 text-[10.5px] text-white/25">
-          <span>{message.modelId || 'AI'}</span>
+        <div className="mb-2 flex items-center gap-2 text-xs text-white/55">
+          <span className="min-w-0 truncate font-medium text-white/80">{message.modelId || 'AI'}</span>
           {message.status === 'PARTIAL' ? <span className="text-amber-300/60">部分回答</span> : null}
           {message.status === 'ERROR' ? <span className="text-red-300/60">出错了</span> : null}
-          <span className="text-white/15">{messageTime(message.createdAt)}</span>
+          <span className="shrink-0 text-white/45">{messageTime(message.createdAt)}</span>
           <button
             type="button"
             onClick={() => void copy()}
-            className="ml-auto rounded p-1 text-white/20 opacity-0 transition hover:bg-white/5 hover:text-white/60 group-hover:opacity-100"
+            className="ml-auto shrink-0 rounded-lg p-2 text-white/55 transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-aurora-400"
             aria-label="复制回答"
           >
             {copied ? <Check className="h-3 w-3 text-aurora-300" /> : <Copy className="h-3 w-3" />}
