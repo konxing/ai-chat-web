@@ -319,6 +319,9 @@ export async function transcribeAudio(input: {
   try {
     if (!safe.response.ok) {
       await safe.response.body?.cancel();
+      if (safe.response.status === 400 || safe.response.status === 404) {
+        throw new ApiError(502, 'STT_FAILED', '语音转写服务不接受当前模型或录音格式，请检查是否配置了专用转写模型');
+      }
       throw new ApiError(502, 'STT_FAILED', `语音转写服务返回 HTTP ${safe.response.status}`);
     }
     const { text: rawBody, truncated } = await readBodyCapped(safe.response, MAX_PROVIDER_BODY_BYTES);

@@ -179,6 +179,9 @@ export function ChatWorkspace({
   const chunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const preferBrowserSpeechRef = useRef(false);
+  const transcribingRef = useRef(false);
+  const [transcribing, setTranscribing] = useState(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stickRef = useRef(true);
 
@@ -836,7 +839,14 @@ export function ChatWorkspace({
     setRecordSeconds(0);
     // 这条路径以前只把秒数归零、从没起过表，所以界面上永远停在 0s。
     recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      setRecording(false);
+      setNotice('无法启动浏览器语音识别，请检查麦克风权限');
+    }
   }, [appendTranscript]);
 
   const stopSpeechRecognition = useCallback(() => {
@@ -846,6 +856,7 @@ export function ChatWorkspace({
   }, []);
 
   const startRecording = useCallback(async () => {
+    if (transcribingRef.current) return;
     if (recording) {
       if (recognitionRef.current) {
         stopSpeechRecognition();
@@ -855,7 +866,7 @@ export function ChatWorkspace({
       if (recorder && recorder.state !== 'inactive') recorder.stop();
       return;
     }
-    if (!hasAudioProvider) {
+    if (!hasAudioProvider || preferBrowserSpeechRef.current) {
       startSpeechRecognition();
       return;
     }
@@ -873,6 +884,7 @@ export function ChatWorkspace({
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
       recorder.onstop = async () => {
+        recorderRef.current = null;
         stream.getTracks().forEach((track) => track.stop());
         if (recordTimerRef.current) clearInterval(recordTimerRef.current);
         setRecording(false);
@@ -880,14 +892,23 @@ export function ChatWorkspace({
         if (blob.size < 400) return;
         const form = new FormData();
         form.append('audio', new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' }));
+        transcribingRef.current = true;
+        setTranscribing(true);
         setNotice('正在转写语音…');
         try {
           const data = await apiFetch<{ text: string }>('/api/stt', { method: 'POST', body: form });
           appendTranscript(data.text);
           setNotice('语音已转写');
         } catch (err) {
-          setNotice(errorMessage(err));
-          if (speechSupported) startSpeechRecognition();
+          if (speechSupported) {
+            preferBrowserSpeechRef.current = true;
+            setNotice(`${errorMessage(err)}。再次点击麦克风可用浏览器识别，请重新说一遍。`);
+          } else {
+            setNotice(errorMessage(err));
+          }
+        } finally {
+          transcribingRef.current = false;
+          setTranscribing(false);
         }
       };
       recorderRef.current = recorder;
@@ -1353,11 +1374,11 @@ export function ChatWorkspace({
                   type="button"
                   className={cn('btn-icon relative', recording && 'bg-red-400/15 text-red-200')}
                   onClick={() => void startRecording()}
-                  aria-label={recording ? '停止录音' : '语音输入'}
-                  title={recording ? '停止录音' : '语音输入'}
-                  disabled={sending}
+                  aria-label={transcribing ? '正在转写语音' : recording ? '停止录音' : '语音输入'}
+                  title={transcribing ? '正在转写语音' : recording ? '停止录音' : '语音输入'}
+                  disabled={sending || transcribing}
                 >
-                  {recording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-4 w-4" />}
+                  {transcribing ? <Spinner /> : recording ? <Square className="h-3.5 w-3.5 fill-current" /> : <Mic className="h-4 w-4" />}
                   {recording ? (
                     <span className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-md border border-red-400/20 bg-[#1a0d10] px-2 py-1 text-[10px] text-red-200">
                       {recordSeconds}s · 点击停止
