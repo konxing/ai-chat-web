@@ -33,11 +33,11 @@
 ### 成本控制（强制）
 - 默认单次生成：模式检测/策略规划/风格/质量检查全部为**程序规则**，不调模型。
 - 仅复杂任务可选独立规划/强质量检查，且默认关闭、需开关。
-- Token 预算：对话智能块单独设上限（初始 ≤1200 字符），示例每轮只选当前模式 1-2 条。
-- 统计：prompt-builder 输出各部分字符数，换算近似 token，落库供 Inspector/成本页。
+- Token 预算：对话智能块单独设上限（当前 `CONVERSATION_PROMPT_MAX_CHARS=1600`），示例 v2 每轮最多 1 组、200–350 字符、预算不足可不注入。
+- 统计：prompt-builder 输出各部分字符数、预算与截断原因（`truncationReasons`），换算近似 token，供 Inspector/成本页。
 
 ## 模块职责（src/lib/cognitive/conversation/）
-- core/conversation-policy.ts：全局默认风格 + 14 条语言规则（纯常量/渲染）。
+- core/conversation-policy.ts：全局默认风格 + 5 条跨场景语言原则（纯常量/渲染）。
 - mode/conversation-mode.ts + mode-detector.ts：8 模式定义 + 规则检测（含当前会话明确要求优先）。
 - planning/response-planner.ts：轻量策略组合（9 策略），输出内部 plan，不展示。
 - style/style-profile.ts + style-examples.ts：用户偏好（按用户隔离存储）+ 审核过的示例库。
@@ -49,3 +49,14 @@
 ## 评测口径（Phase 8）
 固定测试集 + 匿名成对盲测 + LLM-as-judge + 人工抽查；训练/验证/测试分离；
 候选 prompt 必须过独立验证集才替换生效版本；不得仅凭 LLM 自评宣称提升。
+## v1.3 增量（低打扰自主 + 三账本）
+- state/dialogue-ledgers.ts：RepairLedger（真纠正 vs 正常追问、TTL、correctedExpectation）、
+  ActiveConstraint（THIS_TURN/TOPIC/SESSION/GLOBAL_CONFIRMED，state/supersedes，撤销/改口）、
+  ConversationalIntent、topicStack；全部从最近 ≤6 轮现场重建，不持久化、不建新表。
+- planning/question-budget.ts：追问价值预算（SHARING/ESSENTIAL/ALREADY_KNOWN/LOW_VALUE），
+  分享不强制追问、已知不重复索取、缺关键事实只问一个、可安全默认直接完成。
+- learning/autonomy.ts：AutonomyDecision（action/risk/scope/permission/canUndo/userInterruption/reasonCode）。
+- 单一授权开关 `autoLearnStyle`（默认关）：明确长期风格才自动持久化；未授权仅会话遵守、不弹窗；沉默≠同意。
+- 自然语言撤销：`detectStyleUndo` + `performStyleUndo` 真正逆操作（full/length/structure/depth）。
+- A.3/A.5：`selectDialogueExampleFor`（最多 1 组/预算/诊断）+ prompt-builder 截断原因；naturalness 影响动作与示例。
+- 评测：`structural.ts`（零模型结构指标）；run.ts 记录每轮匿名诊断（动作/追问/示例/预算/截断）。

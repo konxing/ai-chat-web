@@ -61,15 +61,39 @@ async function generate(provider: Awaited<ReturnType<typeof resolveDefaultProvid
   return { text, input, output, ms: Date.now() - t0 };
 }
 
-async function layerSystemFor(content: string, history: DialogueTurn[], engineVersion: 'legacy' | 'dialogue-v2'): Promise<string> {
+interface LayerDiag {
+  act: string;
+  question: string | null;
+  questionReason: string | null;
+  constraints: number;
+  exampleSelected: string | null;
+  exampleReason: string | null;
+  promptChars: number;
+  truncated: boolean;
+  dropped: string[];
+}
+
+async function layerSystemFor(content: string, history: DialogueTurn[], engineVersion: 'legacy' | 'dialogue-v2'): Promise<{ system: string; diag: LayerDiag }> {
   const intel = await buildConversationIntelligence({ userId: OWNER, currentContent: content, recentDeep: history.length > 2, recent: history, engineVersion });
-  return BASE_SYSTEM + '\n\n' + intel.block.text;
+  const diag: LayerDiag = {
+    act: intel.act.primary,
+    question: intel.act.question?.responseMove ?? null,
+    questionReason: intel.act.question?.reasonCode ?? null,
+    constraints: intel.state.activeConstraints.length,
+    exampleSelected: intel.exampleDiagnostics?.selectedId ?? null,
+    exampleReason: intel.exampleDiagnostics?.reason ?? null,
+    promptChars: intel.block.usedChars,
+    truncated: intel.block.truncated,
+    dropped: intel.block.truncationReasons.map((r) => r.name)
+  };
+  return { system: BASE_SYSTEM + '\n\n' + intel.block.text, diag };
 }
 
 interface CaseResult {
   id: string; category: string; kind: 'single' | 'multi';
   base: GenResult; layer: GenResult;
   baseTemplate: number; layerTemplate: number;
+  layerDiags: LayerDiag[];
   winner?: 'layer' | 'base' | 'tie';
   judge?: Record<string, number>;
 }
@@ -100,10 +124,12 @@ async function main() {
     const layerHist: DialogueTurn[] = [];
     let baseLast: GenResult = { text: '', input: 0, output: 0, ms: 0 };
     let layerLast: GenResult = { text: '', input: 0, output: 0, ms: 0 };
+    const layerDiags: LayerDiag[] = [];
     for (const turn of c.turns) {
       if (turn.role === 'assistant') { baseHist.push(turn); layerHist.push(turn); continue; }
       const baseMsgs = [{ role: 'system' as const, content: BASE_SYSTEM }, ...baseHist, { role: 'user' as const, content: turn.content }];
-      const layerSys = await layerSystemFor(turn.content, layerHist, engine);
+      const { system: layerSys, diag } = await layerSystemFor(turn.content, layerHist, engine);
+      layerDiags.push(diag);
       const layerMsgs = [{ role: 'system' as const, content: layerSys }, ...layerHist, { role: 'user' as const, content: turn.content }];
       baseLast = await generate(provider, baseMsgs);
       layerLast = await generate(provider, layerMsgs);
@@ -118,7 +144,8 @@ async function main() {
     const r: CaseResult = {
       id: c.id, category: c.category, kind: c.kind,
       base: baseLast, layer: layerLast,
-      baseTemplate: bq.flags.length ? 1 : 0, layerTemplate: lq.flags.length ? 1 : 0
+      baseTemplate: bq.flags.length ? 1 : 0, layerTemplate: lq.flags.length ? 1 : 0,
+      layerDiags
     };
 
     if (judgeProvider) {
@@ -139,7 +166,7 @@ async function main() {
       } catch { r.winner = 'tie'; }
     }
 
-    writeFileSync(new URL(`${c.id}.json`, sampleDir), JSON.stringify({ id: c.id, category: c.category, kind: c.kind, seed, base: baseLast.text, layer: layerLast.text, winner: r.winner }, null, 2));
+    writeFileSync(new URL(`${c.id}.json`, sampleDir), JSON.stringify({ id: c.id, category: c.category, kind: c.kind, seed, base: baseLast.text, layer: layerLast.text, winner: r.winner, layerDiags }, null, 2));
     results.push(r);
     console.log(`${c.id}(${c.category},${c.kind}) base=${baseLast.ms}ms layer=${layerLast.ms}ms winner=${r.winner ?? 'n/a'}`);
   }
@@ -152,6 +179,19 @@ async function main() {
   const p = (q: number) => sorted[Math.floor(q * (sorted.length - 1))] ?? 0;
   const byCat = new Map<string, CaseResult[]>();
   for (const r of results) byCat.set(r.category, [...(byCat.get(r.category) ?? []), r]);
+
+  // 引擎诊断聚合（v1.3：每轮实际回应动作/追问预算/示例引用/预算与截断；匿名，无正文）。
+  const diags = results.flatMap((r) => r.layerDiags);
+  const actCounts = new Map<string, number>();
+  const qCounts = new Map<string, number>();
+  for (const d of diags) {
+    actCounts.set(d.act, (actCounts.get(d.act) ?? 0) + 1);
+    const q = d.questionReason ?? 'n/a';
+    qCounts.set(q, (qCounts.get(q) ?? 0) + 1);
+  }
+  const exHit = diags.filter((d) => d.exampleSelected).length;
+  const avgPrompt = diags.length ? Math.round(diags.reduce((s, d) => s + d.promptChars, 0) / diags.length) : 0;
+  const truncCount = diags.filter((d) => d.truncated).length;
 
   const report = [
     `# 对话智能层对照评测报告（引擎=${engine}）`,
@@ -168,6 +208,12 @@ async function main() {
     '| 场景 | n | 层胜 | 基线胜 | 平 |',
     '|---|---|---|---|---|',
     ...[...byCat.entries()].map(([cat, rs]) => `| ${cat} | ${rs.length} | ${rs.filter((r) => r.winner === 'layer').length} | ${rs.filter((r) => r.winner === 'base').length} | ${rs.filter((r) => r.winner === 'tie').length} |`),
+    '',
+    '## 引擎诊断（匿名聚合，v1.3）',
+    `- 每轮实际回应动作：${[...actCounts.entries()].map(([k, v]) => `${k}=${v}`).join('，')}`,
+    `- 追问预算原因码：${[...qCounts.entries()].map(([k, v]) => `${k}=${v}`).join('，')}`,
+    `- 多轮示例命中 ${exHit}/${diags.length} 轮（每轮最多 1 组，200–350 字符预算）；平均注入 ${avgPrompt} 字符；截断 ${truncCount} 轮（原因见样本层诊断）。`,
+    `- 约束注入与修复账本随轮生效，样本层诊断记录 constraints/repair，不含用户正文。`,
     '',
     '匿名成对样本存 scripts/conversation-eval/samples/（本地，不含真实用户数据）。人评与独立评委为上线前必需。'
   ].join('\n');
