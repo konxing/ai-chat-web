@@ -84,7 +84,8 @@ export function selectResponseAct(
     ? `本轮只澄清一项缺失信息：${question.essentialMissing[0]}。问完等用户回答。`
     : question.responseMove === 'CONTINUE_WITHOUT_QUESTION'
       ? '本轮用观察或观点接住用户的话，说到完整处就停，不用问题或邀请来收尾。'
-      : '直接给出当前能确定的内容，必要时说明假设；不附加可有可无的追问。';
+      : '直接给出当前能确定的内容，必要时说明假设；不附加可有可无的追问。' +
+        (question.alreadyKnown.includes('日期') ? '沿用用户给出的日期和已明确的行程条件，不再索取日期或可选偏好。' : '');
   const notes = [constraintNote, repairNote, questionNote].filter(Boolean).join(' ');
   const merged: ActSelection = { ...base, primary, question };
   return notes ? { ...merged, contextNote: notes } : merged;

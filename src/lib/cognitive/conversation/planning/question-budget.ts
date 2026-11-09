@@ -33,6 +33,11 @@ const SLOT_TASKS: Array<{ trigger: RegExp; slot: string; present: RegExp; safeDe
   { trigger: /帮我.*选|怎么选.*取决于/, slot: '关键约束/偏好', present: /更看重|主要|优先|必须|不能/, safeDefault: true }
 ];
 
+// 只为紧接上文、没有新行程条件的购票指令沿用上一条用户消息。
+// 例如“帮我订一张高铁票”可承接“明天从上海去北京”，但不能把日期套到“帮我订去南京的票”。
+const BOOKING_FOLLOWUP_RE = /^(?:那就)?(?:帮我|替我)(?:预订|订|买)(?:一下)?(?:一张)?(?:高铁票|火车票|车票|票)(?:吧)?[。！!？?]*$/;
+const TRIP_CONTEXT_RE = /高铁|火车|车票|从[^。！？!?]{1,24}(?:去|到|前往)/;
+
 export function decideQuestion(input: {
   content: string;
   understanding: DialogueUnderstanding;
@@ -76,7 +81,12 @@ export function decideQuestion(input: {
   for (const task of SLOT_TASKS) {
     if (!task.trigger.test(content)) continue;
     matchedTask = true;
-    if (task.present.test(content)) {
+    const dateInSameTrip = task.slot === '日期' &&
+      BOOKING_FOLLOWUP_RE.test(content.trim()) &&
+      state.topic !== null &&
+      TRIP_CONTEXT_RE.test(state.topic) &&
+      task.present.test(state.topic);
+    if (task.present.test(content) || dateInSameTrip) {
       decision.alreadyKnown.push(task.slot);
       continue;
     }

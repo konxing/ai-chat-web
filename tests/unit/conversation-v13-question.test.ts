@@ -47,6 +47,17 @@ describe('B2 追问价值预算', () => {
     expect(d.alreadyKnown).toContain('日期');
   });
 
+  it('承接上文的购票请求沿用日期，另订不同目的地时不沿用', () => {
+    const recent = [
+      { role: 'user' as const, content: '我明天从上海出发去北京，上午出发就行。' },
+      { role: 'assistant' as const, content: '知道了。' }
+    ];
+    const sameTrip = decide('帮我订一张高铁票。', recent);
+    expect(sameTrip.responseMove).toBe('ANSWER_NOW');
+    expect(sameTrip.alreadyKnown).toContain('日期');
+    expect(decide('帮我订去南京的票。', recent).responseMove).toBe('ASK_ONE');
+  });
+
   it('可安全默认的任务：直接完成并披露假设，不抢占回合', () => {
     const d = decide('帮我选一个方案，怎么选取决于场景。');
     expect(d.responseMove).toBe('ANSWER_NOW');
