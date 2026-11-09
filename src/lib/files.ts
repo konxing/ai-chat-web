@@ -179,12 +179,24 @@ export async function inspectUpload(input: {
 
   const detected = await fileTypeFromBuffer(input.buffer);
   if (!detected) throw new ApiError(400, 'UNKNOWN_FILE_TYPE', '无法识别文件类型，仅支持 PNG/JPEG/WebP/GIF、PDF、DOCX、TXT/MD/CSV 和常见音频');
-  let effectiveMime = detected.mime;
+  let effectiveMime: string = detected.mime;
   let allowed = ALLOWED.find((t) => t.mime === effectiveMime);
 
   // Some DOCX files are identified as ZIP; trust the extension only for .docx and verify structure via mammoth.
   if (!allowed && detected.mime === 'application/zip' && ext === 'docx') {
     effectiveMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    allowed = ALLOWED.find((t) => t.mime === effectiveMime);
+  }
+  // MediaRecorder 的纯音频 WebM 与视频 WebM 同容器，file-type 会嗅探成 video/webm。
+  // 仅当扩展名 webm 且客户端声明为音频时按 audio/webm 处理（语音转写路径）；
+  // 声明为视频的 webm 仍被拒绝，不会把视频当音频放进附件。
+  if (
+    !allowed &&
+    (detected.mime === 'video/webm' || detected.mime === 'video/x-matroska') &&
+    ext === 'webm' &&
+    input.declaredMime?.startsWith('audio/')
+  ) {
+    effectiveMime = 'audio/webm';
     allowed = ALLOWED.find((t) => t.mime === effectiveMime);
   }
   if (!allowed) throw new ApiError(400, 'UNSUPPORTED_FILE_TYPE', `不支持的文件类型：${detected.mime}`);
