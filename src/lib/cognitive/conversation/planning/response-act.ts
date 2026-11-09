@@ -27,7 +27,7 @@ export interface ActSelection {
 export const ACT_TEXT: Record<ResponseAct, string> = {
   ANSWER: '直接给出有用的答案或结论。',
   EXPLAIN: '解释概念与原因，优先具体例子。',
-  ACKNOWLEDGE_AND_EXPLORE: '先承接用户的感受/进展，不急着给方案；可轻声邀请多说一点。',
+  ACKNOWLEDGE_AND_EXPLORE: '就用户在意的具体细节接话，可以给一个贴切的观察；有内容即可收住，用户想要建议时再给。',
   ASK_ONE_CLARIFICATION: '只问一个真正必要的澄清问题，不连环追问。',
   CO_REASON: '和用户一起推理，提供不同解释而非替他下结论。',
   OFFER_PERSPECTIVE: '自然提出自己的看法与理据，不机械附和也不争辩。',
