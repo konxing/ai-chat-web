@@ -4,11 +4,12 @@
 
 :root {
   color-scheme: dark;
-  --bg: #07090f;
+  --bg: #06080e;
   --panel: rgba(18, 23, 35, 0.72);
   --line: rgba(255, 255, 255, 0.08);
   --muted: #8d99ad;
   --accent: #4fe0b4;
+  --accent-2: #8b5cf6;
 }
 
 * {
@@ -33,10 +34,10 @@ body::before {
   inset: 0;
   z-index: -2;
   background:
-    radial-gradient(900px 600px at 12% -10%, rgba(79, 224, 180, 0.13), transparent 60%),
-    radial-gradient(800px 620px at 95% 0%, rgba(139, 92, 246, 0.12), transparent 55%),
-    radial-gradient(1000px 700px at 50% 115%, rgba(34, 201, 154, 0.07), transparent 60%),
-    #07090f;
+    radial-gradient(1100px 700px at 8% -12%, rgba(79, 224, 180, 0.16), transparent 60%),
+    radial-gradient(900px 680px at 98% -4%, rgba(139, 92, 246, 0.16), transparent 55%),
+    radial-gradient(1200px 800px at 50% 118%, rgba(34, 201, 154, 0.09), transparent 62%),
+    linear-gradient(180deg, #070a12 0%, #06080e 100%);
 }
 
 body::after {
@@ -70,7 +71,7 @@ body::after {
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(79, 224, 180, 0.35);
   background-clip: content-box;
 }
 
@@ -80,11 +81,14 @@ body::after {
   }
 
   .panel {
-    @apply rounded-2xl border border-white/10 bg-[#151b25] shadow-[0_16px_44px_-30px_rgba(0,0,0,0.75)];
+    @apply rounded-2xl border border-white/[0.09] shadow-[0_20px_50px_-30px_rgba(0,0,0,0.85)];
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015) 38%, rgba(13, 18, 27, 0.6)), #141a24;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 20px 50px -30px rgba(0, 0, 0, 0.85);
   }
 
   .field {
-    @apply w-full rounded-xl border border-white/10 bg-[#0c121b] px-4 py-3 text-[15px] text-white outline-none transition placeholder:text-white/45 focus:border-aurora-400/60 focus:ring-2 focus:ring-aurora-400/15 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply w-full rounded-xl border border-white/10 px-4 py-3 text-[15px] text-white outline-none transition placeholder:text-white/40 focus:border-aurora-400/60 focus:ring-2 focus:ring-aurora-400/20 disabled:cursor-not-allowed disabled:opacity-50;
+    background: linear-gradient(180deg, #0b111a, #0c121b);
   }
 
   .btn {
@@ -92,11 +96,13 @@ body::after {
   }
 
   .btn-primary {
-    @apply btn bg-aurora-400 text-[#04120d] shadow-[0_10px_30px_-12px_rgba(79,224,180,0.8)] hover:bg-aurora-300 active:scale-[0.99];
+    @apply btn text-[#04120d] hover:brightness-110 active:scale-[0.99];
+    background: linear-gradient(135deg, #6ff0c6, #35c79b);
+    box-shadow: 0 10px 30px -12px rgba(79, 224, 180, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   }
 
   .btn-ghost {
-    @apply btn border border-white/10 bg-white/[0.04] text-white/85 hover:border-white/20 hover:bg-white/[0.08];
+    @apply btn border border-white/10 bg-white/[0.04] text-white/85 hover:border-white/25 hover:bg-white/[0.09] hover:text-white;
   }
 
   .btn-danger {
@@ -114,12 +120,15 @@ body::after {
   }
 
   .chat-surface {
-    background: radial-gradient(ellipse 550px 330px at 50% 10%, rgb(63 224 180 / 0.055), transparent 80%), #0d121b;
+    background:
+      radial-gradient(ellipse 620px 360px at 50% 8%, rgb(63 224 180 / 0.07), transparent 80%),
+      radial-gradient(ellipse 500px 300px at 90% 100%, rgb(139 92 246 / 0.05), transparent 80%),
+      #0c111a;
   }
 
   .chat-composer {
-    background: #171f2b;
-    box-shadow: 0 18px 45px -25px #000b, 0 0 0 1px rgb(255 255 255 / 0.025);
+    background: linear-gradient(180deg, #1a2330, #161e29);
+    box-shadow: 0 18px 45px -25px #000c, inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
 
   .label {
@@ -345,12 +354,13 @@ body::after {
   color: #a7f3d8;
 }
 .md pre {
-  background: #080c14 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  background: linear-gradient(180deg, #0a0f18, #080c14) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
   padding: 0;
   margin: 1em 0;
   overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .md pre code {
   display: block;
