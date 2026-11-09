@@ -19,6 +19,8 @@ import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager'
 import { ensureCognitiveModules } from './cognitive/memory-module';
 import { buildConversationIntelligence } from './cognitive/conversation/core/conversation-engine';
 import { conversationLayerEnabled, conversationEngineVersionFor } from './cognitive/cognitive-flags';
+import { getCognitivePreferences } from './cognitive/preferences';
+import { isTimeRelevant, timeContextLine } from './time-context';
 
 export interface ChatSummary {
   id: string;
@@ -411,6 +413,21 @@ export async function buildConversation(input: {
         '不要声称自己看到了未提供的图片或文件。'
     }
   ];
+
+  // 选择性时间上下文：只有当前/最近用户话语涉及时钟/日历才注入当前本地时间；
+  // 与时间无关不传，避免占上下文与模型主动报时。读偏好失败回落 UTC+0，不阻断对话。
+  try {
+    const recentUserTexts = trimmed
+      .filter((m) => m.role === 'USER')
+      .slice(-2)
+      .map((m) => decryptMessage(m));
+    if (isTimeRelevant([input.currentContent, ...recentUserTexts])) {
+      const prefs = await getCognitivePreferences(input.userId).catch(() => null);
+      messages.push({ role: 'system', content: timeContextLine(prefs?.timezoneOffsetMinutes ?? null) });
+    }
+  } catch {
+    /* 时间上下文是增益，坏了不影响原有聊天 */
+  }
 
   // 认知块排在历史之前：它是「关于这位用户的资料」，不是某一轮的发言。
   // 模块内部有截止时间和错误隔离，认知读不出来就等于这段没加上，对话照旧。

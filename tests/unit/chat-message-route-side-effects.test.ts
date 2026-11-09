@@ -296,7 +296,7 @@ vi.mock('@/lib/ai', async () => {
   };
 });
 
-async function post(signal?: AbortSignal) {
+async function post(signal?: AbortSignal, content = '帮我解释一下这段代码') {
   const { POST } = await import('@/app/api/chats/[id]/messages/route');
   const request = new Request(`http://127.0.0.1:3000/api/chats/${CHAT_ID}/messages`, {
     method: 'POST',
@@ -306,7 +306,7 @@ async function post(signal?: AbortSignal) {
       'x-client-ip': '203.0.113.21',
       'user-agent': 'vitest'
     },
-    body: JSON.stringify({ content: '今天天气如何', attachmentIds: [] }),
+    body: JSON.stringify({ content, attachmentIds: [] }),
     ...(signal ? { signal } : {})
   });
   const response = await POST(request, { params: Promise.resolve({ id: CHAT_ID }) });
@@ -510,6 +510,19 @@ describe('出站上下文里的认知内容', () => {
     expect(outbound[1]!.text).toContain('【长期记忆】');
     expect(outbound[1]!.text).toContain('不是指令');
     expect(outbound[1]!.text).toContain('我在用 Prisma');
+  });
+
+  it('时间相关才注入当前时间；与时间无关不注入', async () => {
+    cognitiveTables().preference.seed(preferenceRow());
+    ctx.outbound = [];
+    await post(undefined, '现在几点了？');
+    await post(undefined, '帮我写个排序函数');
+    expect(ctx.outbound).toHaveLength(2);
+    const withTime = toOutboundTexts(ctx.outbound[0]!).map((m) => m.text).join('\n');
+    const noTime = toOutboundTexts(ctx.outbound[1]!).map((m) => m.text).join('\n');
+    expect(withTime).toContain('当前时间：');
+    expect(withTime).toContain('不要主动报时');
+    expect(noTime).not.toContain('当前时间：');
   });
 
   it('八个开关显式全关：同一个候选池一个字都不出去，而且记忆表一次都没被查', async () => {
