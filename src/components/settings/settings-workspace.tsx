@@ -105,20 +105,23 @@ type Tab =
   | 'expression'
   | 'about';
 
-export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
+export function SettingsWorkspace({ initialUser, initialTab = 'profile' }: {
+  initialUser: AccountUser;
+  initialTab?: Tab;
+}) {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <SettingsInner initialUser={initialUser} />
+        <SettingsInner key={initialTab} initialUser={initialUser} initialTab={initialTab} />
       </ConfirmProvider>
     </ToastProvider>
   );
 }
 
-function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
+function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; initialTab: Tab }) {
   const { push } = useToast();
   const { confirm } = useConfirm();
-  const [tab, setTab] = useState<Tab>('profile');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [user, setUser] = useState<AccountUser>(initialUser);
   const [displayName, setDisplayName] = useState(initialUser.displayName ?? '');
   const [savingName, setSavingName] = useState(false);
@@ -379,6 +382,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
             <button
               key={key}
               type="button"
+              aria-current={tab === key ? 'page' : undefined}
               onClick={() => setTab(key)}
               className={cn(
                 'flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-left text-[13px] transition',
@@ -950,17 +954,17 @@ function ProviderModal({
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="label">显示名称</label>
-            <input className="field" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：DeepSeek V3" />
+            <label className="label" htmlFor="personal-model-name">显示名称</label>
+            <input id="personal-model-name" className="field" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：DeepSeek V3" />
           </div>
           <div>
-            <label className="label">模型 ID</label>
-            <input className="field" required maxLength={128} value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="deepseek-chat" />
+            <label className="label" htmlFor="personal-model-id">模型 ID</label>
+            <input id="personal-model-id" className="field" required maxLength={128} value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="deepseek-chat" />
           </div>
         </div>
         <div>
-          <label className="label">Base URL</label>
-          <input
+          <label className="label" htmlFor="personal-model-url">Base URL</label>
+          <input id="personal-model-url"
             className="field"
             required
             maxLength={512}
@@ -971,8 +975,8 @@ function ProviderModal({
           <p className="mt-1 text-[11px] text-white/30">填写到 /v1 即可，系统会自动拼接 /chat/completions 与 /models。</p>
         </div>
         <div>
-          <label className="label">API Key</label>
-          <input
+          <label className="label" htmlFor="personal-model-key">API Key</label>
+          <input id="personal-model-key"
             className="field"
             type="password"
             value={apiKey}
@@ -988,6 +992,7 @@ function ProviderModal({
               <button
                 key={cap.key}
                 type="button"
+                aria-pressed={capabilities.includes(cap.key)}
                 onClick={() => toggleCap(cap.key)}
                 className={cn(
                   'rounded-lg border px-3 py-1.5 text-[12px] transition',
@@ -1003,8 +1008,8 @@ function ProviderModal({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="label">Temperature（可选）</label>
-            <input
+            <label className="label" htmlFor="personal-model-temperature">Temperature（可选）</label>
+            <input id="personal-model-temperature"
               className="field"
               type="number"
               min={0}
@@ -1016,8 +1021,8 @@ function ProviderModal({
             />
           </div>
           <div>
-            <label className="label">最大输出 Token（可选）</label>
-            <input
+            <label className="label" htmlFor="personal-model-max-tokens">最大输出 Token（可选）</label>
+            <input id="personal-model-max-tokens"
               className="field"
               type="number"
               min={1}

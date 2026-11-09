@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode
@@ -14,6 +15,10 @@ import { cn } from '@/lib/cn';
 import { lockScroll, unlockScroll } from '@/lib/scroll-lock';
 
 /* ------------------------------- Modal ------------------------------- */
+
+const modalStack: HTMLElement[] = [];
+const focusableSelector =
+  'button, a[href], input:not([type="hidden"]), select, textarea, [tabindex], [contenteditable="true"]';
 
 export function Modal({
   open,
@@ -34,17 +39,57 @@ export function Modal({
 }) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
-    if (!open) return;
+    const dialog = dialogRef.current;
+    if (!open || !dialog) return;
+    const trigger = document.activeElement;
+    const isTop = () => modalStack.at(-1) === dialog;
+    const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.getClientRects().length > 0);
+    const focusFirst = () => (focusable()[0] ?? dialog).focus();
+    modalStack.push(dialog);
+    const initial = dialog.querySelector<HTMLElement>('[data-modal-initial-focus]');
+    if (initial) initial.focus();
+    else focusFirst();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current();
+      if (!isTop() || e.defaultPrevented) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeRef.current();
+      } else if (e.key === 'Tab') {
+        const elements = focusable();
+        const index = elements.indexOf(document.activeElement as HTMLElement);
+        const edge = e.shiftKey ? index <= 0 : index === -1 || index === elements.length - 1;
+        if (edge) {
+          e.preventDefault();
+          (elements[e.shiftKey ? elements.length - 1 : 0] ?? dialog).focus();
+        }
+      }
     };
-    document.addEventListener('keydown', onKey);
+    const onFocus = (e: FocusEvent) => {
+      if (isTop() && e.target instanceof Node && !dialog.contains(e.target)) focusFirst();
+    };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('focusin', onFocus);
     lockScroll();
     return () => {
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('focusin', onFocus);
+      const wasTop = isTop();
+      modalStack.splice(modalStack.indexOf(dialog), 1);
       unlockScroll();
+      if (!wasTop) return;
+      const parent = modalStack.at(-1);
+      if (trigger instanceof HTMLElement && trigger.isConnected && (!parent || parent.contains(trigger))) {
+        trigger.focus();
+      } else {
+        parent?.focus();
+      }
     };
   }, [open]);
 
@@ -53,20 +98,23 @@ export function Modal({
     <div
       className="fixed inset-0 z-[80] flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-6"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && modalStack.at(-1) === dialogRef.current) onClose();
       }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         className="panel max-h-[92vh] w-full overflow-y-auto rounded-b-none rounded-t-2xl p-5 sm:rounded-2xl sm:p-6"
         style={{ maxWidth: width }}
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-white">{title}</h2>
-            {description ? <p className="mt-1 text-[13px] leading-relaxed text-white/45">{description}</p> : null}
+            <h2 id={titleId} className="text-lg font-semibold text-white">{title}</h2>
+            {description ? <p id={descriptionId} className="mt-1 text-[13px] leading-relaxed text-white/45">{description}</p> : null}
           </div>
           <button type="button" className="btn-icon shrink-0" onClick={onClose} aria-label="关闭">
             <X className="h-4 w-4" />
@@ -87,7 +135,7 @@ export function Spinner({ className }: { className?: string }) {
 
 export function LoadingBlock({ label = '加载中' }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-12 text-sm text-white/40">
+    <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm text-white/40">
       <Spinner /> {label}
     </div>
   );
@@ -112,7 +160,7 @@ export function Alert({
   }[tone];
   const Icon = tone === 'success' ? CheckCircle2 : tone === 'error' ? XCircle : AlertTriangle;
   return (
-    <div className={cn('flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-[13px] leading-relaxed', styles, className)}>
+    <div role={tone === 'error' ? 'alert' : 'status'} className={cn('flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-[13px] leading-relaxed', styles, className)}>
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0">{children}</div>
     </div>
@@ -132,7 +180,6 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const requestPassword = useCallback((reason: string) => {
     return new Promise<string | null>((resolve) => {
@@ -140,7 +187,6 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
       setError('');
       setBusy(false);
       setState({ reason, resolve });
-      setTimeout(() => inputRef.current?.focus(), 60);
     });
   }, []);
 
@@ -189,7 +235,7 @@ export function ReauthProvider({ children }: { children: ReactNode }) {
           </label>
           <input
             id="reauth-password"
-            ref={inputRef}
+            data-modal-initial-focus
             type="password"
             className="field"
             autoComplete="current-password"
@@ -292,7 +338,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 flex-col gap-2 sm:left-auto sm:right-6 sm:translate-x-0">
+      <div aria-live="polite" className="pointer-events-none fixed bottom-4 left-1/2 z-[100] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 flex-col gap-2 sm:left-auto sm:right-6 sm:translate-x-0">
         {items.map((item) => (
           <div
             key={item.id}
@@ -362,6 +408,7 @@ export function Segmented<T extends string>({
         <button
           key={option.value}
           type="button"
+          aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
             'rounded-lg px-3 py-1.5 text-[13px] transition',

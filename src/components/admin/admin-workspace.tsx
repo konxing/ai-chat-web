@@ -117,14 +117,14 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
             </Link>
           </div>
           {/* 侧栏在 lg 以下折叠，因此平板宽度也要保留这个开关 */}
-          <button type="button" className="btn-icon lg:hidden" onClick={() => setNavOpen((v) => !v)} aria-label="切换菜单">
+          <button type="button" className="btn-icon lg:hidden" onClick={() => setNavOpen((v) => !v)} aria-label="切换菜单" aria-expanded={navOpen} aria-controls="admin-navigation">
             <Layers className="h-4 w-4" />
           </button>
         </div>
       </header>
 
       <div className="mx-auto grid max-w-[1400px] gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[230px_minmax(0,1fr)]">
-        <nav className={cn('space-y-5 lg:block', navOpen ? 'block' : 'hidden')}>
+        <nav id="admin-navigation" aria-label="管理后台导航" className={cn('space-y-5 lg:block', navOpen ? 'block' : 'hidden')}>
           {groups.map((group) => (
             <div key={group}>
               <div className="px-3 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-white/25">{group}</div>
@@ -135,6 +135,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
                     <button
                       key={item.key}
                       type="button"
+                      aria-current={tab === item.key ? 'page' : undefined}
                       onClick={() => {
                         setTab(item.key);
                         setNavOpen(false);

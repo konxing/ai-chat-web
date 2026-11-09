@@ -167,6 +167,8 @@ export function ChatWorkspace({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const composerBusyRef = useRef(false);
+  const navigationRef = useRef(0);
   const activeIdRef = useRef<string | null>(initialChat?.id ?? null);
   const chatIdRef = useRef<string | null>(initialChat?.id ?? null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -194,6 +196,13 @@ export function ChatWorkspace({
 
   const selectedProviderId = chat?.providerId ?? localProviderId;
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
+  const attachmentWarning = selectedProvider && pending.length > 0
+    ? pending.some((item) => item.kind === 'IMAGE') && !selectedProvider.capabilities.includes('vision')
+      ? '当前模型不支持图片输入，请切换模型或移除图片。'
+      : pending.some((item) => item.kind === 'FILE') && !selectedProvider.capabilities.includes('files')
+        ? '当前模型不支持文件输入，请切换模型或移除文件。'
+        : null
+    : null;
   const hasAudioProvider = providers.some((p) => p.capabilities.includes('audio'));
   const speechSupported = typeof window !== 'undefined' && Boolean(getSpeechRecognition());
 
@@ -294,7 +303,7 @@ export function ChatWorkspace({
         setOptimisticUser(null);
       }
     } catch (err) {
-      if (err instanceof Error && 'status' in err && (err as { status?: number }).status === 404) {
+      if (activeIdRef.current === chatId && err instanceof Error && 'status' in err && (err as { status?: number }).status === 404) {
         router.replace('/chat');
       }
     }
@@ -303,8 +312,8 @@ export function ChatWorkspace({
   const selectChat = useCallback(
     async (id: string) => {
       if (sending) abortRef.current?.abort();
+      const navigation = ++navigationRef.current;
       activeIdRef.current = id;
-      chatIdRef.current = id;
       setSidebarOpen(false);
       setAccountOpen(false);
       setStreamText('');
@@ -313,10 +322,14 @@ export function ChatWorkspace({
       setPending([]);
       try {
         const data = await apiFetch<{ chat: ChatDetailDto }>(`/api/chats/${id}`);
+        if (navigationRef.current !== navigation) return;
+        chatIdRef.current = id;
         setChat(data.chat);
         if (data.chat.providerId) setLocalProviderId(data.chat.providerId);
         window.history.replaceState(null, '', `/chat/${id}`);
       } catch (err) {
+        if (navigationRef.current !== navigation) return;
+        activeIdRef.current = chatIdRef.current;
         setNotice(errorMessage(err));
       }
     },
@@ -324,6 +337,7 @@ export function ChatWorkspace({
   );
 
   const startNewChat = useCallback(() => {
+    navigationRef.current++;
     abortRef.current?.abort();
     activeIdRef.current = null;
     chatIdRef.current = null;
@@ -356,12 +370,16 @@ export function ChatWorkspace({
   }, [toggleSidebar, startNewChat, accountOpen]);
 
   const ensureChat = useCallback(async (): Promise<string | null> => {
+    if (activeIdRef.current !== chatIdRef.current) return null;
     if (chatIdRef.current) return chatIdRef.current;
+    const navigation = navigationRef.current;
     try {
       const data = await apiFetch<{ chat: ChatSummaryDto }>('/api/chats', {
         json: selectedProviderId ? { providerId: selectedProviderId } : {}
       });
       const created = data.chat;
+      setChats((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+      if (navigationRef.current !== navigation) return null;
       activeIdRef.current = created.id;
       chatIdRef.current = created.id;
       setChat({
@@ -375,29 +393,40 @@ export function ChatWorkspace({
         messages: [],
         hasOlder: false
       });
-      setChats((prev) => [created, ...prev]);
       window.history.replaceState(null, '', `/chat/${created.id}`);
       return created.id;
     } catch (err) {
-      setNotice(errorMessage(err));
+      if (navigationRef.current === navigation) setNotice(errorMessage(err));
       return null;
     }
   }, [selectedProviderId]);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
-      if (!files.length) return;
-      const chatId = await ensureChat();
-      if (!chatId) return;
-      const overflow = Math.max(0, files.length - MAX_FILES_PER_MESSAGE);
-      const queue = files.slice(0, MAX_FILES_PER_MESSAGE);
+      if (!files.length || composerBusyRef.current) return;
+      const remaining = MAX_FILES_PER_MESSAGE - pending.length;
+      if (remaining <= 0) {
+        setNotice(`一条消息最多 ${MAX_FILES_PER_MESSAGE} 个附件，请先移除部分附件`);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+      const navigation = navigationRef.current;
+      const overflow = Math.max(0, files.length - remaining);
+      const queue = files.slice(0, remaining);
+      const count = queue.length;
+      const uploaded: Array<AttachmentDto | undefined> = new Array(count);
+      let nextIndex = 0;
+      composerBusyRef.current = true;
       setUploading(true);
       let firstError = '';
       try {
+        const chatId = await ensureChat();
+        if (!chatId || navigationRef.current !== navigation) return;
         await Promise.all(
           Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
-            let file: File | undefined;
-            while ((file = queue.shift())) {
+            while (navigationRef.current === navigation && nextIndex < count) {
+              const index = nextIndex++;
+              const file = queue[index]!;
               try {
                 const form = new FormData();
                 form.append('file', file);
@@ -406,7 +435,7 @@ export function ChatWorkspace({
                   method: 'POST',
                   body: form
                 });
-                setPending((prev) => [...prev, data.attachment]);
+                uploaded[index] = data.attachment;
               } catch (err) {
                 // 一张失败不该拖垮后面十几张：记下第一个原因，其余继续传完。
                 if (!firstError) firstError = errorMessage(err);
@@ -414,18 +443,23 @@ export function ChatWorkspace({
             }
           })
         );
+        if (navigationRef.current === navigation) {
+          setPending((prev) => [...prev, ...uploaded.filter((item) => item !== undefined)]);
+        }
       } finally {
+        composerBusyRef.current = false;
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
+      if (navigationRef.current !== navigation) return;
       if (firstError) setNotice(firstError);
       else if (overflow > 0) {
         setNotice(
-          `一条消息最多 ${MAX_FILES_PER_MESSAGE} 个附件，本次只上传前 ${MAX_FILES_PER_MESSAGE} 个，另外 ${overflow} 个未上传`
+          `一条消息最多 ${MAX_FILES_PER_MESSAGE} 个附件，本次只上传前 ${count} 个，另外 ${overflow} 个未上传`
         );
       }
     },
-    [ensureChat]
+    [ensureChat, pending.length]
   );
 
   const removePending = useCallback(async (id: string) => {
@@ -439,12 +473,17 @@ export function ChatWorkspace({
 
   const send = useCallback(async () => {
     const content = draft.trim();
-    if (sending) return;
+    if (composerBusyRef.current || attachmentWarning) return;
     if (!content && pending.length === 0) return;
     setStreamError('');
     setNotice('');
+    composerBusyRef.current = true;
+    const navigation = navigationRef.current;
     const chatId = await ensureChat();
-    if (!chatId) return;
+    if (!chatId || navigationRef.current !== navigation) {
+      composerBusyRef.current = false;
+      return;
+    }
     const attachments = pending;
     const optimistic: ChatMessageDto = {
       id: `temp-${Date.now()}`,
@@ -486,6 +525,7 @@ export function ChatWorkspace({
         } catch {
           /* ignore */
         }
+        if (navigationRef.current !== navigation) return;
         setStreamError(message);
         setOptimisticUser(null);
         // 请求在进入模型前就被拒绝：服务端没有留下这条消息，把输入原样还给用户以便重试。
@@ -495,7 +535,7 @@ export function ChatWorkspace({
         return;
       }
       if (!response.body) {
-        setStreamError('当前浏览器不支持流式响应');
+        if (navigationRef.current === navigation) setStreamError('当前浏览器不支持流式响应');
         return;
       }
       const reader = response.body.getReader();
@@ -506,6 +546,10 @@ export function ChatWorkspace({
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (navigationRef.current !== navigation) {
+          await reader.cancel();
+          return;
+        }
         buffer += decoder.decode(value, { stream: true });
         let index: number;
         while ((index = buffer.indexOf('\n\n')) !== -1) {
@@ -587,25 +631,27 @@ export function ChatWorkspace({
           }
         }
       }
+      if (navigationRef.current !== navigation) return;
       if (accumulated && !applied) setStreamText(accumulated);
       if (!finished && accumulated && !controller.signal.aborted) {
         setStreamError('连接意外结束，已保存已生成的内容');
       }
     } catch (err) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && navigationRef.current === navigation) {
         setStreamError(errorMessage(err));
       }
     } finally {
       abortRef.current = null;
-      setSending(false);
       if (controller.signal.aborted) {
         await new Promise((resolve) => setTimeout(resolve, 350));
       }
       if (!applied) await refreshChat(chatId);
       void refreshChats();
-      setStreamText('');
+      if (navigationRef.current === navigation) setStreamText('');
+      composerBusyRef.current = false;
+      setSending(false);
     }
-  }, [draft, pending, sending, ensureChat, refreshChat, refreshChats]);
+  }, [draft, pending, attachmentWarning, ensureChat, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -622,10 +668,13 @@ export function ChatWorkspace({
       const data = await apiFetch<{ messages: ChatMessageDto[]; hasOlder: boolean }>(
         `/api/chats/${current.id}/messages?before=${encodeURIComponent(current.messages[0].id)}`
       );
+      if (activeIdRef.current !== current.id) return;
       // 往上翻页时不该被拽回底部：先关掉自动跟随，再按新增高度还原视觉位置。
       stickRef.current = false;
       setShowJump(true);
-      setChat({ ...current, messages: [...data.messages, ...current.messages], hasOlder: data.hasOlder });
+      setChat((latest) => latest?.id === current.id
+        ? { ...latest, messages: [...data.messages, ...latest.messages], hasOlder: data.hasOlder }
+        : latest);
       requestAnimationFrame(() => {
         const node = scrollRef.current;
         if (node) node.scrollTop = node.scrollHeight - prevHeight + prevTop;
@@ -860,8 +909,8 @@ export function ChatWorkspace({
         id="chat-sidebar"
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.07] bg-[#080b12]/95 backdrop-blur-2xl transition-[transform,width,visibility] duration-300 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
-          sidebarCollapsed ? 'lg:invisible lg:w-0 lg:max-w-0' : 'lg:w-[300px] xl:w-[320px]',
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          sidebarCollapsed ? 'lg:invisible lg:w-0 lg:max-w-0' : 'lg:visible lg:w-[300px] xl:w-[320px]',
+          sidebarOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         )}
       >
         <div className="flex items-center justify-between px-4 pb-2 pt-4">
@@ -869,7 +918,7 @@ export function ChatWorkspace({
             <BrandMark size={30} />
             <span className="truncate text-[15px] font-semibold text-white/90">{settings.siteName}</span>
           </Link>
-          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭">
+          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(false)} aria-label="关闭对话侧栏">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -891,6 +940,7 @@ export function ChatWorkspace({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索对话"
+              aria-label="搜索对话"
               className="w-full rounded-lg border border-white/[0.07] bg-white/[0.03] py-2 pl-8 pr-3 text-[12.5px] text-white/80 outline-none placeholder:text-white/25 focus:border-white/15"
             />
           </div>
@@ -910,8 +960,9 @@ export function ChatWorkspace({
                     <button
                       type="button"
                       onClick={() => void selectChat(item.id)}
+                      aria-current={active ? 'page' : undefined}
                       className={cn(
-                        'w-full rounded-lg px-3 py-2.5 text-left transition',
+                        'w-full rounded-lg py-2.5 pl-3 pr-20 text-left transition lg:pr-3 lg:group-hover:pr-16 lg:group-focus-within:pr-16',
                         active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.04]'
                       )}
                     >
@@ -921,10 +972,10 @@ export function ChatWorkspace({
                       </div>
                       {item.preview ? <p className="mt-0.5 truncate text-[11px] text-white/30">{item.preview}</p> : null}
                     </button>
-                    <div className="absolute right-1.5 top-1.5 hidden items-center gap-0.5 rounded-md bg-[#0b1019]/90 p-0.5 shadow-lg group-hover:flex">
+                    <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-[#0b1019]/90 p-0.5 shadow-lg lg:hidden lg:group-hover:flex lg:group-focus-within:flex">
                       <button
                         type="button"
-                        className="btn-icon h-6 w-6"
+                        className="btn-icon h-8 w-8 lg:h-6 lg:w-6"
                         aria-label="重命名"
                         onClick={() => {
                           setRenameTarget(item);
@@ -935,7 +986,7 @@ export function ChatWorkspace({
                       </button>
                       <button
                         type="button"
-                        className="btn-icon h-6 w-6 text-red-300/70 hover:text-red-300"
+                        className="btn-icon h-8 w-8 text-red-300/70 hover:text-red-300 lg:h-6 lg:w-6"
                         aria-label="删除"
                         onClick={() => setDeleteTarget(item)}
                       >
@@ -1002,7 +1053,7 @@ export function ChatWorkspace({
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-2 border-b border-white/[0.06] bg-[#080b12]/55 px-3 backdrop-blur-xl sm:px-4">
-          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开侧栏">
+          <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开侧栏" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
             <Menu className="h-4 w-4" />
           </button>
           <button
@@ -1071,7 +1122,7 @@ export function ChatWorkspace({
                 {providers.length === 0 ? (
                   <div className="mt-6 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3 text-[12.5px] text-amber-200/80">
                     尚未配置可用模型。请前往{' '}
-                    <Link href="/settings" className="underline">
+                    <Link href="/settings?tab=models" className="underline">
                       设置 · 模型
                     </Link>{' '}
                     添加，或联系管理员。
@@ -1198,9 +1249,14 @@ export function ChatWorkspace({
             ) : null}
 
             {uploading ? (
-              <div className="mb-2 flex items-center gap-2 text-[11.5px] text-white/35">
+              <div role="status" className="mb-2 flex items-center gap-2 text-[11.5px] text-white/35">
                 <Spinner className="h-3 w-3" /> 正在加密保存文件…
               </div>
+            ) : null}
+            {attachmentWarning ? (
+              <p id="composer-attachment-warning" role="status" className="mb-2 text-xs text-amber-200">
+                {attachmentWarning}
+              </p>
             ) : null}
 
             <div
@@ -1210,6 +1266,8 @@ export function ChatWorkspace({
             >
               <textarea
                 ref={textareaRef}
+                aria-label="消息内容"
+                aria-describedby={attachmentWarning ? 'composer-attachment-warning' : undefined}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={onComposerKeyDown}
@@ -1261,7 +1319,7 @@ export function ChatWorkspace({
                   <button
                     type="button"
                     onClick={() => void send()}
-                    disabled={(!draft.trim() && pending.length === 0) || uploading}
+                    disabled={(!draft.trim() && pending.length === 0) || uploading || Boolean(attachmentWarning)}
                     className="btn-primary h-9 w-9 shrink-0 rounded-xl p-0"
                     aria-label="发送"
                   >
@@ -1298,7 +1356,8 @@ export function ChatWorkspace({
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           maxLength={60}
-          autoFocus
+          data-modal-initial-focus
+          aria-label="对话名称"
           onKeyDown={(e) => {
             if (e.key === 'Enter') void submitRename();
           }}
@@ -1324,7 +1383,7 @@ export function ChatWorkspace({
       />
 
       {notice ? (
-        <div className="pointer-events-none fixed bottom-24 left-1/2 z-[90] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-xl border border-white/10 bg-[#101520]/95 px-4 py-2.5 text-center text-[12px] text-white/75 shadow-2xl backdrop-blur-xl">
+        <div role="status" className="pointer-events-none fixed bottom-24 left-1/2 z-[90] w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-xl border border-white/10 bg-[#101520]/95 px-4 py-2.5 text-center text-[12px] text-white/75 shadow-2xl backdrop-blur-xl">
           {notice}
         </div>
       ) : null}

@@ -354,21 +354,21 @@ function GlobalProviderModal({
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="label">显示名称</label>
-            <input className="field" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 GPT-4.1" />
+            <label className="label" htmlFor="global-model-name">显示名称</label>
+            <input id="global-model-name" className="field" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 GPT-4.1" />
           </div>
           <div>
-            <label className="label">模型 ID</label>
-            <input className="field" required maxLength={128} value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="gpt-4.1" />
+            <label className="label" htmlFor="global-model-id">模型 ID</label>
+            <input id="global-model-id" className="field" required maxLength={128} value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="gpt-4.1" />
           </div>
         </div>
         <div>
-          <label className="label">Base URL</label>
-          <input className="field" required maxLength={512} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+          <label className="label" htmlFor="global-model-url">Base URL</label>
+          <input id="global-model-url" className="field" required maxLength={512} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
         </div>
         <div>
-          <label className="label">API Key</label>
-          <input
+          <label className="label" htmlFor="global-model-key">API Key</label>
+          <input id="global-model-key"
             className="field"
             type="password"
             value={apiKey}
@@ -384,6 +384,7 @@ function GlobalProviderModal({
               <button
                 key={cap.key}
                 type="button"
+                aria-pressed={capabilities.includes(cap.key)}
                 onClick={() => toggleCap(cap.key)}
                 className={cn(
                   'rounded-lg border px-3 py-1.5 text-[12px] transition',
@@ -399,12 +400,12 @@ function GlobalProviderModal({
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
-            <label className="label">Temperature（可选）</label>
-            <input className="field" type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
+            <label className="label" htmlFor="global-model-temperature">Temperature（可选）</label>
+            <input id="global-model-temperature" className="field" type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(e.target.value)} />
           </div>
           <div>
-            <label className="label">最大输出 Token（可选）</label>
-            <input className="field" type="number" min={1} max={64000} value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
+            <label className="label" htmlFor="global-model-max-tokens">最大输出 Token（可选）</label>
+            <input id="global-model-max-tokens" className="field" type="number" min={1} max={64000} value={maxTokens} onChange={(e) => setMaxTokens(e.target.value)} />
           </div>
         </div>
         <div className="flex flex-wrap gap-4">
