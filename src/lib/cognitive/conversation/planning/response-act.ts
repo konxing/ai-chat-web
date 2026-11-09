@@ -31,7 +31,7 @@ export const ACT_TEXT: Record<ResponseAct, string> = {
   ASK_ONE_CLARIFICATION: '只问一个真正必要的澄清问题，不连环追问。',
   CO_REASON: '和用户一起推理，提供不同解释而非替他下结论。',
   OFFER_PERSPECTIVE: '自然提出自己的看法与理据，不机械附和也不争辩。',
-  CORRECT_COURSE: '承认上轮理解偏差，按用户纠正调整，不重复原错误路径。',
+  CORRECT_COURSE: '按用户澄清后的意思接话。只有前文明示你确实误解了才简短承认；没有发生过的误解或回复不要补写。',
   SUGGEST_ACTION: '在用户明确要行动建议时给出可执行下一步。'
 };
 
