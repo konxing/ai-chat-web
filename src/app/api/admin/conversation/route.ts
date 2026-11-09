@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     return {
       enabled: settings.conversationLayerEnabled,
       engineVersion: settings.conversationEngineVersion,
+      autoLearnStyle: settings.autoLearnStyle,
       defaultStyle: DEFAULT_CONVERSATION_STYLE,
       versions,
       activeVersion: active?.version ?? null
@@ -32,6 +33,7 @@ export async function GET(req: Request) {
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
   engineVersion: z.enum(['legacy', 'dialogue-v2']).optional(),
+  autoLearnStyle: z.boolean().optional(),
   confirmPassword: z.string().min(1)
 });
 
@@ -40,11 +42,12 @@ export async function PATCH(req: Request) {
     const { user } = await requireOwner(req);
     const body = patchSchema.parse(await readJson(req));
     await requireOwnerPassword(user.id, body.confirmPassword);
-    const patch: { conversationLayerEnabled?: boolean; conversationEngineVersion?: 'legacy' | 'dialogue-v2' } = {};
+    const patch: { conversationLayerEnabled?: boolean; conversationEngineVersion?: 'legacy' | 'dialogue-v2'; autoLearnStyle?: boolean } = {};
     if (body.enabled !== undefined) patch.conversationLayerEnabled = body.enabled;
     if (body.engineVersion !== undefined) patch.conversationEngineVersion = body.engineVersion;
+    if (body.autoLearnStyle !== undefined) patch.autoLearnStyle = body.autoLearnStyle;
     const settings = await updateSystemSettings(patch, user.id);
-    return { enabled: settings.conversationLayerEnabled, engineVersion: settings.conversationEngineVersion };
+    return { enabled: settings.conversationLayerEnabled, engineVersion: settings.conversationEngineVersion, autoLearnStyle: settings.autoLearnStyle };
   });
 }
 

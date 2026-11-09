@@ -26,14 +26,16 @@ export function ConversationTab() {
   const [candidate, setCandidate] = useState('');
   const [busy, setBusy] = useState(false);
   const [engineVersion, setEngineVersion] = useState<'legacy' | 'dialogue-v2'>('legacy');
+  const [autoLearnStyle, setAutoLearnStyle] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ enabled: boolean; engineVersion: 'legacy' | 'dialogue-v2'; versions: PromptVersion[]; activeVersion: number | null }>(
+      const data = await apiFetch<{ enabled: boolean; engineVersion: 'legacy' | 'dialogue-v2'; autoLearnStyle: boolean; versions: PromptVersion[]; activeVersion: number | null }>(
         '/api/admin/conversation'
       );
       setEnabled(data.enabled);
       setEngineVersion(data.engineVersion ?? 'legacy');
+      setAutoLearnStyle(data.autoLearnStyle ?? false);
       setVersions(data.versions);
       setActiveVersion(data.activeVersion);
     } catch (err) {
@@ -74,6 +76,24 @@ export function ConversationTab() {
       });
       setEnabled(data.enabled);
       push(data.enabled ? '对话智能层已开启' : '对话智能层已关闭');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAutoLearn() {
+    const password = await requestPassword('修改自动学习表达偏好授权需要验证管理员身份。');
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ autoLearnStyle: boolean }>('/api/admin/conversation', {
+        method: 'PATCH',
+        json: { autoLearnStyle: !autoLearnStyle, confirmPassword: password }
+      });
+      setAutoLearnStyle(data.autoLearnStyle);
+      push(data.autoLearnStyle ? '已授权自动学习表达偏好（可自然语言撤销）' : '已关闭自动学习：长期风格仅当前会话遵守');
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -156,6 +176,22 @@ export function ConversationTab() {
             默认 legacy；dialogue-v2 需经 A/B 验证非劣后再灰度。按用户覆盖键 conversationEngineVersionUser:&lt;userId&gt; 可小范围开启。回滚=切回 legacy。
           </p>
         </div>
+        <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+          <div>
+            <div className="text-[13px] font-medium text-white/80">自动学习表达偏好</div>
+            <div className="mt-0.5 text-[11.5px] text-white/35">
+              当前：{autoLearnStyle ? '开' : '关（默认）'}。开启后，用户明确长期风格要求（如"以后简短些"）自动保存并可一句话撤销；
+              关闭时仅当前会话遵守，不写长期库、不弹窗。敏感/核心画像不走此开关。
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+            checked={autoLearnStyle}
+            disabled={busy}
+            onChange={() => void toggleAutoLearn()}
+          />
+        </label>
       </section>
 
       <section className="panel p-5 sm:p-6">

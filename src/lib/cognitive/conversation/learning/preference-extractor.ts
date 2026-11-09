@@ -1,5 +1,7 @@
 import type { ConversationStyle } from '../core/conversation-policy';
-import { setConversationStyle } from '../style/style-profile';
+import { setConversationStyle, performStyleUndo, type StyleUndoTarget } from '../style/style-profile';
+import { autoLearnStyleEnabled } from '../../cognitive-flags';
+import { decideStyleAutonomy } from './autonomy';
 
 /**
  * 自适应对话学习（Phase 6）。只识别用户对"表达方式"的明确反馈，生成偏好候选。
@@ -77,14 +79,46 @@ export function attributeMechanicalFeedback(content: string): MechanicalCause {
 }
 
 /**
- * 应用反馈：GLOBAL 持久化到用户风格；TASK/CONTEXT/TEMPORARY 不写库（本轮/本任务生效由调用方处理）。
- * 返回是否持久化。读/写失败静默，不影响对话。
+ * v1.3 C2：自然语言撤销解析（无需按钮）。返回撤销目标；非撤销返回 null。
+ * "恢复原来的风格/恢复默认/撤销风格偏好" → 全量恢复；
+ * "撤销之前的简短偏好/不要这么简短" → 恢复长度；"撤销不要列点/恢复列表" → 恢复结构。
+ */
+export function detectStyleUndo(content: string): StyleUndoTarget | null {
+  const t = content.trim();
+  if (/恢复原来的风格|恢复默认风格|恢复默认|撤销.*风格偏好|撤销之前的偏好|取消.*偏好/.test(t)) return 'full';
+  if (/撤销.*简短|不要.*简短|恢复详细|别这么简短|撤销.*简短偏好/.test(t)) return 'length';
+  if (/撤销.*列点|恢复列表|撤销.*不列点|可以列点/.test(t)) return 'structure';
+  if (/撤销.*深入|恢复深度|别这么浅/.test(t)) return 'depth';
+  return null;
+}
+
+/**
+ * 应用反馈（v1.3 C2/C3 低打扰自主）：
+ * - 自然语言撤销优先：低风险可逆，直接执行真正逆操作，无需审批。
+ * - GLOBAL 持久化须 autoLearnStyle 已授权；未授权仅当前会话遵守，不写库、不弹窗。
+ * - TASK/CONTEXT/TEMPORARY 不写库（本轮/本任务生效由调用方处理）。
+ * 返回是否产生持久化变更（持久化或撤销）。读/写失败静默，不影响对话。
  */
 export async function learnConversationPreference(userId: string, content: string): Promise<boolean> {
+  const undo = detectStyleUndo(content);
+  if (undo) {
+    const decision = decideStyleAutonomy({ scope: 'GLOBAL', autoLearnEnabled: false, isUndo: true });
+    if (decision.permission !== 'ALLOWED') return false;
+    try {
+      await performStyleUndo(userId, undo);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   const feedback = extractStyleFeedback(content);
-  if (!feedback || feedback.scope !== 'GLOBAL') return false;
+  if (!feedback) return false;
+  const autoLearn = await autoLearnStyleEnabled().catch(() => false);
+  const decision = decideStyleAutonomy({ scope: feedback.scope, autoLearnEnabled: autoLearn, isUndo: false });
+  // 仅 ALLOWED 的 GLOBAL 才持久化；其余本轮遵守但不写库（permission DISABLED/会话级）。
+  if (decision.action !== 'SAVE_EXPLICIT_STYLE' || decision.permission !== 'ALLOWED') return false;
   try {
-    await setConversationStyle(userId, feedback.adjustments);
+    await setConversationStyle(userId, feedback.adjustments, 'auto');
     return true;
   } catch {
     return false;

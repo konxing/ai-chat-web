@@ -61,6 +61,15 @@ export function conversationLayerEnabled(): Promise<boolean> {
 }
 
 /**
+ * v1.3 C2：自动学习表达偏好单一授权开关。默认关。
+ * 开启后，明确长期（GLOBAL）风格要求才自动持久化，且支持自然语言撤销；
+ * 未开启时仅当前会话遵守，不写长期库、不反复征求许可。敏感/核心画像不走此开关（仍守记忆授权）。
+ */
+export function autoLearnStyleEnabled(): Promise<boolean> {
+  return bundleOrEnv('autoLearnStyle', 'COGNITIVE_AUTO_LEARN_STYLE', false);
+}
+
+/**
  * P4：对话引擎两臂灰度。默认 legacy；全局 conversationEngineVersion 可设 dialogue-v2；
  * 按用户键 conversationEngineVersionUser:<userId> 可单独覆盖（小范围灰度），遵守现有权限模型。
  */

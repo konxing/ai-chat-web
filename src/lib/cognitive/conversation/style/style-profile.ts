@@ -76,3 +76,16 @@ export async function resetConversationStyle(userId: string): Promise<Conversati
   await prisma.systemConfig.deleteMany({ where: { key: { in: [styleSettingKey(userId), styleMetaKey(userId)] } } });
   return { ...DEFAULT_CONVERSATION_STYLE };
 }
+
+/** v1.3 C2/C4：自然语言撤销的真正逆操作（不是 UI 显示"已撤销"）。按目标恢复对应维度到默认。 */
+export type StyleUndoTarget = 'full' | 'length' | 'structure' | 'depth';
+export async function performStyleUndo(userId: string, target: StyleUndoTarget): Promise<ConversationStyle> {
+  if (target === 'full') return resetConversationStyle(userId);
+  const revert: Partial<ConversationStyle> =
+    target === 'length'
+      ? { length: DEFAULT_CONVERSATION_STYLE.length }
+      : target === 'structure'
+        ? { structure: DEFAULT_CONVERSATION_STYLE.structure }
+        : { knowledgeDepth: DEFAULT_CONVERSATION_STYLE.knowledgeDepth };
+  return setConversationStyle(userId, revert, 'undo');
+}

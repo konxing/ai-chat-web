@@ -36,18 +36,28 @@ import { getActivePromptVersion, addCandidatePromptVersion, activatePromptVersio
 describe('P3 偏好范围：临时不污染长期（F-08）', () => {
   it('"这次不要列点" → TEMPORARY，不持久化', async () => {
     ctx.saved.length = 0;
+    ctx.settings.delete('autoLearnStyle'); // 未授权也不影响临时语义
     const f = extractStyleFeedback('这次不要列点');
     expect(f?.scope).toBe('TEMPORARY');
     expect(await learnConversationPreference('u', '这次不要列点')).toBe(false);
     expect(ctx.saved.length).toBe(0);
   });
 
-  it('"以后不要列点" → GLOBAL，持久化', async () => {
+  it('"以后不要列点" → GLOBAL，已授权 autoLearn 时持久化', async () => {
     ctx.saved.length = 0;
+    ctx.settings.set('autoLearnStyle', true); // v1.3 C2：长期持久化须显式授权
     const f = extractStyleFeedback('以后不要列点');
     expect(f?.scope).toBe('GLOBAL');
     expect(await learnConversationPreference('u', '以后不要列点')).toBe(true);
     expect(ctx.saved.length).toBe(1);
+    ctx.settings.delete('autoLearnStyle');
+  });
+
+  it('未授权 autoLearn 时 GLOBAL 仅会话遵守，不写库（v1.3 C2）', async () => {
+    ctx.saved.length = 0;
+    ctx.settings.delete('autoLearnStyle');
+    expect(await learnConversationPreference('u', '以后不要列点')).toBe(false);
+    expect(ctx.saved.length).toBe(0);
   });
 
   it('含糊"不要列点"（无持续标记）降级 CONTEXT，不自动持久化', async () => {
