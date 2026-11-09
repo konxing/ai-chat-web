@@ -143,3 +143,42 @@ export function renderDialogueExamples(examples: readonly DialogueExample[]): st
   }
   return lines.join('\n');
 }
+
+/**
+ * v1.3 A.3：按话语行为选**最多 1 组**短多轮示例，严格字符预算（初始实验参数 200–350）。
+ * 预算不足可完全不注入；返回引用诊断（选中/原因/是否裁剪），供匿名结构化审计，不存私人正文。
+ * naturalness=low 时不注入示例（低自然度偏直接、信息密度高）。
+ */
+export const DIALOGUE_EXAMPLE_BUDGET_CHARS = 350;
+
+export interface ExampleDiagnostics {
+  selectedId: string | null;
+  reason: 'act-match' | 'over-budget' | 'no-match' | 'low-naturalness';
+  chars: number;
+  trimmed: boolean;
+}
+
+function exampleChars(e: DialogueExample): number {
+  return e.turns.reduce((s, t) => s + t.content.length + 4, 0); // "用户："/"助手：" 标签各 3-4 字
+}
+
+export function selectDialogueExampleFor(
+  act: DialogueAct,
+  opts: { budget?: number; naturalness?: 'low' | 'medium' | 'high' } = {}
+): { example: DialogueExample | null; diagnostics: ExampleDiagnostics } {
+  const budget = opts.budget ?? DIALOGUE_EXAMPLE_BUDGET_CHARS;
+  if (opts.naturalness === 'low') {
+    return { example: null, diagnostics: { selectedId: null, reason: 'low-naturalness', chars: 0, trimmed: false } };
+  }
+  const candidates = DIALOGUE_EXAMPLES.filter((e) => e.acts.includes(act));
+  if (candidates.length === 0) {
+    return { example: null, diagnostics: { selectedId: null, reason: 'no-match', chars: 0, trimmed: false } };
+  }
+  const first = candidates[0];
+  const chars = exampleChars(first);
+  if (chars <= budget) {
+    return { example: first, diagnostics: { selectedId: first.id, reason: 'act-match', chars, trimmed: false } };
+  }
+  // 超预算：按 A.3 可直接不注入，而不是裁掉用户最新消息/事实依据。
+  return { example: null, diagnostics: { selectedId: null, reason: 'over-budget', chars, trimmed: false } };
+}

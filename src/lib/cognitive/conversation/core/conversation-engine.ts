@@ -4,7 +4,7 @@ import { buildConversationPrompt, type BuiltConversationPrompt } from '../prompt
 import { detectConversationMode, type ModeDetection } from '../mode/mode-detector';
 import { modeInstruction } from '../mode/conversation-mode';
 import { planResponse, type ResponsePlan } from '../planning/response-planner';
-import { selectExamples, renderExamples, selectDialogueExamples, renderDialogueExamples } from '../style/style-examples';
+import { selectExamples, renderExamples, selectDialogueExampleFor, renderDialogueExamples, type ExampleDiagnostics } from '../style/style-examples';
 import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
 import { buildConversationState, type ConversationState } from '../state/conversation-state';
@@ -23,6 +23,8 @@ export interface ConversationIntelligence {
   understanding: DialogueUnderstanding;
   state: ConversationState;
   act: ActSelection;
+  /** A.3：v2 示例引用诊断（是否选中/原因/字符数/是否裁剪）；legacy 为 null。 */
+  exampleDiagnostics: ExampleDiagnostics | null;
 }
 
 export async function buildConversationIntelligence(input: {
@@ -38,13 +40,14 @@ export async function buildConversationIntelligence(input: {
   const content = input.currentContent ?? '';
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
   const understanding = understandDialogue(content);
-  const state = buildConversationState(input.recent ?? [], content, understanding);
-  const act = selectResponseAct(understanding, state, content);
   const [style, version] = await Promise.all([
     getConversationStyle(input.userId).catch(() => null),
     getActivePromptVersion({ mode: mode.mode, provider: input.providerName }).catch(() => null)
   ]);
   const effectiveStyle = style ?? (await import('../core/conversation-policy')).DEFAULT_CONVERSATION_STYLE;
+  const state = buildConversationState(input.recent ?? [], content, understanding);
+  // A.5：naturalness 传入回应动作选择（低自然度=偏直接），不再只是装饰文本。
+  const act = selectResponseAct(understanding, state, content, effectiveStyle.naturalness);
   const plan = planResponse({
     mode: mode.mode,
     content,
@@ -60,8 +63,11 @@ export async function buildConversationIntelligence(input: {
       (act.secondary ? `\n次动作：${ACT_TEXT[act.secondary]}` : '') +
       (act.contextNote ? `\n${act.contextNote}` : '')
     : plan.planText;
+  // A.3：v2 每轮最多 1 组多轮示例，严格字符预算，带引用诊断；预算不足可完全不注入。
+  const picked = v2 ? selectDialogueExampleFor(understanding.dialogueAct, { naturalness: effectiveStyle.naturalness }) : null;
+  const exampleDiagnostics: ExampleDiagnostics | null = picked?.diagnostics ?? null;
   const examplesText = v2
-    ? ([renderDialogueExamples(selectDialogueExamples(understanding.dialogueAct)), renderExamples(selectExamples(mode.mode, mode.secondary))].filter(Boolean).join('\n') || null)
+    ? (picked?.example ? renderDialogueExamples([picked.example]) : null)
     : renderExamples(selectExamples(mode.mode, mode.secondary));
   const block = buildConversationPrompt({
     style: effectiveStyle,
@@ -71,5 +77,5 @@ export async function buildConversationIntelligence(input: {
     planText: actText,
     examplesText
   });
-  return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act };
+  return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act, exampleDiagnostics };
 }

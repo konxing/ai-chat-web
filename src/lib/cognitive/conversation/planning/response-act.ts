@@ -35,7 +35,12 @@ export const ACT_TEXT: Record<ResponseAct, string> = {
   SUGGEST_ACTION: '在用户明确要行动建议时给出可执行下一步。'
 };
 
-export function selectResponseAct(u: DialogueUnderstanding, state: ConversationState, content = ''): ActSelection {
+export function selectResponseAct(
+  u: DialogueUnderstanding,
+  state: ConversationState,
+  content = '',
+  naturalness: 'low' | 'medium' | 'high' = 'high'
+): ActSelection {
   // 约束账本：本轮仍有效的用户直接约束，作为补充说明注入（不覆盖安全/事实）。
   const constraintNote = state.activeConstraints.length
     ? '本轮遵守用户明确要求：' + state.activeConstraints.map((c) => c.content).join('；') + '。'
@@ -57,6 +62,10 @@ export function selectResponseAct(u: DialogueUnderstanding, state: ConversationS
   const question = decideQuestion({ content, understanding: u, state });
   let primary = base.primary;
   if (primary === 'ASK_ONE_CLARIFICATION' && question.responseMove !== 'ASK_ONE') {
+    primary = 'ANSWER';
+  }
+  // A.5：naturalness 有可观测行为差异。低自然度=偏直接、信息密度高：分享/倾诉不铺陈承接，直接回应。
+  if (naturalness === 'low' && primary === 'ACKNOWLEDGE_AND_EXPLORE') {
     primary = 'ANSWER';
   }
   const merged: ActSelection = { ...base, primary, question };

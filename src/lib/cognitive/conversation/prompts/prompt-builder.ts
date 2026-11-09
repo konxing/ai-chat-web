@@ -19,6 +19,11 @@ export interface BuiltConversationPrompt {
   text: string;
   parts: { name: string; chars: number }[];
   truncated: boolean;
+  /** v1.3 A.5：预算与实际用量，便于量化 token 与截断率。 */
+  budget: number;
+  usedChars: number;
+  /** v1.3 A.5：被裁掉的模块及原因（budget=整块丢弃 / partial=核心原则被截断），不静默。 */
+  truncationReasons: { name: string; reason: 'budget' | 'partial' }[];
 }
 
 /** 对话智能块字符预算。初始较小，实际由评测调整（计划书 11.3）。 */
@@ -46,6 +51,7 @@ export function buildConversationPrompt(input: {
   ];
 
   const kept: PromptPart[] = [];
+  const truncationReasons: { name: string; reason: 'budget' | 'partial' }[] = [];
   let used = 0;
   let truncated = false;
   for (const part of ordered) {
@@ -55,10 +61,13 @@ export function buildConversationPrompt(input: {
       used += cost;
     } else {
       truncated = true;
-      // 高优先级（global-policy）必须保留；其余超预算直接丢弃。
+      // 高优先级（global-policy）必须保留；其余超预算直接丢弃，并记录原因。
       if (part.name === 'global-policy') {
         kept.push({ name: part.name, text: part.text.slice(0, Math.max(0, budget - used)) });
+        truncationReasons.push({ name: part.name, reason: 'partial' });
         used = budget;
+      } else {
+        truncationReasons.push({ name: part.name, reason: 'budget' });
       }
     }
   }
@@ -66,6 +75,9 @@ export function buildConversationPrompt(input: {
   return {
     text: kept.map((p) => p.text).join('\n\n'),
     parts: kept.map((p) => ({ name: p.name, chars: p.text.length })),
-    truncated
+    truncated,
+    budget,
+    usedChars: used,
+    truncationReasons
   };
 }
