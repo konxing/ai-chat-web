@@ -142,6 +142,7 @@ export function ChatWorkspace({
   const [chat, setChat] = useState<ChatDetailDto | null>(initialChat);
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState<AttachmentDto[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [streamText, setStreamText] = useState('');
@@ -474,8 +475,23 @@ export function ChatWorkspace({
     }
   }, []);
 
+  const beginEdit = useCallback((message: ChatMessageDto) => {
+    if (composerBusyRef.current) return;
+    setEditingId(message.id);
+    setDraft(message.content);
+    setPending([]);
+    setStreamError('');
+    textareaRef.current?.focus();
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setDraft('');
+  }, []);
+
   const send = useCallback(async () => {
     const content = draft.trim();
+    const editId = editingId;
     if (composerBusyRef.current || attachmentWarning) return;
     if (!content && pending.length === 0) return;
     setStreamError('');
@@ -488,18 +504,30 @@ export function ChatWorkspace({
       return;
     }
     const attachments = pending;
-    const optimistic: ChatMessageDto = {
-      id: `temp-${Date.now()}`,
-      role: 'USER',
-      content,
-      modelId: null,
-      status: 'COMPLETE',
-      inputTokens: null,
-      outputTokens: null,
-      attachments,
-      createdAt: new Date().toISOString()
-    };
-    setOptimisticUser(optimistic);
+    if (editId) {
+      // 编辑：本地先把该条改成新内容并截掉其后问答，流式回答接在编辑条之后。
+      setChat((prev) => {
+        if (!prev) return prev;
+        const idx = prev.messages.findIndex((m) => m.id === editId);
+        if (idx < 0) return prev;
+        const kept = prev.messages.slice(0, idx + 1).map((m) => (m.id === editId ? { ...m, content } : m));
+        return { ...prev, messages: kept };
+      });
+      setOptimisticUser(null);
+    } else {
+      const optimistic: ChatMessageDto = {
+        id: `temp-${Date.now()}`,
+        role: 'USER',
+        content,
+        modelId: null,
+        status: 'COMPLETE',
+        inputTokens: null,
+        outputTokens: null,
+        attachments,
+        createdAt: new Date().toISOString()
+      };
+      setOptimisticUser(optimistic);
+    }
     setDraft('');
     setPending([]);
     setSending(true);
@@ -516,7 +544,7 @@ export function ChatWorkspace({
           Accept: 'text/event-stream',
           ...csrfHeader()
         },
-        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id) }),
+        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined }),
         credentials: 'same-origin',
         signal: controller.signal
       });
@@ -610,11 +638,14 @@ export function ChatWorkspace({
                         providerId: providerId ?? prev.providerId,
                         providerName: providerName ?? prev.providerName,
                         modelId: modelId ?? prev.modelId,
-                        messages: [...prev.messages, { ...savedUser, attachments }, savedAssistant]
+                        messages: editId
+                          ? [...prev.messages.map((m) => (m.id === editId ? { ...savedUser, attachments } : m)), savedAssistant]
+                          : [...prev.messages, { ...savedUser, attachments }, savedAssistant]
                       }
                     : prev
                 );
                 setOptimisticUser(null);
+                setEditingId(null);
                 setStreamText('');
                 const ids = event.memoryIds ?? [];
                 if (ids.length > 0) {
@@ -654,7 +685,7 @@ export function ChatWorkspace({
       composerBusyRef.current = false;
       setSending(false);
     }
-  }, [draft, pending, attachmentWarning, ensureChat, refreshChat, refreshChats]);
+  }, [draft, pending, editingId, attachmentWarning, ensureChat, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -1171,6 +1202,7 @@ export function ChatWorkspace({
                       message={message}
                       citationIds={citations[message.id]}
                       getCitationSource={getCitationSource}
+                      onEdit={message.role === 'USER' ? beginEdit : undefined}
                     />
                   )
                 )}
@@ -1268,6 +1300,17 @@ export function ChatWorkspace({
               <p id="composer-attachment-warning" role="status" className="mb-2 text-xs text-amber-200">
                 {attachmentWarning}
               </p>
+            ) : null}
+
+            {editingId ? (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-aurora-400/25 bg-aurora-400/[0.07] px-3 py-2 text-[12px] text-aurora-200">
+                <span className="flex items-center gap-1.5">
+                  <Pencil className="h-3 w-3" /> 正在编辑消息：发送后将移除其后的问答并重新回答
+                </span>
+                <button type="button" className="shrink-0 rounded px-1.5 py-0.5 text-white/60 hover:bg-white/10 hover:text-white" onClick={cancelEdit}>
+                  取消
+                </button>
+              </div>
             ) : null}
 
             <div
@@ -1406,12 +1449,14 @@ const MessageBubble = memo(function MessageBubble({
   message,
   optimistic,
   citationIds,
-  getCitationSource
+  getCitationSource,
+  onEdit
 }: {
   message: ChatMessageDto;
   optimistic?: boolean;
   citationIds?: string[];
   getCitationSource: () => Promise<CitationSource>;
+  onEdit?: (message: ChatMessageDto) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'USER';
@@ -1459,11 +1504,22 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           ) : null}
           {message.content ? (
-            <div className="rounded-[20px] rounded-br-md border border-aurora-400/15 bg-[#1c302f] px-4 py-3 text-[15px] leading-relaxed text-white/95">
+            <div className="rounded-[20px] rounded-br-md border border-aurora-400/20 bg-gradient-to-br from-[#173a33] to-[#122a26] px-4 py-3 text-[15px] leading-relaxed text-white/95 shadow-[0_10px_30px_-18px_rgba(79,224,180,0.45)]">
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
             </div>
           ) : null}
           <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-white/20">
+            {onEdit && !optimistic ? (
+              <button
+                type="button"
+                onClick={() => onEdit(message)}
+                className="rounded p-1 text-white/25 transition hover:bg-white/5 hover:text-white/60"
+                aria-label="编辑并重发这条消息"
+                title="编辑并重发（会移除其后的问答）"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void copy()}

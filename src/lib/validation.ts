@@ -76,7 +76,9 @@ export const chatModelSchema = z.object({
 
 export const sendMessageSchema = z.object({
   content: z.string().max(50_000).default(''),
-  attachmentIds: z.array(z.string().uuid()).max(15, '一条消息最多 15 个附件').default([])
+  attachmentIds: z.array(z.string().uuid()).max(15, '一条消息最多 15 个附件').default([]),
+  /** 编辑并重发：更新该用户消息并移除其后问答，再重新生成回答。 */
+  editMessageId: z.string().uuid().optional()
 });
 
 export const ipRuleInputSchema = z.object({

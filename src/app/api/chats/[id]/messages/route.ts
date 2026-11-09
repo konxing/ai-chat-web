@@ -11,12 +11,14 @@ import { sendMessageSchema } from '@/lib/validation';
 import { rateLimit } from '@/lib/rate-limit';
 import {
   buildConversation,
+  encryptMessage,
   getChatOwned,
   getOlderMessages,
   publicMessage,
   saveAssistantMessage,
   saveUserMessage
 } from '@/lib/chats';
+import { prisma } from '@/lib/prisma';
 import { getAttachmentsForUser, imageSendSummary, publicAttachment } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
@@ -75,13 +77,46 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     throw new ApiError(400, 'MODEL_NO_FILES', '当前模型未启用文件理解能力，请切换模型或移除文件');
   }
 
-  const userMessage = await saveUserMessage({
-    chat,
-    content: body.content,
-    attachments,
-    providerId: provider.id,
-    modelId: provider.modelId
-  });
+  let userMessage: Awaited<ReturnType<typeof saveUserMessage>>;
+  if (body.editMessageId) {
+    // 编辑=重发：更新该用户消息，移除其后所有问答（含其附件），再走同一条流式重答链路。
+    const target = await prisma.message.findFirst({
+      where: { id: body.editMessageId, chatId, role: 'USER' }
+    });
+    if (!target) throw new ApiError(404, 'MESSAGE_NOT_FOUND', '要编辑的消息不存在');
+    userMessage = await prisma.$transaction(async (tx) => {
+      const removed = await tx.message.findMany({
+        where: { chatId, createdAt: { gt: target.createdAt } },
+        select: { id: true }
+      });
+      if (removed.length) {
+        await tx.attachment.deleteMany({ where: { messageId: { in: removed.map((r) => r.id) } } });
+        await tx.message.deleteMany({ where: { id: { in: removed.map((r) => r.id) } } });
+      }
+      const updated = await tx.message.update({
+        where: { id: target.id },
+        data: { contentCiphertext: encryptMessage(body.content, target.id), status: 'COMPLETE' }
+      });
+      if (attachments.length) {
+        const result = await tx.attachment.updateMany({
+          where: { id: { in: attachments.map((a) => a.id) }, chatId, messageId: null },
+          data: { messageId: target.id }
+        });
+        if (result.count !== attachments.length) {
+          throw new ApiError(400, 'ATTACHMENT_STATE_CHANGED', '附件状态已变化，请重新上传');
+        }
+      }
+      return updated;
+    });
+  } else {
+    userMessage = await saveUserMessage({
+      chat,
+      content: body.content,
+      attachments,
+      providerId: provider.id,
+      modelId: provider.modelId
+    });
+  }
   const { messages, citedMemoryIds, cognitiveFailed } = await buildConversation({
     chatId,
     userId: user.id,
