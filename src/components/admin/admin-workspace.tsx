@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   Activity,
   ArrowLeft,
@@ -41,12 +42,13 @@ import {
 } from '@/components/ui';
 import type { AdminOverview, ServiceStatus } from '@/lib/admin-types';
 import type { ProviderDto } from '@/lib/chat-types';
-import { UsersTab } from '@/components/admin/users-tab';
-import { IpRulesTab } from '@/components/admin/ip-rules-tab';
-import { LogsTab } from '@/components/admin/logs-tab';
-import { ModelsTab } from '@/components/admin/models-tab';
-import { StorageTab } from '@/components/admin/storage-tab';
-import { ConversationTab } from '@/components/admin/conversation-tab';
+const tabLoading = () => <LoadingBlock label="加载管理面板" />;
+const UsersTab = dynamic(() => import('@/components/admin/users-tab').then((m) => m.UsersTab), { loading: tabLoading });
+const IpRulesTab = dynamic(() => import('@/components/admin/ip-rules-tab').then((m) => m.IpRulesTab), { loading: tabLoading });
+const LogsTab = dynamic(() => import('@/components/admin/logs-tab').then((m) => m.LogsTab), { loading: tabLoading });
+const ModelsTab = dynamic(() => import('@/components/admin/models-tab').then((m) => m.ModelsTab), { loading: tabLoading });
+const StorageTab = dynamic(() => import('@/components/admin/storage-tab').then((m) => m.StorageTab), { loading: tabLoading });
+const ConversationTab = dynamic(() => import('@/components/admin/conversation-tab').then((m) => m.ConversationTab), { loading: tabLoading });
 
 type Tab =
   | 'overview'

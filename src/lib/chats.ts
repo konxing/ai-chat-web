@@ -93,7 +93,7 @@ export function publicMessage(
   };
 }
 
-function previewOf(message: Message | undefined): string {
+function previewOf(message: Pick<Message, 'id' | 'contentCiphertext'> | undefined): string {
   if (!message) return '';
   const text = decryptMessage(message)
     .replace(/```[\s\S]*?```/g, ' [代码] ')
@@ -108,9 +108,19 @@ export async function listChats(userId: string): Promise<ChatSummary[]> {
     where: { userId },
     orderBy: { updatedAt: 'desc' },
     take: 200,
-    include: {
+    select: {
+      id: true,
+      titleCiphertext: true,
+      modelId: true,
+      modelProviderId: true,
+      createdAt: true,
+      updatedAt: true,
       provider: { select: { name: true } },
-      messages: { orderBy: { createdAt: 'desc' }, take: 1 }
+      messages: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { id: true, contentCiphertext: true }
+      }
     }
   });
   return rows.map((chat) => ({

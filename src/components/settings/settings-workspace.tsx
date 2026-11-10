@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   ArrowLeft,
   BadgeCheck,
@@ -44,18 +45,21 @@ import {
   useToast
 } from '@/components/ui';
 import type { ProviderDto } from '@/lib/chat-types';
-import { MemoryPanel } from './memory-panel';
-import { MemoryPolicyPanel } from './memory-policy-panel';
-import { DecisionPanel } from './decision-panel';
-import { TimelinePanel } from './timeline-panel';
-import { MemoryGraphPanel } from './memory-graph-panel';
-import { ReflectionPanel } from './reflection-panel';
-import { ProfilePanel } from './profile-panel';
-import { CapabilityPanel } from './capability-panel';
-import { WikiPanel } from './wiki-panel';
-import { ExperiencePanel } from './experience-panel';
-import { ExpressionPanel } from './expression-panel';
-import { CognitiveOverviewPanel, type OverviewTarget } from './cognitive-overview-panel';
+import type { OverviewTarget } from './cognitive-overview-panel';
+
+const panelLoading = () => <LoadingBlock label="加载设置面板" />;
+const MemoryPanel = dynamic(() => import('./memory-panel').then((m) => m.MemoryPanel), { loading: panelLoading });
+const MemoryPolicyPanel = dynamic(() => import('./memory-policy-panel').then((m) => m.MemoryPolicyPanel), { loading: panelLoading });
+const DecisionPanel = dynamic(() => import('./decision-panel').then((m) => m.DecisionPanel), { loading: panelLoading });
+const TimelinePanel = dynamic(() => import('./timeline-panel').then((m) => m.TimelinePanel), { loading: panelLoading });
+const MemoryGraphPanel = dynamic(() => import('./memory-graph-panel').then((m) => m.MemoryGraphPanel), { loading: panelLoading });
+const ReflectionPanel = dynamic(() => import('./reflection-panel').then((m) => m.ReflectionPanel), { loading: panelLoading });
+const ProfilePanel = dynamic(() => import('./profile-panel').then((m) => m.ProfilePanel), { loading: panelLoading });
+const CapabilityPanel = dynamic(() => import('./capability-panel').then((m) => m.CapabilityPanel), { loading: panelLoading });
+const WikiPanel = dynamic(() => import('./wiki-panel').then((m) => m.WikiPanel), { loading: panelLoading });
+const ExperiencePanel = dynamic(() => import('./experience-panel').then((m) => m.ExperiencePanel), { loading: panelLoading });
+const ExpressionPanel = dynamic(() => import('./expression-panel').then((m) => m.ExpressionPanel), { loading: panelLoading });
+const CognitiveOverviewPanel = dynamic(() => import('./cognitive-overview-panel').then((m) => m.CognitiveOverviewPanel), { loading: panelLoading });
 
 interface AccountUser {
   id: string;
@@ -173,9 +177,9 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
   }, [push]);
 
   useEffect(() => {
-    void loadSessions();
-    void loadProviders();
-  }, [loadSessions, loadProviders]);
+    if (tab === 'security') void loadSessions();
+    if (tab === 'models') void loadProviders();
+  }, [tab, loadSessions, loadProviders]);
 
   async function saveName(event: React.FormEvent) {
     event.preventDefault();

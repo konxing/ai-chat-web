@@ -167,6 +167,6 @@ describe('设置页接线', () => {
     expect(WORKSPACE).toContain("| 'memoryGraph'");
     expect(WORKSPACE).toContain("['memoryGraph', '记忆网络', Network]");
     expect(WORKSPACE).toContain("{tab === 'memoryGraph' ? <MemoryGraphPanel /> : null}");
-    expect(WORKSPACE).toContain("import { MemoryGraphPanel } from './memory-graph-panel'");
+    expect(WORKSPACE).toContain("dynamic(() => import('./memory-graph-panel').then((m) => m.MemoryGraphPanel)");
   });
 });
