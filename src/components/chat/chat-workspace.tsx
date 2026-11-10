@@ -40,7 +40,7 @@ import {
   Utensils,
   X
 } from 'lucide-react';
-import { apiFetch, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
+import { apiFetch, attachmentUrl, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
 import {
   CITATION_LOAD_FAILED_NOTE,
   CITATION_NOTE,
@@ -1510,7 +1510,7 @@ const MessageBubble = memo(function MessageBubble({
                 ) : (
                   <a
                     key={attachment.id}
-                    href={`/api/files/${attachment.id}`}
+                    href={attachmentUrl(attachment.id)}
                     className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-[11.5px] text-white/60 hover:border-white/20"
                   >
                     <FileText className="h-3.5 w-3.5 text-aurora-300/70" />

@@ -71,6 +71,7 @@ describe('GET /api/files/[id] 的限流', () => {
   it('放行的下载按用户记账，口径是每分钟 600 次', async () => {
     const response = await GET(request(), PARAMS);
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     // 逐个字段断言：`toEqual` 的失败信息会被 vitest 折成 `{ key: …, …(2) }`，
     // 数字错了也看不出是哪个错了。
     expect(ctx.limiterCalls).toHaveLength(1);
@@ -92,9 +93,8 @@ describe('GET /api/files/[id] 的限流', () => {
   it('命中 ETag 的 304 同样记账，不是免费的重验证', async () => {
     const response = await GET(request(`"${'a'.repeat(64)}"`), PARAMS);
     expect(response.status).toBe(304);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(ctx.limiterCalls).toHaveLength(1);
-    // 响应头里带 immutable + 一年 max-age，正常浏览器根本不会回来重验证，
-    // 所以把 304 也算进额度对真实用户几乎没有成本，却堵掉了一整条绕开闸的路。
     expect(ctx.readCalls).toBe(0);
   });
 });

@@ -164,6 +164,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
+export function attachmentUrl(id: string): string {
+  // Use a fresh URL so existing long-lived browser cache entries are bypassed.
+  return `/api/files/${id}?v=2`;
+}
+
 export function imageUrl(id: string): string {
-  return `/api/files/${id}?inline=1`;
+  return `${attachmentUrl(id)}&inline=1`;
 }

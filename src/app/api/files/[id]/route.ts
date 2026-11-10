@@ -34,7 +34,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     if (req.headers.get('if-none-match') === etag) {
       return new Response(null, {
         status: 304,
-        headers: { ETag: etag, 'Cache-Control': 'private, max-age=31536000, immutable' }
+        headers: { ETag: etag, 'Cache-Control': 'private, no-store' }
       });
     }
     const buffer = await readAttachmentBuffer(attachment);
@@ -48,7 +48,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
         'Content-Type': attachment.mime,
         'Content-Length': String(buffer.length),
         'Content-Disposition': contentDisposition(inline ? 'inline' : 'attachment', name),
-        'Cache-Control': 'private, max-age=31536000, immutable',
+        // A browser profile can be used by different accounts. Require a fresh
+        // authorization check instead of allowing it to reuse decrypted files.
+        'Cache-Control': 'private, no-store',
         ETag: etag,
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'; sandbox",
