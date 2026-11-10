@@ -23,6 +23,17 @@ import type { MemoryContext } from './policy';
 export const GRAPH_MAX_NODES = 120;
 export const GRAPH_MAX_EDGES = 240;
 
+/** Weight measures visible connections, not how important or reliable a memory is. */
+export function graphNodeWeights(graph: Pick<MemoryGraph, 'nodes' | 'edges'>): Map<string, number> {
+  const weights = new Map(graph.nodes.map(({ id }) => [id, 0]));
+  for (const { from, to } of graph.edges) {
+    if (from === to || !weights.has(from) || !weights.has(to)) continue;
+    weights.set(from, weights.get(from)! + 1);
+    weights.set(to, weights.get(to)! + 1);
+  }
+  return weights;
+}
+
 /** 节点标签的最长字数：SVG 里的文字不会自动换行，撑破了就没有第二种画法能救。 */
 const LABEL_MAX = 24;
 

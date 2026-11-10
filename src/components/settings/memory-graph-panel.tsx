@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Share2 } from 'lucide-react';
+import { Search, Share2 } from 'lucide-react';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, useToast } from '@/components/ui';
 import {
@@ -11,6 +11,7 @@ import {
   describeAssociationGate,
   describeGraphBudget,
   describeNotAGraph,
+  graphNodeWeights,
   isGraphDrawable,
   memoryNeighborhood,
   truncateNodeLabel
@@ -47,10 +48,10 @@ import type { GraphEdgeKind, MemoryGraph } from '@/lib/cognitive/memory-graph';
 const GRAPH_URL = '/api/account/cognitive/graph';
 const PREFERENCES_URL = '/api/account/cognitive';
 
-/** 画布几何。只有一个用途：把点摊开在一个圆上，别重叠。 */
-const CANVAS = 360;
+/** 多圈布局为高密度节点留出间距。 */
+const CANVAS = 600;
 const CENTER = CANVAS / 2;
-const RADIUS = CANVAS / 2 - 40;
+const RINGS = [8, 16, 24, 32, 40];
 
 /** 四种线各自的画法。名字在 `GRAPH_EDGE_LABELS`，这里只给样子，图例和线共用同一个 kind。 */
 const EDGE_STROKES: Record<GraphEdgeKind, string> = {
@@ -78,6 +79,7 @@ export function MemoryGraphPanel() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   const loadGraph = useCallback(async () => {
     setLoading(true);
@@ -127,13 +129,27 @@ export function MemoryGraphPanel() {
   }
 
   const focus = useMemo(() => graph && selectedId ? memoryNeighborhood(graph, selectedId) : null, [graph, selectedId]);
+  const weights = useMemo(() => graph ? graphNodeWeights(graph) : new Map<string, number>(), [graph]);
+  const maxWeight = Math.max(1, ...weights.values());
   const positions = useMemo(() => {
     const nodes = focus ? [focus.selected, ...focus.neighbors.map(({ node }) => node)] : graph?.nodes ?? [];
-    return new Map(nodes.map((node, index) => {
-      if (focus && index === 0) return [node.id, { node, x: CENTER, y: CENTER }];
-      const angle = (Math.PI * 2 * (focus ? index - 1 : index)) / Math.max(focus ? nodes.length - 1 : nodes.length, 1);
-      return [node.id, { node, x: CENTER + RADIUS * Math.cos(angle), y: CENTER + RADIUS * Math.sin(angle) }];
-    }));
+    const [center, ...outer] = nodes;
+    const points = new Map<string, { node: (typeof nodes)[number]; x: number; y: number }>();
+    if (center) points.set(center.id, { node: center, x: CENTER, y: CENTER });
+    let ringCount = 0;
+    let slots = 0;
+    while (slots < outer.length && ringCount < RINGS.length) slots += RINGS[ringCount++]!;
+    let offset = 0;
+    for (const [ring, capacity] of RINGS.slice(0, ringCount).entries()) {
+      const members = outer.slice(offset, offset + capacity);
+      const radius = (ring + 1) * (ringCount === 1 ? 164 : 225 / ringCount);
+      members.forEach((node, index) => {
+        const angle = Math.PI * (2 * (index + ring * 0.3) / members.length - 0.5);
+        points.set(node.id, { node, x: CENTER + radius * Math.cos(angle), y: CENTER + radius * Math.sin(angle) });
+      });
+      offset += capacity;
+    }
+    return points;
   }, [graph, focus]);
 
   const selected = focus?.selected ?? null;
@@ -141,6 +157,44 @@ export function MemoryGraphPanel() {
   const drawable = graph !== null && isGraphDrawable(graph);
   /** 闸门句只在画得出图时摆：画不出来时那句「还不是一张图」已经把同一个条数说过了，两句同时出现就是重复。 */
   const gateNote = graph && drawable ? describeAssociationGate(graph.associationGated) : '';
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = graph?.nodes.filter((node) => node.content.toLocaleLowerCase().includes(needle)) ?? [];
+  const picker = graph && graph.nodes.length > 0 ? (
+    <div className="min-w-0 rounded-2xl border border-slate-700/70 bg-[#111c2b] p-3">
+      <label className="flex items-center gap-2 rounded-xl border border-slate-600 bg-[#0b1420] px-3 text-slate-300 focus-within:border-aurora-400">
+        <Search aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <input
+          type="search"
+          aria-label="搜索并聚焦记忆"
+          placeholder="搜索记忆…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-slate-100 outline-none placeholder:text-slate-400"
+        />
+      </label>
+      <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1 lg:max-h-[360px]">
+        <button type="button" aria-pressed={!selected} onClick={() => setSelectedId(null)} className="w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 hover:bg-slate-700 aria-pressed:bg-emerald-950 aria-pressed:text-emerald-100">
+          全部记忆 <span className="text-xs text-slate-300">· {graph.nodes.length}</span>
+        </button>
+        {matches.map((node) => (
+          <button
+            key={node.id}
+            type="button"
+            aria-pressed={selected?.id === node.id}
+            onClick={() => setSelectedId(node.id)}
+            className="flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-slate-100 hover:bg-slate-700 aria-pressed:bg-emerald-950 aria-pressed:text-emerald-100"
+          >
+            <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: GRAPH_CONTEXT_COLORS[node.context] }} />
+            <span className="min-w-0 flex-1 break-words">{truncateNodeLabel(node.content)}</span>
+            <span className="shrink-0 text-xs text-slate-300" title="关联数">{weights.get(node.id) ?? 0}</span>
+          </button>
+        ))}
+        {needle && matches.length === 0 ? (
+          <p className="px-3 py-2 text-sm text-slate-300">没有找到匹配的记忆。</p>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
 
   return (
     <section className="panel p-5 sm:p-6">
@@ -174,64 +228,90 @@ export function MemoryGraphPanel() {
           {loadError ? <Alert tone="error">{loadError}</Alert> : null}
           {graph ? describeGraphBudget(graph).map((sentence) => <Alert key={sentence} tone="info">{sentence}</Alert>) : null}
           {gateNote ? <Alert tone="info">{gateNote}</Alert> : null}
-          {!loading && graph && graph.nodes.length > 0 ? (
-            <label className="block max-w-[520px]">
-              <span className="label">聚焦一条记忆</span>
-              <select className="field" value={selected?.id ?? ''} onChange={(event) => setSelectedId(event.target.value || null)}>
-                <option value="">全部记忆</option>
-                {graph.nodes.map((node, index) => (
-                  <option key={node.id} value={node.id}>{index + 1}. {truncateNodeLabel(node.content)}</option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-
           {loading ? (
             <LoadingBlock label="加载记忆网络" />
           ) : graph === null ? null : drawable ? (
             <div className="space-y-3">
-              <svg
-                viewBox={`0 0 ${CANVAS} ${CANVAS}`}
-                className="w-full max-w-[520px] rounded-xl border border-white/[0.07] bg-white/[0.02]"
-                role="img"
-                aria-label={focus ? '当前记忆的直接关系图' : '记忆之间的关系图'}
-              >
-                {shownEdges.map((edge) => {
-                  const from = positions.get(edge.from);
-                  const to = positions.get(edge.to);
-                  if (!from || !to) return null;
-                  return (
-                    <line
-                      key={`${edge.kind}-${edge.from}-${edge.to}`}
-                      x1={from.x}
-                      y1={from.y}
-                      x2={to.x}
-                      y2={to.y}
-                      stroke={EDGE_STROKES[edge.kind]}
-                      strokeDasharray={EDGE_DASHES[edge.kind]}
-                      strokeWidth={1.2}
-                      opacity={0.6}
-                    />
-                  );
-                })}
-                {Array.from(positions.values()).map(({ node, x, y }) => (
-                  <g key={node.id} onClick={() => setSelectedId(selectedId === node.id ? null : node.id)}>
-                    <circle
-                      cx={x}
-                      cy={y}
-                      r={selectedId === node.id ? 9 : 7}
-                      fill={GRAPH_CONTEXT_COLORS[node.context]}
-                      fillOpacity={node.isCurrent ? 1 : 0.45}
-                      stroke={node.isCurrent ? 'none' : '#ffffff'}
-                      strokeDasharray={node.isCurrent ? '0' : '2 2'}
-                      strokeWidth={1}
-                    />
-                    <text x={x + 10} y={y + 3} fontSize={8.5} fill="rgba(255,255,255,0.55)">
-                      {truncateNodeLabel(node.content)}
-                    </text>
-                  </g>
-                ))}
-              </svg>
+              <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)]">
+                <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1420]">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/70 px-4 py-3 text-xs text-slate-300">
+                    <span className="font-medium text-slate-100">{focus ? '直接关系' : '网络总览'}</span>
+                    <span>{positions.size} 条记忆 · {shownEdges.length} 条关系</span>
+                  </div>
+                  <svg
+                    viewBox={`0 0 ${CANVAS} ${CANVAS}`}
+                    className="block w-full bg-[radial-gradient(ellipse_at_center,#16283d,transparent_72%)]"
+                    role="group"
+                    aria-label={focus ? '当前记忆的直接关系图' : '记忆之间的关系图'}
+                  >
+                    {shownEdges.map((edge) => {
+                      const from = positions.get(edge.from);
+                      const to = positions.get(edge.to);
+                      if (!from || !to) return null;
+                      return (
+                        <line
+                          key={`${edge.kind}-${edge.from}-${edge.to}`}
+                          x1={from.x}
+                          y1={from.y}
+                          x2={to.x}
+                          y2={to.y}
+                          stroke={EDGE_STROKES[edge.kind]}
+                          strokeDasharray={EDGE_DASHES[edge.kind]}
+                          strokeWidth={focus ? 1.7 : 1.2}
+                          opacity={focus ? 0.78 : edge.kind === 'relation' || edge.kind === 'update' ? 0.55 : 0.32}
+                        />
+                      );
+                    })}
+                    {Array.from(positions.values()).map(({ node, x, y }) => {
+                      const strength = Math.sqrt((weights.get(node.id) ?? 0) / maxWeight);
+                      const radius = 5 + 9 * strength;
+                      const color = GRAPH_CONTEXT_COLORS[node.context];
+                      const active = selectedId === node.id;
+                      const label = truncateNodeLabel(node.content);
+                      const selectNode = () => setSelectedId(active ? null : node.id);
+                      return (
+                        <g
+                          key={node.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`${node.content}，${weights.get(node.id) ?? 0} 条关系`}
+                          aria-pressed={active}
+                          onClick={selectNode}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              selectNode();
+                            }
+                          }}
+                          className="group cursor-pointer outline-none"
+                        >
+                          <title>{node.content}</title>
+                          <circle cx={x} cy={y} r={radius + 9} fill="transparent" />
+                          <circle cx={x} cy={y} r={radius + 6} fill={color} opacity={0.07 + strength * 0.27} pointerEvents="none" />
+                          <circle
+                            cx={x}
+                            cy={y}
+                            r={radius}
+                            fill={color}
+                            fillOpacity={0.65 + strength * 0.35}
+                            stroke={active || !node.isCurrent ? '#e2e8f0' : color}
+                            strokeDasharray={node.isCurrent ? '0' : '2 2'}
+                            strokeWidth={1}
+                          />
+                          <circle cx={x} cy={y} r={radius * 0.8} fill="#fff" opacity={strength * 0.58} pointerEvents="none" />
+                          <circle cx={x} cy={y} r={radius + 4} fill="none" stroke="#f1f5f9" className="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" pointerEvents="none" />
+                          {active || positions.size <= 9 ? (
+                            <text x={x} y={y + radius + 16} textAnchor="middle" fontSize={12} fill="#e2e8f0" pointerEvents="none" paintOrder="stroke" stroke="#0b1420" strokeWidth={3}>
+                              {label.length > 12 ? `${label.slice(0, 11)}…` : label}
+                            </text>
+                          ) : null}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+                {picker}
+              </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-white/45">
                 {Object.entries(GRAPH_EDGE_LABELS).map(([kind, label]) => (
@@ -261,11 +341,12 @@ export function MemoryGraphPanel() {
                 ))}
               </div>
 
-              <p className="text-[11.5px] text-white/35">点的位置只为了铺开不重叠，不表示任何东西。选中一点后，只显示和它直接相连的记忆。</p>
+              <p className="text-xs leading-relaxed text-slate-300">连接越多，节点越亮、越大。点的位置只为了铺开不重叠，不表示任何东西。选中一点后，只显示和它直接相连的记忆。</p>
             </div>
           ) : (
             <div className="space-y-3">
               <Alert tone="info">{describeNotAGraph(graph.nodes.length, graph.edges.length, graph.associationGated)}</Alert>
+              {picker}
               {!selected ? graph.nodes.map((node) => (
                 <button key={node.id} type="button" onClick={() => setSelectedId(node.id)} className="block w-full whitespace-pre-wrap break-words rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left text-[13px] leading-relaxed text-white/80">
                   <span className="block">{node.content}</span>

@@ -91,6 +91,12 @@ body::after {
     background: linear-gradient(180deg, #0b111a, #0c121b);
   }
 
+  select.field option,
+  select.field optgroup {
+    background-color: #111a26;
+    color: #edf3fa;
+  }
+
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition duration-200 disabled:cursor-not-allowed disabled:opacity-45;
   }

@@ -13,6 +13,7 @@ import {
   describeAssociationGate,
   describeGraphBudget,
   describeNotAGraph,
+  graphNodeWeights,
   isGraphDrawable,
   memoryNeighborhood,
   truncateNodeLabel
@@ -63,6 +64,14 @@ function graph(overrides: Partial<MemoryGraph> = {}): MemoryGraph {
 function nodes(count: number) {
   return Array.from({ length: count }, (_unused, index) => node(`m-${index}`));
 }
+
+it('weights nodes by visible edges and leaves isolated nodes at zero', () => {
+  const weights = graphNodeWeights(graph({
+    nodes: [node('a'), node('b'), node('c'), node('d')],
+    edges: [edge('a', 'b'), edge('c', 'a'), edge('b', 'missing'), edge('c', 'c')]
+  }));
+  expect(Object.fromEntries(weights)).toEqual({ a: 2, b: 1, c: 1, d: 0 });
+});
 
 /** 画布上那行字的长度上限：这里是**写死的期望**，不是从实现里读回来的数——改成 25 就该让用例红。 */
 const LABEL_MAX = 24;
