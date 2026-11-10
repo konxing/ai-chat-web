@@ -237,7 +237,7 @@ export function ReflectionPanel() {
         <div>
           <h2 className="text-[16px] font-semibold text-white">AI 主动洞察</h2>
           <p className="mt-1 text-[12.5px] text-white/40">
-            开启后，系统会定期从你已保存的记忆里找反复出现的模式、前后矛盾和长期未定的事，摆在这里等你处置。这些洞察不会在聊天里被主动提起。
+            开启后，系统会从你已保存的记忆里寻找反复出现的模式、前后不一致的地方和长期未定的事，供你在这里查看。这些洞察不会在聊天里被主动提起。
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-[13px] text-white/70">
@@ -266,8 +266,8 @@ export function ReflectionPanel() {
           <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
             <h3 className="text-[13.5px] text-white/85">洞察生成节奏</h3>
             <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
-              两次生成之间至少隔多久。这一档只改频率，不改任何判定标准：隔得越久攒下的记忆越多，
-              一轮里能找出的反复模式也越站得住。
+              这是两次生成之间的最短间隔。达到间隔后，系统会在处理新的对话任务时检查是否有新洞察。
+              待处理的洞察由你决定是否采纳，超过 30 天会显示为已过期。
             </p>
 
             <div className="mt-3">

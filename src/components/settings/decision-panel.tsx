@@ -179,7 +179,7 @@ export function DecisionPanel() {
         <div>
           <h2 className="text-[16px] font-semibold text-white">决策</h2>
           <p className="mt-1 text-[12.5px] text-white/40">
-            开启后，AI 会把你亲口说出的重要决策记为待确认候选；只有你确认后才成为正式决策记录。
+            开启后，AI 会把你说出的重要决策记为待确认记录。你可以自行确认；若管理员开启自动审核，满 24 小时后仍待确认的记录也可能由审核模型标记为已确认或已拒绝。
           </p>
         </div>
         <label className="flex shrink-0 items-center gap-2 text-[13px] text-white/70">

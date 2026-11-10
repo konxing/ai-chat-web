@@ -501,11 +501,11 @@ function ConfigTab() {
           </label>
           <label className="flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
             <div>
-              <div className="text-[13px] font-medium text-white/80">待确认超过 24 小时交给 AI 裁决</div>
+              <div className="text-[13px] font-medium text-white/80">待确认超过 24 小时后由 AI 审核</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
                 记忆候选、决策记录、画像建议超过 24 小时没被用户处理时，交给审核模型逐条判「保留/丢弃」：
                 保留的记忆候选直接入库、决策标记确认、画像建议写进画像；丢弃的拒绝或不再出现。
-                模型不可用时不处理，条目继续等。
+                审核在系统处理该用户新的对话任务时触发。模型不可用时，条目继续待确认。
               </div>
             </div>
             <input

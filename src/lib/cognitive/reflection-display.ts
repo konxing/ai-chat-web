@@ -67,7 +67,7 @@ export const COOLDOWN_LABELS: Record<ReflectionCooldown, string> = {
 };
 
 export const COOLDOWN_HINTS: Record<ReflectionCooldown, string> = {
-  daily: '距上次生成满 24 小时。这是默认档，也是加上这一项之前写死的节奏。',
+  daily: '距上次生成满 24 小时（默认）。',
   weekly: '距上次生成满 7 天。',
   monthly: '距上次生成满 30 天。'
 };

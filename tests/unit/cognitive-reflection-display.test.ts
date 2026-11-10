@@ -299,7 +299,7 @@ describe('洞察生成节奏三档', () => {
     expect(COOLDOWN_ORDER).toEqual(['daily', 'weekly', 'monthly']);
     expect(COOLDOWN_LABELS).toEqual({ daily: '每天', weekly: '每周', monthly: '每月' });
     expect(COOLDOWN_HINTS).toEqual({
-      daily: '距上次生成满 24 小时。这是默认档，也是加上这一项之前写死的节奏。',
+      daily: '距上次生成满 24 小时（默认）。',
       weekly: '距上次生成满 7 天。',
       monthly: '距上次生成满 30 天。'
     });
