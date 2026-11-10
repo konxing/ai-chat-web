@@ -21,6 +21,7 @@ export interface SystemSettings {
   cognitiveContextEnhanced: boolean;
   /** 对话智能层总开关：默认关，打开后才在 system 里注入交流原则/模式/风格块。 */
   conversationLayerEnabled: boolean;
+  enhancedPersona: boolean;
   /** P4：对话引擎版本两臂。legacy=旧规则累加；dialogue-v2=话语行为/状态/回应动作。默认 legacy，可灰度。 */
   conversationEngineVersion: 'legacy' | 'dialogue-v2';
   /** v1.3 C2：自动学习表达偏好单一授权开关。默认关；开启后明确长期风格要求才自动持久化（可自然语言撤销）。 */
@@ -41,6 +42,7 @@ const DEFAULTS: SystemSettings = {
   cognitiveRetrievalEnhanced: false,
   cognitiveContextEnhanced: true,
   conversationLayerEnabled: false,
+  enhancedPersona: false,
   conversationEngineVersion: 'legacy',
   autoLearnStyle: false
 };
@@ -58,6 +60,7 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'cognitiveRetrievalEnhanced',
   'cognitiveContextEnhanced',
   'conversationLayerEnabled',
+  'enhancedPersona',
   'conversationEngineVersion',
   'autoLearnStyle'
 ]);
@@ -71,6 +74,7 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
     key === 'cognitiveRetrievalEnhanced' ||
     key === 'cognitiveContextEnhanced' ||
     key === 'conversationLayerEnabled' ||
+    key === 'enhancedPersona' ||
     key === 'autoLearnStyle'
   ) {
     return Boolean(value) as SystemSettings[K];

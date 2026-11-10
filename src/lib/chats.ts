@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AiProvider, Attachment, Chat, Message, Prisma } from '@prisma/client';
 import { prisma } from './prisma';
+import { getSystemSetting } from './config';
 import { decryptString, encryptString } from './crypto';
 import { ApiError } from './http';
 import {
@@ -393,7 +394,6 @@ export async function buildConversation(input: {
   chatId: string;
   userId: string;
   currentContent: string;
-  enhancedPersona?: boolean;
   attachments: Attachment[];
   provider: AiProvider;
 }): Promise<ConversationContext> {
@@ -472,7 +472,7 @@ export async function buildConversation(input: {
     content: input.currentContent
   });
   for (const block of cognitive.blocks) messages.push({ role: 'system', content: block.text });
-  if (input.enhancedPersona) {
+  if (await getSystemSetting('enhancedPersona').catch(() => false)) {
     messages.push({
       role: 'system',
       content: [
@@ -480,7 +480,9 @@ export async function buildConversation(input: {
         '把同一话题里最近的几条用户消息一起理解，优先回应最新的补充或纠正。话题变了就跟着转，不硬拉回旧事。',
         '闲聊或单纯吐槽时，从对方实际提到的一处细节接一句；一两句够了就停。别自动分析、给建议或用问题续场。',
         '用户求解释、方案或取舍时，直接把关键理由讲透，按需用例子和结构。',
-        '只沿用当前对话有依据的细节。别编自己的生活经历，也别擅自补全对方的环境、动机或心情。'
+        '只沿用当前对话有依据的细节。别编自己的生活经历，也别擅自补全对方的环境、动机或心情。',
+        '闲聊示例（只学接话方式）：用户说「好不容易腾出一小时，结果整整等了四十分钟。我就想吐槽一下。」可以回「好不容易空出一个小时，四十分钟全耗在等上了，难怪你烦。」',
+        '纠正示例：用户说「不是嫌远，是下班根本赶不上末班车。」就接住末班车这个限制，别再按路程远近给建议。'
       ].join('\n')
     });
   }

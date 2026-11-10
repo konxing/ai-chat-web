@@ -36,7 +36,6 @@ import {
   Settings,
   Shield,
   Square,
-  Sparkles,
   Trash2,
   Utensils,
   X
@@ -142,27 +141,6 @@ export function ChatWorkspace({
   const [chats, setChats] = useState<ChatSummaryDto[]>(initialChats);
   const [chat, setChat] = useState<ChatDetailDto | null>(initialChat);
   const [draft, setDraft] = useState('');
-  const personaKey = `family-ai.enhanced-persona:${user.id}`;
-  const [personaPreference, setPersonaPreference] = useState<string | null>(null);
-  const enhancedPersona = personaPreference === personaKey;
-
-  useEffect(() => {
-    try {
-      setPersonaPreference(localStorage.getItem(personaKey) === '1' ? personaKey : null);
-    } catch {
-      setPersonaPreference(null);
-    }
-  }, [personaKey]);
-
-  function toggleEnhancedPersona() {
-    const next = !enhancedPersona;
-    setPersonaPreference(next ? personaKey : null);
-    try {
-      localStorage.setItem(personaKey, next ? '1' : '0');
-    } catch {
-      // The switch still works for this page when storage is unavailable.
-    }
-  }
   const [pending, setPending] = useState<AttachmentDto[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -569,12 +547,7 @@ export function ChatWorkspace({
           Accept: 'text/event-stream',
           ...csrfHeader()
         },
-        body: JSON.stringify({
-          content,
-          attachmentIds: attachments.map((a) => a.id),
-          editMessageId: editId ?? undefined,
-          enhancedPersona
-        }),
+        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined }),
         credentials: 'same-origin',
         signal: controller.signal
       });
@@ -715,7 +688,7 @@ export function ChatWorkspace({
       composerBusyRef.current = false;
       setSending(false);
     }
-  }, [draft, pending, editingId, attachmentWarning, enhancedPersona, ensureChat, refreshChat, refreshChats]);
+  }, [draft, pending, editingId, attachmentWarning, ensureChat, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -1411,22 +1384,6 @@ export function ChatWorkspace({
                       {recordSeconds}s · 点击停止
                     </span>
                   ) : null}
-                </button>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={enhancedPersona}
-                  aria-label="增强人格化"
-                  title="让 AI 更自然地接话。切换后从下一条回复生效。"
-                  onClick={toggleEnhancedPersona}
-                  className={cn(
-                    'btn-ghost h-9 shrink-0 gap-1.5 whitespace-nowrap px-2 text-xs',
-                    enhancedPersona ? 'border-teal-300/40 bg-teal-400/15 text-teal-100' : 'border-white/10 text-white/60'
-                  )}
-                >
-                  <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
-                  增强人格化
-                  <span aria-hidden="true">{enhancedPersona ? '开' : '关'}</span>
                 </button>
                 <div className="flex-1" />
                 {sending ? (

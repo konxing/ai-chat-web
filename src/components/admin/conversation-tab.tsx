@@ -21,6 +21,7 @@ export function ConversationTab() {
   const { requestPassword } = useReauth();
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(false);
+  const [enhancedPersona, setEnhancedPersona] = useState(false);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [activeVersion, setActiveVersion] = useState<number | null>(null);
   const [candidate, setCandidate] = useState('');
@@ -30,10 +31,11 @@ export function ConversationTab() {
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ enabled: boolean; engineVersion: 'legacy' | 'dialogue-v2'; autoLearnStyle: boolean; versions: PromptVersion[]; activeVersion: number | null }>(
+      const data = await apiFetch<{ enabled: boolean; enhancedPersona: boolean; engineVersion: 'legacy' | 'dialogue-v2'; autoLearnStyle: boolean; versions: PromptVersion[]; activeVersion: number | null }>(
         '/api/admin/conversation'
       );
       setEnabled(data.enabled);
+      setEnhancedPersona(data.enhancedPersona);
       setEngineVersion(data.engineVersion ?? 'legacy');
       setAutoLearnStyle(data.autoLearnStyle ?? false);
       setVersions(data.versions);
@@ -76,6 +78,24 @@ export function ConversationTab() {
       });
       setEnabled(data.enabled);
       push(data.enabled ? '对话智能层已开启' : '对话智能层已关闭');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleEnhancedPersona() {
+    const password = await requestPassword('修改全站增强人格化设置需要验证管理员身份。');
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ enhancedPersona: boolean }>('/api/admin/conversation', {
+        method: 'PATCH',
+        json: { enhancedPersona: !enhancedPersona, confirmPassword: password }
+      });
+      setEnhancedPersona(data.enhancedPersona);
+      push(data.enhancedPersona ? '全站增强人格化已开启' : '全站增强人格化已关闭');
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -159,6 +179,24 @@ export function ConversationTab() {
             checked={enabled}
             disabled={busy}
             onChange={() => void toggle()}
+          />
+        </label>
+        <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+          <div>
+            <div className="text-[13px] font-medium text-white/80">增强人格化</div>
+            <div className="mt-0.5 text-[11.5px] text-white/35">
+              当前：{enhancedPersona ? '开' : '关'}。全站下一次发送时生效，独立于对话智能层总开关。
+              闲聊时接住具体细节，减少套话和追问，用户需要分析时照常展开。
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="增强人格化"
+            className="mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition checked:bg-emerald-400/80 relative before:absolute before:top-0.5 before:left-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:before:translate-x-4"
+            checked={enhancedPersona}
+            disabled={busy}
+            onChange={() => void toggleEnhancedPersona()}
           />
         </label>
         <div className="mt-4">
