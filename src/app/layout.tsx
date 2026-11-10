@@ -3,10 +3,10 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: {
-    default: '澄境 · Family AI',
-    template: '%s · 澄境'
+    default: 'AI Chat',
+    template: '%s · AI Chat'
   },
-  description: '私有部署的家庭 AI 对话空间，仅限授权网络访问。',
+  description: '用于日常交流、提问和讨论的私有 AI 对话平台，仅限授权网络访问。',
   robots: { index: false, follow: false, nocache: true },
   referrer: 'same-origin'
 };

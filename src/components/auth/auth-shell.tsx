@@ -32,9 +32,9 @@ export function AuthShell({
             <ShieldCheck className="h-7 w-7 text-aurora-300" />
           </div>
           <h2 className="text-[clamp(2.125rem,3.5vw,3.25rem)] font-semibold leading-[1.22] tracking-tight text-white">
-            给家人留一处
+            和 AI 对话，
             <br />
-            安心对话的空间。
+            从一个问题开始。
           </h2>
           <p className="mt-5 max-w-sm text-sm leading-7 text-white/65">
             只向授权的网络和账号开放。对话与凭证在服务器上加密保存。

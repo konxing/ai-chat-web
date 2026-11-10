@@ -17,7 +17,7 @@ export default function ErrorPage({
   return (
     <main className="flex min-h-dvh items-center justify-center bg-ink-950 px-6">
       <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/[0.03] p-8 text-center">
-        <div className="text-xs tracking-[0.35em] text-aurora-400/70">FAMILY · AI</div>
+        <div className="text-xs tracking-[0.35em] text-aurora-400/70">AI Chat</div>
         <h1 className="mt-6 text-2xl font-semibold text-white">页面暂时无法加载</h1>
         <p className="mt-3 text-sm leading-6 text-slate-400">
           可能是网络波动或服务正在更新。你的对话数据不会丢失。

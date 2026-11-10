@@ -104,7 +104,7 @@ export function LoginForm({ registrationOpen }: { registrationOpen: boolean }) {
       </div>
       <button type="submit" className="btn-primary w-full py-3" disabled={busy}>
         {busy ? <Spinner /> : <ShieldCheck className="h-4 w-4" />}
-        {busy ? '正在验证…' : '进入澄境'}
+        {busy ? '正在验证…' : '登录 AI Chat'}
       </button>
       {registrationOpen ? (
         <p className="pt-1 text-center text-[13px] text-white/35">
@@ -221,7 +221,7 @@ export function RegisterForm({ registrationOpen }: { registrationOpen: boolean }
   if (!registrationOpen) {
     return (
       <div className="space-y-4">
-        <Alert tone="warning">站点当前未开放注册。如需加入，请联系家庭管理员为你创建账号。</Alert>
+        <Alert tone="warning">站点当前未开放注册。如需加入，请联系管理员为你创建账号。</Alert>
         <Link href="/login" className="btn-ghost w-full">
           <ArrowLeft className="h-4 w-4" /> 返回登录
         </Link>
@@ -269,7 +269,7 @@ export function RegisterForm({ registrationOpen }: { registrationOpen: boolean }
           {busy ? '正在发送…' : '发送验证码'}
         </button>
         <p className="text-center text-[12px] leading-relaxed text-white/25">
-          注册前请确认你已获得家庭管理员授权。
+          注册前请确认你已获得管理员授权。
         </p>
       </form>
     );

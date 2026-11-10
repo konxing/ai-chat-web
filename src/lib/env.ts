@@ -19,7 +19,7 @@ const schema = z.object({
   TRUSTED_PROXY_CIDRS: z.string().default('127.0.0.1/32,::1/128'),
   IP_CACHE_MS: z.coerce.number().int().min(200).max(60000).default(1000),
   EMAIL_TRANSPORT: z.enum(['smtp', 'console', 'file']).default('console'),
-  EMAIL_FROM: z.string().default('Family AI <no-reply@localhost>'),
+  EMAIL_FROM: z.string().default('AI Chat <no-reply@localhost>'),
   SMTP_HOST: z.string().optional().default(''),
   SMTP_PORT: z.coerce.number().int().default(587),
   SMTP_SECURE: boolFromString.default(false),

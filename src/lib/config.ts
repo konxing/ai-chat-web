@@ -28,7 +28,7 @@ export interface SystemSettings {
 }
 
 const DEFAULTS: SystemSettings = {
-  siteName: '澄境 · Family AI',
+  siteName: 'AI Chat',
   registrationOpen: false,
   defaultProviderId: null,
   maxUploadMB: 300,
@@ -63,6 +63,10 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
 ]);
 
 function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemSettings[K] {
+  // Keep previously configured instance names working across the branding change.
+  if (key === 'siteName' && (value === '澄境 · Family AI' || value === 'Family AI Chat' || value === 'Interstellar AI')) {
+    return DEFAULTS[key];
+  }
   if (
     key === 'registrationOpen' ||
     key === 'cognitiveAiMemoryEnabled' ||

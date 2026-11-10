@@ -41,7 +41,7 @@ export function BrandWordmark({ name, compact }: { name: string; compact?: boole
           {name}
         </span>
         {!compact ? (
-          <span className="block text-[10px] uppercase tracking-[0.28em] text-white/30">Private Family AI</span>
+          <span className="block text-[10px] uppercase tracking-[0.28em] text-white/30">Private AI Chat</span>
         ) : null}
       </span>
     </span>

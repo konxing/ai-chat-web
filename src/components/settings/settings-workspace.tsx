@@ -418,7 +418,7 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
                           <BadgeCheck className="h-4 w-4 text-amber-300" /> 超级管理员
                         </>
                       ) : (
-                        '家庭成员'
+                        '用户'
                       )}
                     </div>
                   </div>

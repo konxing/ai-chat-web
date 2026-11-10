@@ -152,7 +152,7 @@ export function ModelsTab() {
         <EmptyState
           icon={<Bot className="h-5 w-5" />}
           title="尚未配置全局模型"
-          description="添加一个 OpenAI 兼容模型，或在系统配置中指定默认模型。家庭成员也可以添加自己的个人模型。"
+          description="添加一个 OpenAI 兼容模型，或在系统配置中指定默认模型。用户也可以添加自己的模型。"
           action={
             <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
               添加第一个模型

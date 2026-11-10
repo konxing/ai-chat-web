@@ -143,7 +143,7 @@ export function UsersTab() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[18px] font-semibold text-white">用户管理</h1>
-          <p className="mt-1 text-[12.5px] text-white/40">创建家庭成员、重置密码、停用或删除账号。超级管理员账号受保护。</p>
+          <p className="mt-1 text-[12.5px] text-white/40">创建账号、重置密码、停用或删除账号。超级管理员账号受保护。</p>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className="btn-ghost" onClick={() => void load()}>
@@ -173,7 +173,7 @@ export function UsersTab() {
         <EmptyState
           icon={<Users className="h-5 w-5" />}
           title={applied ? '没有匹配的用户' : '还没有其他用户'}
-          description={applied ? '尝试其他关键词。' : '可以创建一个账号，把临时密码线下告诉家人。'}
+          description={applied ? '尝试其他关键词。' : '可以创建账号，并私下将临时密码告知账号使用者。'}
           action={
             !applied ? (
               <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
@@ -439,7 +439,7 @@ function CreateUserModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="新建家庭成员账号"
+      title="新建账号"
       description="系统会生成一次性临时密码，并通过安全渠道告知对方。"
       width="520px"
     >

@@ -43,9 +43,9 @@ export function emailChannel(): 'smtp' | 'console' | 'file' {
 }
 
 function subjectFor(purpose: EmailTokenPurpose): string {
-  if (purpose === 'REGISTER') return '澄境 · 注册验证码';
-  if (purpose === 'EMAIL_CHANGE') return '澄境 · 更换邮箱验证码';
-  return '澄境 · 重置密码验证码';
+  if (purpose === 'REGISTER') return 'AI Chat · 注册验证码';
+  if (purpose === 'EMAIL_CHANGE') return 'AI Chat · 更换邮箱验证码';
+  return 'AI Chat · 重置密码验证码';
 }
 
 function textFor(purpose: EmailTokenPurpose, code: string): string {
@@ -54,7 +54,7 @@ function textFor(purpose: EmailTokenPurpose, code: string): string {
     `你正在${action}。验证码：${code}`,
     '验证码 10 分钟内有效，仅可使用一次。',
     '如果这不是你的操作，请忽略本邮件，你的账号不会发生变化。',
-    '— 家庭私人 AI 聊天'
+    '— AI Chat'
   ].join('\n');
 }
 
@@ -62,7 +62,7 @@ function htmlFor(purpose: EmailTokenPurpose, code: string): string {
   const action = purpose === 'REGISTER' ? '注册账号' : purpose === 'EMAIL_CHANGE' ? '更换邮箱' : '重置密码';
   return `<!doctype html><html lang="zh-CN"><body style="margin:0;background:#0b0e17;font-family:-apple-system,'Segoe UI','PingFang SC',sans-serif;color:#e7ecf5">
   <div style="max-width:480px;margin:0 auto;padding:40px 24px">
-    <div style="font-size:13px;letter-spacing:.3em;color:#4fe0b4;margin-bottom:24px">FAMILY · AI</div>
+    <div style="font-size:13px;letter-spacing:.3em;color:#4fe0b4;margin-bottom:24px">AI Chat</div>
     <h1 style="font-size:22px;margin:0 0 12px">${escapeHtml(action)}验证码</h1>
     <p style="color:#9aa5b8;font-size:14px;line-height:1.7">请输入以下验证码完成${escapeHtml(action)}。验证码 10 分钟内有效，仅可使用一次。</p>
     <div style="margin:24px 0;padding:18px 20px;background:#151a27;border:1px solid #2a3348;border-radius:14px;font-size:30px;letter-spacing:.35em;color:#8ff0d0;font-weight:600;text-align:center">${escapeHtml(code)}</div>

@@ -108,7 +108,7 @@ function messageTime(value: string): string {
 const SUGGESTIONS = [
   { label: '润色文字', detail: '把一段话写得更温和', prompt: '帮我把这段话写得更温和一些：', icon: Pencil },
   { label: '学个新概念', detail: '用比喻解释量子纠缠', prompt: '用简单的比喻解释一下量子纠缠', icon: Lightbulb },
-  { label: '计划晚餐', detail: '为明天设计家庭菜单', prompt: '为明天的家庭晚餐设计一份菜单', icon: Utensils },
+  { label: '计划晚餐', detail: '为明天安排晚餐', prompt: '为明天的晚餐设计一份菜单', icon: Utensils },
   { label: '阅读文档', detail: '从 PDF 里提取要点', prompt: '把这份 PDF 的要点总结成清单', icon: FileText }
 ];
 
@@ -1067,7 +1067,7 @@ export function ChatWorkspace({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[12.5px] text-white/80">{user.displayName || user.username}</span>
-              <span className="block text-[10px] text-white/30">{user.role === 'OWNER' ? '所有者' : '家庭成员'}</span>
+              <span className="block text-[10px] text-white/30">{user.role === 'OWNER' ? '所有者' : '用户'}</span>
             </span>
             <ChevronDown className={cn('h-3.5 w-3.5 text-white/30 transition', accountOpen && 'rotate-180')} />
           </button>
