@@ -121,6 +121,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     chatId,
     userId: user.id,
     currentContent: body.content,
+    enhancedPersona: body.enhancedPersona,
     attachments,
     provider
   });

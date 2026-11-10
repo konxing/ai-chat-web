@@ -92,12 +92,13 @@ async function build(userId = 'user-a') {
   return toOutboundTexts(messages);
 }
 
-async function rawBuild(userId = 'user-a') {
+async function rawBuild(userId = 'user-a', enhancedPersona?: boolean) {
   const { buildConversation } = await import('@/lib/chats');
   return buildConversation({
     chatId: 'chat-1',
     userId,
     currentContent: '帮我看下这段代码',
+    enhancedPersona,
     attachments: [],
     provider: PROVIDER
   });
@@ -117,6 +118,19 @@ beforeEach(() => {
 });
 
 describe('认知块进入对话上下文', () => {
+  it('人格化仅在本轮显式开启时添加一段表达指引', async () => {
+    const { messages: baseline } = await rawBuild();
+    const { messages: off } = await rawBuild('user-a', false);
+    const { messages: on } = await rawBuild('user-a', true);
+
+    expect(off).toEqual(baseline);
+    expect(on).toEqual([
+      baseline[0],
+      { role: 'system', content: expect.stringContaining('增强人格化') },
+      ...baseline.slice(1)
+    ]);
+  });
+
   it('开关关着时只有基础 system 和本轮用户消息', async () => {
     db.memoryEnabled = false;
     db.rows = [await memoryRow('user-a', 'mem-1', '我在用 Prisma')];
