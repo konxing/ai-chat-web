@@ -21,7 +21,6 @@ vi.mock('@/lib/cognitive/experience', () => ({
 }));
 
 const db = vi.hoisted(() => ({
-  enhancedPersona: false,
   memoryEnabled: false,
   rows: [] as Array<Record<string, unknown>>,
   wheres: [] as Array<Record<string, unknown>>,
@@ -30,10 +29,6 @@ const db = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
-    systemConfig: {
-      findUnique: ({ where }: { where: { key: string } }) =>
-        Promise.resolve(where.key === 'enhancedPersona' ? { value: db.enhancedPersona } : null)
-    },
     chat: { findFirst: () => Promise.resolve({ id: 'chat-1' }) },
     message: { findMany: () => Promise.resolve([]) },
     cognitivePreference: {
@@ -115,7 +110,6 @@ async function cited(userId = 'user-a') {
 }
 
 beforeEach(() => {
-  db.enhancedPersona = false;
   db.memoryEnabled = false;
   db.rows = [];
   db.wheres = [];
@@ -123,21 +117,6 @@ beforeEach(() => {
 });
 
 describe('认知块进入对话上下文', () => {
-  it('全站人格化开关作用于不同账号，并在关闭后的下一轮撤下指引', async () => {
-    const { messages: baseline } = await rawBuild();
-    expect(baseline).toHaveLength(2);
-    db.enhancedPersona = true;
-    const expected = [
-      baseline[0],
-      { role: 'system', content: expect.stringContaining('增强人格化') },
-      ...baseline.slice(1)
-    ];
-    expect((await rawBuild('user-a')).messages).toEqual(expected);
-    expect((await rawBuild('user-b')).messages).toEqual(expected);
-    db.enhancedPersona = false;
-    expect((await rawBuild('user-a')).messages).toEqual(baseline);
-  });
-
   it('开关关着时只有基础 system 和本轮用户消息', async () => {
     db.memoryEnabled = false;
     db.rows = [await memoryRow('user-a', 'mem-1', '我在用 Prisma')];

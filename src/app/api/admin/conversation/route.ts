@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { api, readJson, ApiError } from '@/lib/http';
 import { requireOwner, requireOwnerPassword } from '@/lib/auth';
-import { getSystemSettings, updateSystemSettings, type SystemSettings } from '@/lib/config';
+import { getSystemSettings, updateSystemSettings } from '@/lib/config';
 import {
   listPromptVersions,
   getActivePromptVersion,
@@ -21,7 +21,6 @@ export async function GET(req: Request) {
     const [versions, active] = await Promise.all([listPromptVersions(), getActivePromptVersion()]);
     return {
       enabled: settings.conversationLayerEnabled,
-      enhancedPersona: settings.enhancedPersona,
       engineVersion: settings.conversationEngineVersion,
       autoLearnStyle: settings.autoLearnStyle,
       defaultStyle: DEFAULT_CONVERSATION_STYLE,
@@ -33,7 +32,6 @@ export async function GET(req: Request) {
 
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
-  enhancedPersona: z.boolean().optional(),
   engineVersion: z.enum(['legacy', 'dialogue-v2']).optional(),
   autoLearnStyle: z.boolean().optional(),
   confirmPassword: z.string().min(1)
@@ -44,18 +42,12 @@ export async function PATCH(req: Request) {
     const { user } = await requireOwner(req);
     const body = patchSchema.parse(await readJson(req));
     await requireOwnerPassword(user.id, body.confirmPassword);
-    const patch: Partial<SystemSettings> = {};
+    const patch: { conversationLayerEnabled?: boolean; conversationEngineVersion?: 'legacy' | 'dialogue-v2'; autoLearnStyle?: boolean } = {};
     if (body.enabled !== undefined) patch.conversationLayerEnabled = body.enabled;
-    if (body.enhancedPersona !== undefined) patch.enhancedPersona = body.enhancedPersona;
     if (body.engineVersion !== undefined) patch.conversationEngineVersion = body.engineVersion;
     if (body.autoLearnStyle !== undefined) patch.autoLearnStyle = body.autoLearnStyle;
     const settings = await updateSystemSettings(patch, user.id);
-    return {
-      enabled: settings.conversationLayerEnabled,
-      enhancedPersona: settings.enhancedPersona,
-      engineVersion: settings.conversationEngineVersion,
-      autoLearnStyle: settings.autoLearnStyle
-    };
+    return { enabled: settings.conversationLayerEnabled, engineVersion: settings.conversationEngineVersion, autoLearnStyle: settings.autoLearnStyle };
   });
 }
 
