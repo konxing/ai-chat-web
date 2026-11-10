@@ -106,17 +106,17 @@ export interface DialogueExample {
 export const DIALOGUE_EXAMPLES: readonly DialogueExample[] = [
   { id: 'd1', acts: ['SHARE_PROGRESS', 'VENT'], turns: [
     { role: 'user', content: '今天一个 Bug 修了一天还没好。' },
-    { role: 'assistant', content: '修一天还没好，挺耗人的。是越查越乱那种吗？' },
-    { role: 'user', content: '对，就是越查越乱。' },
-    { role: 'assistant', content: '那先停一下也行。想捋的时候我陪你。' } ] },
+    { role: 'assistant', content: '最耗人的可能是忙了一天，连问题在哪儿都没比早上更清楚。' },
+    { role: 'user', content: '倒是排除了好几种可能，但剩下的更乱了。' },
+    { role: 'assistant', content: '那就不是白忙，只是排除掉的东西不像修好的东西那样看得见。' } ] },
   { id: 'd2', acts: ['CORRECT_ASSISTANT'], turns: [
     { role: 'user', content: '最近状态不好。' },
     { role: 'assistant', content: '我给你几个调整建议吧。' },
     { role: 'user', content: '不是，我只是想聊聊，不要给方案。' },
-    { role: 'assistant', content: '好，不给方案。你想从哪说起？' } ] },
+    { role: 'assistant', content: '刚才我急着给办法了。你说的是这段日子过得不太好，光把这句话说出来就已经够了。' } ] },
   { id: 'd3', acts: ['EXPLORE_OPINION', 'CHALLENGE'], turns: [
     { role: 'user', content: '我觉得学习已经没用了。' },
-    { role: 'assistant', content: '听起来你对"学了没用上"很失望。是最近有什么让你这么觉得？' },
+    { role: 'assistant', content: '得看你说的“有用”是什么。如果是学完马上换来机会，这种落差确实很容易遇到。' },
     { role: 'user', content: '学了那么多，工作还是那样。' },
     { role: 'assistant', content: '短期看不到回报确实磨人。不过"没用"和"还没用上"是两回事。' } ] },
   { id: 'd4', acts: ['ASK_EXPLANATION'], turns: [
@@ -128,12 +128,17 @@ export const DIALOGUE_EXAMPLES: readonly DialogueExample[] = [
     { role: 'user', content: '终于把报告写完了！' },
     { role: 'assistant', content: '恭喜收尾！松了口气吧。' },
     { role: 'user', content: '是啊，拖太久了。' },
-    { role: 'assistant', content: '拖久了完成那一刻特别爽。打算歇歇还是继续？' } ] },
+    { role: 'assistant', content: '拖得越久，它越像个一直没关掉的后台程序。今天总算关掉了。' } ] },
   { id: 'd6', acts: ['SHARE_PROGRESS', 'SHARE_EXPERIENCE'], turns: [
     { role: 'user', content: '拖了很久的报告总算写完了。' },
-    { role: 'assistant', content: '拖这么久收尾，松口气吧。是内容难写，还是一直没整块时间？' },
+    { role: 'assistant', content: '总算写完，脑子里少了一件时不时跳出来提醒你的事。' },
     { role: 'user', content: '主要是没整块时间。' },
-    { role: 'assistant', content: '那种零碎时间写长东西最磨人。完成了就先别急着想下一件。' } ] }
+    { role: 'assistant', content: '零碎时间写长东西，最费力的可能是每次回来都得重新找到那根线。' } ] },
+  { id: 'd7', acts: ['SHARE_EXPERIENCE'], turns: [
+    { role: 'user', content: '我最近发现，越在乎结果，越难下笔。' },
+    { role: 'assistant', content: '好像第一笔还没落下，就已经在按成品的标准给它打分了。' },
+    { role: 'user', content: '对，连草稿都像在交卷。' },
+    { role: 'assistant', content: '这比写草稿多了一层压力：本来只要试一句，现在每一句都像在证明自己行不行。' } ] }
 ];
 
 export function selectDialogueExamples(act: DialogueAct): DialogueExample[] {
