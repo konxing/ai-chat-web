@@ -127,7 +127,7 @@ function toCandidateMemory(memory: MemoryDto): ProfileCandidateSource {
 async function readReflectionSources(userId: string, gates: ProfileGates): Promise<ProfileReflectionSource[]> {
   if (!gates.reflectionEnabled) return [];
   const rows = await prisma.reflectionRecord.findMany({
-    where: { userId, status: { in: [...ACCEPTED_STATUSES] } },
+    where: { userId, status: { in: [...ACCEPTED_STATUSES] }, reviewedByAi: false },
     orderBy: { generatedAt: 'desc' },
     take: PROFILE_CANDIDATE_REFLECTION_MAX_ROWS,
     select: { id: true, status: true, titleCiphertext: true }

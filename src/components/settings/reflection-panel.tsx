@@ -70,6 +70,7 @@ interface ReflectionDto {
   expiresAt: string | null;
   snoozedUntil: string | null;
   decidedAt: string | null;
+  reviewedByAi: boolean;
 }
 
 interface CitationDto {
@@ -267,7 +268,7 @@ export function ReflectionPanel() {
             <h3 className="text-[13.5px] text-white/85">洞察生成节奏</h3>
             <p className="mt-1 text-[11.5px] leading-relaxed text-white/35">
               这是两次生成之间的最短间隔。达到间隔后，系统会在处理新的对话任务时检查是否有新洞察。
-              待处理的洞察由你决定是否采纳，超过 30 天会显示为已过期。
+              管理员开启自动审核后，待处理满 7 天的洞察会进入后台审核，即使你没继续聊天。超过 30 天仍未处理的洞察会显示为已过期。
             </p>
 
             <div className="mt-3">
@@ -351,6 +352,7 @@ export function ReflectionPanel() {
                                 <span className="text-[11.5px] text-white/35">
                                   {REFLECTION_CONFIDENCE_LABELS[reflection.confidenceBand]}
                                 </span>
+                                {reflection.reviewedByAi ? <span className="chip">AI 已审核</span> : null}
                                 {timeLine ? (
                                   <span className="text-[11.5px] text-white/35">{timeLine}</span>
                                 ) : null}

@@ -571,7 +571,7 @@ async function writeReflection(userId: string, now: Date, item: Prepared): Promi
       // where 带着 userId：这条 UPDATE 只能碰这个用户自己的那一行。
       await tx.reflectionRecord.updateMany({
         where: { id, userId },
-        data: { ...columns, status: 'PENDING', decidedAt: null, snoozedUntil: null }
+        data: { ...columns, status: 'PENDING', decidedAt: null, snoozedUntil: null, reviewedByAi: false }
       });
       // 老引用整批换掉：留着上一次的证据，等于让界面说出一个现在支撑不了的理由。
       await tx.reflectionCitation.deleteMany({ where: { reflectionId: id, userId } });

@@ -125,6 +125,16 @@ vi.mock('@/lib/cognitive/pending-confirmation-sweep', () => ({
   runAutoConfirmSweep: () => Promise.resolve(null)
 }));
 
+const pollReflectionAutoReview = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('@/lib/cognitive/reflection-auto-review', () => ({ pollReflectionAutoReview }));
+
+it('polls for overdue insights even when the conversation task queue is empty', async () => {
+  pollReflectionAutoReview.mockClear();
+  const { runCognitiveWorkerTick } = await worker();
+  expect(await runCognitiveWorkerTick()).toBe(0);
+  expect(pollReflectionAutoReview).toHaveBeenCalledOnce();
+});
+
 const USER = 'user-a';
 const OTHER = 'user-b';
 const BASE = new Date('2026-11-03T08:00:00.000Z');

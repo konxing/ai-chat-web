@@ -12,6 +12,7 @@ import { runMemoryConsolidation } from './memory-consolidator';
 import { runSessionSummarySweep } from './memory-session-summary';
 import { runAutoConfirmSweep } from './pending-confirmation-sweep';
 import { pollIdleDreaming } from './dreaming';
+import { pollReflectionAutoReview } from './reflection-auto-review';
 import {
   claimCognitiveTasks,
   finishCognitiveTask,
@@ -127,6 +128,7 @@ export async function runCognitiveWorkerTick(): Promise<number> {
     // Unlike message-triggered work, this poll also inspects idle conversations.
     // Per-user DB lease protects concurrent workers; failures remain nonfatal.
     await pollIdleDreaming().catch(() => log.warn('cognitive.dreaming_poll_failed', { reason: 'unavailable' }));
+    await pollReflectionAutoReview().catch(() => log.warn('cognitive.reflection_auto_review_failed', { reason: 'unavailable' }));
     return tasks.length;
   } catch {
     // 只记事件名：驱动的报错原文里会带上失败的字段值。

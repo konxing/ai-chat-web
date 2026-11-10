@@ -85,6 +85,7 @@ export interface ReflectionDto {
   expiresAt: string | null;
   snoozedUntil: string | null;
   decidedAt: string | null;
+  reviewedByAi: boolean;
 }
 
 /** 反证搜索用的关键词不进 DTO：它是正文的派生物，读侧和界面都不需要它。 */
@@ -109,7 +110,8 @@ function toDto(row: ReflectionRecord, now: Date): ReflectionDto {
     generatedAt: row.generatedAt.toISOString(),
     expiresAt: row.expiresAt?.toISOString() ?? null,
     snoozedUntil: row.snoozedUntil?.toISOString() ?? null,
-    decidedAt: row.decidedAt?.toISOString() ?? null
+    decidedAt: row.decidedAt?.toISOString() ?? null,
+    reviewedByAi: row.reviewedByAi
   };
 }
 

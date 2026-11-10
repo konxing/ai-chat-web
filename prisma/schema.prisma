@@ -934,6 +934,7 @@ model ReflectionRecord {
   expiresAt               DateTime?
   /// 用户做出动作（采纳/忽略/改/稍后）的时刻。
   decidedAt               DateTime?
+  reviewedByAi            Boolean          @default(false)
   updatedAt               DateTime         @updatedAt
 
   user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)

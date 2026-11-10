@@ -144,6 +144,7 @@ function reflectionRow(overrides: Row = {}): Row {
     userId: USER,
     type: 'PATTERN',
     status: 'ACCEPTED',
+    reviewedByAi: false,
     titleCiphertext: encryptString(title, `reflection:v1:${USER}:${id}:title`),
     generatedAt: new Date('2026-11-02T10:00:00.000Z'),
     ...overrides
@@ -285,14 +286,18 @@ describe('候选：来自哪一路、由谁把关', () => {
     });
   });
 
-  it('PENDING 和 REJECTED 的洞察不成候选：状态过滤在库里，不是在界面里', async () => {
+  it('未由用户采纳或编辑的洞察不成画像候选', async () => {
     memoryTable.seed(memoryRow({ id: 'mem-1' }));
     reflectionTable.seed(
       reflectionRow({ id: 'ref-pending', status: 'PENDING' }),
       reflectionRow({ id: 'ref-rejected', status: 'REJECTED' }),
+      reflectionRow({ id: 'ref-ai', status: 'ACCEPTED', reviewedByAi: true }),
       reflectionRow({ id: 'ref-edited', status: 'EDITED' })
     );
-    citationTable.seed({ id: 'cit-1', userId: USER, reflectionId: 'ref-edited', memoryId: 'mem-1' });
+    citationTable.seed(
+      { id: 'cit-1', userId: USER, reflectionId: 'ref-edited', memoryId: 'mem-1' },
+      { id: 'cit-ai', userId: USER, reflectionId: 'ref-ai', memoryId: 'mem-1' }
+    );
 
     const result = await (await screen()).readProfileScreen(USER, NOW, OPEN);
 
