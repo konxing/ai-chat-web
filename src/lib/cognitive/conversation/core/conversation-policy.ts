@@ -1,3 +1,5 @@
+import type { ChatPersona } from '@/lib/chat-personas';
+
 /**
  * 全局交流原则（Phase 1）。纯常量 + 渲染函数，不调模型。
  *
@@ -6,6 +8,7 @@
  */
 
 export interface ConversationStyle {
+  persona?: ChatPersona;
   /** 知识深度：复杂问题解释原理/机制/背景，简单问题不强行展开。 */
   knowledgeDepth: 'low' | 'medium' | 'high';
   /** 自然程度：连贯、自然承接，避免机械答题模板。 */

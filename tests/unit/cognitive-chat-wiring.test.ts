@@ -29,6 +29,11 @@ const db = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
+    systemConfig: {
+      findUnique: ({ where }: { where: { key: string } }) => Promise.resolve(
+        where.key === 'conversationStyle:persona-user' ? { value: { persona: 'zhiwei' } } : null
+      )
+    },
     chat: { findFirst: () => Promise.resolve({ id: 'chat-1' }) },
     message: { findMany: () => Promise.resolve([]) },
     cognitivePreference: {
@@ -91,6 +96,11 @@ async function build(userId = 'user-a') {
   const { messages } = await rawBuild(userId);
   return toOutboundTexts(messages);
 }
+
+it('adds the selected persona only to the account that chose it, even with the global layer off', async () => {
+  expect((await build('persona-user')).some(({ text }) => text.includes('女性角色知微'))).toBe(true);
+  expect((await build('other-persona-user')).some(({ text }) => text.includes('女性角色知微'))).toBe(false);
+});
 
 async function rawBuild(userId = 'user-a') {
   const { buildConversation } = await import('@/lib/chats');

@@ -9,6 +9,7 @@ import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
 import { buildConversationState, renderStateBrief, type ConversationState } from '../state/conversation-state';
 import { selectResponseAct, ACT_TEXT, type ActSelection } from '../planning/response-act';
+import type { ConversationStyle } from './conversation-policy';
 
 /**
  * 对话智能层入口。组合全局原则 + 用户风格 + 生效版本 + 模式(辅助) + 话语行为/交流状态/回应动作。
@@ -29,6 +30,7 @@ export interface ConversationIntelligence {
 
 export async function buildConversationIntelligence(input: {
   userId: string;
+  style?: ConversationStyle;
   currentContent?: string;
   recentDeep?: boolean;
   hasPersonalMemory?: boolean;
@@ -41,7 +43,7 @@ export async function buildConversationIntelligence(input: {
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
   const understanding = understandDialogue(content);
   const [style, version] = await Promise.all([
-    getConversationStyle(input.userId).catch(() => null),
+    input.style ?? getConversationStyle(input.userId).catch(() => null),
     getActivePromptVersion({ mode: mode.mode, provider: input.providerName }).catch(() => null)
   ]);
   const effectiveStyle = style ?? (await import('../core/conversation-policy')).DEFAULT_CONVERSATION_STYLE;

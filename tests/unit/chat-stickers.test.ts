@@ -5,6 +5,8 @@ describe('chat stickers', () => {
   it('shows an explicitly requested sticker even during the automatic cooldown', () => {
     expect(chooseChatSticker('给我发个表情包', [{ sticker: 'laugh' }], () => 1)).toBe('wave');
     expect(chooseChatSticker('能不能给我发一张庆祝表情包？', [], () => 1)).toBe('celebrate');
+    expect(chooseChatSticker('发个晚安表情包', [], () => 0)).toBe('night');
+    expect(chooseChatSticker('给我发个表情包', [{ sticker: 'celebrate' }], () => 0)).toBe('laugh');
   });
 
   it('samples only clearly playful or celebratory turns', () => {

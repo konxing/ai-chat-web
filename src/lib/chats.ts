@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { chooseChatSticker, isChatSticker, type ChatSticker } from './chat-stickers';
+import { CHAT_PERSONAS } from './chat-personas';
+import { getConversationStyle } from './cognitive/conversation/style/style-profile';
 import type { AiProvider, Attachment, Chat, Message, Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { decryptString, encryptString } from './crypto';
@@ -456,10 +458,15 @@ export async function buildConversation(input: {
   // 对话智能层（Phase 1）：全局交流原则 + 用户风格 + 生效提示词版本。
   // 默认关（保住现有聊天契约）；打开后才注入，排在 base system 之后、认知块之前。
   // 读失败回落默认，不阻断对话。默认不增加模型调用。
+  const [layerEnabled, style] = await Promise.all([
+    conversationLayerEnabled().catch(() => false),
+    getConversationStyle(input.userId).catch(() => undefined)
+  ]);
   try {
-    if (await conversationLayerEnabled()) {
+    if (layerEnabled) {
       const intelligence = await buildConversationIntelligence({
         userId: input.userId,
+        style,
         currentContent: input.currentContent,
         providerName: input.provider.name,
         engineVersion: await conversationEngineVersionFor(input.userId),
@@ -473,6 +480,12 @@ export async function buildConversation(input: {
     }
   } catch {
     /* 对话智能层是增益，坏了不影响原有聊天 */
+  }
+  if (style?.persona && style.persona !== 'default') {
+    messages.push({
+      role: 'system',
+      content: `${CHAT_PERSONAS[style.persona].instruction} 这只定义表达方式，优先遵循用户当轮明确的表达要求，不虚构身份经历或对方的感受。`
+    });
   }
 
   const cognitive = await runCognitiveReads({

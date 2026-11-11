@@ -1,6 +1,7 @@
 import { getRawSystemSetting } from '@/lib/config';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
+import { CHAT_PERSONA_IDS } from '@/lib/chat-personas';
 import { DEFAULT_CONVERSATION_STYLE, type ConversationStyle } from '../core/conversation-policy';
 
 /**
@@ -15,7 +16,8 @@ export function styleSettingKey(userId: string): string {
   return `conversationStyle:${userId}`;
 }
 
-const ENUMS: Record<keyof ConversationStyle, readonly string[]> = {
+const ENUMS: Record<keyof Required<ConversationStyle>, readonly string[]> = {
+  persona: CHAT_PERSONA_IDS,
   knowledgeDepth: ['low', 'medium', 'high'],
   naturalness: ['low', 'medium', 'high'],
   structure: ['minimal', 'dynamic', 'rich'],

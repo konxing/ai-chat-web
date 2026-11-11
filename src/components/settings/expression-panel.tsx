@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, errorMessage } from '@/lib/client-api';
+import { CHAT_PERSONA_IDS, CHAT_PERSONAS, type ChatPersona } from '@/lib/chat-personas';
 import { useToast, LoadingBlock } from '@/components/ui';
 
 interface Style {
+  persona?: ChatPersona;
   knowledgeDepth: string;
   naturalness: string;
   structure: string;
@@ -90,6 +92,24 @@ export function ExpressionPanel() {
         <button type="button" className="btn-ghost" disabled={busy} onClick={() => void reset()}>恢复默认</button>
       </div>
       <div className="mt-4 space-y-4">
+        <div>
+          <div className="label">聊天人格</div>
+          <div className="mt-1 grid gap-2 sm:grid-cols-2">
+            {CHAT_PERSONA_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                disabled={busy}
+                aria-pressed={(style.persona ?? 'default') === id}
+                onClick={() => void set('persona', id)}
+                className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left hover:bg-white/[0.08] aria-pressed:border-emerald-400/60 aria-pressed:bg-emerald-400/15"
+              >
+                <span className="block text-sm font-medium text-white">{CHAT_PERSONAS[id].name}</span>
+                <span className="mt-1 block text-xs text-white/65">{CHAT_PERSONAS[id].description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         {OPTIONS.map((opt) => (
           <div key={opt.key}>
             <div className="label">{opt.label}</div>

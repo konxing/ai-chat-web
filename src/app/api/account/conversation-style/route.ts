@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CHAT_PERSONA_IDS } from '@/lib/chat-personas';
 import { api, readJson } from '@/lib/http';
 import { requireUser } from '@/lib/auth';
 import { getConversationStyle, setConversationStyle, getConversationStyleMeta, resetConversationStyle } from '@/lib/cognitive/conversation/style/style-profile';
@@ -7,6 +8,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const styleSchema = z.object({
+  persona: z.enum(CHAT_PERSONA_IDS).optional(),
   knowledgeDepth: z.enum(['low', 'medium', 'high']).optional(),
   naturalness: z.enum(['low', 'medium', 'high']).optional(),
   structure: z.enum(['minimal', 'dynamic', 'rich']).optional(),

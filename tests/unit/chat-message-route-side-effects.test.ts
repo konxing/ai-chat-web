@@ -485,7 +485,7 @@ describe('本轮失败时的落库与审计', () => {
 });
 
 it('persists an explicitly requested sticker and returns it with the completed assistant message', async () => {
-  const { text } = await post(undefined, '给我发个表情包');
+  const { text } = await post(undefined, '给我发个打招呼表情包');
   expect(text).toContain('"sticker":"wave"');
   expect(assistantRows()[0]).toMatchObject({ sticker: 'wave', status: 'COMPLETE' });
 });
