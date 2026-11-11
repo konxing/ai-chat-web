@@ -8,9 +8,9 @@ import type { MemoryContext } from '@/lib/cognitive/policy';
 import { cn } from '@/lib/cn';
 
 /**
- * 记忆星图（3D）。手写 Canvas 投影，不引图形库：单 rAF 循环、像素比封顶、
+ * 记忆星图（3D）。手写 Canvas 投影，不引图形库：单 rAF 循环、阻尼轨道、像素比封顶、
  * 深度排序 + 雾衰减 + 加色光晕 + 漂移星尘 + 星云背景。
- * 交互只保留两件事：点击星点聚焦、自动旋转开关；其余参数一律默认。
+ * 交互：鼠标拖拽旋转、滚轮/双指缩放、点击星点聚焦；自动旋转可开关；其余观感参数固定默认。
  * 坐标只用于把点铺开并按主题聚簇，不表示任何真实距离。
  */
 
@@ -40,7 +40,7 @@ export const STAR_EDGE_DASHES: Record<GraphEdgeKind, number[]> = {
   coCitation: [2, 5]
 };
 
-/** 固定默认观感（不再提供实时调节）。 */
+/** 固定默认观感（不提供实时调节滑杆）。 */
 const RENDER = {
   rotateSpeed: 0.35,
   nodeScale: 1,
@@ -150,7 +150,8 @@ export function MemoryStarfield({
   const maxWeightRef = useRef(maxWeight);
   maxWeightRef.current = maxWeight;
 
-  const viewRef = useRef({ yaw: 0.6, pitch: 0.28, dist: 430 });
+  // 阻尼轨道：target 由输入驱动，当前值每帧逼近，拖拽全程保持满画质。
+  const viewRef = useRef({ yaw: 0.6, pitch: 0.28, dist: 430, tYaw: 0.6, tPitch: 0.28, tDist: 430 });
   const hoverRef = useRef<string | null>(null);
 
   const exportPng = useCallback(() => {
@@ -225,21 +226,82 @@ export function MemoryStarfield({
       return best;
     };
 
-    // 只保留点击聚焦与悬停高亮；不做拖拽/缩放。
-    const onClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const id = pick(e.clientX - rect.left, e.clientY - rect.top);
-      onSelectRef.current(id && id === selectedRef.current ? null : id);
+    // 拖拽旋转 / 双指缩放 / 点击聚焦（用位移阈值区分点击与拖拽）。
+    const pointers = new Map<number, { x: number; y: number }>();
+    let dragging = false;
+    let moved = 0;
+    let pinchDist = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      canvas.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) { dragging = true; moved = 0; canvas.style.cursor = 'grabbing'; }
+      if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      }
     };
-    const onMove = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
       const rect = canvas.getBoundingClientRect();
-      hoverRef.current = pick(e.clientX - rect.left, e.clientY - rect.top);
-      canvas.style.cursor = hoverRef.current ? 'pointer' : 'default';
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      if (!pointers.has(e.pointerId)) {
+        hoverRef.current = pick(mx, my);
+        canvas.style.cursor = hoverRef.current ? 'pointer' : 'grab';
+        return;
+      }
+      const prev = pointers.get(e.pointerId)!;
+      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const v = viewRef.current;
+      if (pointers.size === 1) {
+        moved += Math.abs(dx) + Math.abs(dy);
+        v.tYaw += dx * 0.005;
+        v.tPitch = clamp(v.tPitch + dy * 0.005, -1.35, 1.35);
+      } else if (pointers.size === 2) {
+        const pts = [...pointers.values()];
+        const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchDist > 0) v.tDist = clamp(v.tDist * (pinchDist / Math.max(1, d)), 220, 900);
+        pinchDist = d;
+        moved += 10;
+      }
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size === 0) {
+        dragging = false;
+        canvas.style.cursor = 'grab';
+        if (moved < 5) {
+          const rect = canvas.getBoundingClientRect();
+          const id = pick(e.clientX - rect.left, e.clientY - rect.top);
+          onSelectRef.current(id && id === selectedRef.current ? null : id);
+        }
+      }
+      pinchDist = 0;
+    };
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = viewRef.current;
+      v.tDist = clamp(v.tDist * Math.exp(e.deltaY * 0.001), 220, 900);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const v = viewRef.current;
+      if (e.key === 'ArrowLeft') v.tYaw -= 0.15;
+      else if (e.key === 'ArrowRight') v.tYaw += 0.15;
+      else if (e.key === 'ArrowUp') v.tPitch = clamp(v.tPitch - 0.12, -1.35, 1.35);
+      else if (e.key === 'ArrowDown') v.tPitch = clamp(v.tPitch + 0.12, -1.35, 1.35);
+      else if (e.key === '+' || e.key === '=') v.tDist = clamp(v.tDist * 0.9, 220, 900);
+      else if (e.key === '-') v.tDist = clamp(v.tDist * 1.1, 220, 900);
+      else return;
+      e.preventDefault();
     };
     const onLeave = () => { hoverRef.current = null; };
-    canvas.addEventListener('click', onClick);
-    canvas.addEventListener('mousemove', onMove);
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('keydown', onKey);
     canvas.addEventListener('mouseleave', onLeave);
+    canvas.style.cursor = 'grab';
 
     let raf = 0;
     let last = performance.now();
@@ -248,7 +310,10 @@ export function MemoryStarfield({
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const v = viewRef.current;
-      if (autoRotateRef.current && !reduced) v.yaw += RENDER.rotateSpeed * dt * 0.6;
+      if (autoRotateRef.current && !dragging && !reduced) v.tYaw += RENDER.rotateSpeed * dt * 0.6;
+      v.yaw += (v.tYaw - v.yaw) * 0.12;
+      v.pitch += (v.tPitch - v.pitch) * 0.12;
+      v.dist += (v.tDist - v.dist) * 0.12;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
@@ -383,8 +448,12 @@ export function MemoryStarfield({
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      canvas.removeEventListener('click', onClick);
-      canvas.removeEventListener('mousemove', onMove);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('keydown', onKey);
       canvas.removeEventListener('mouseleave', onLeave);
     };
   }, []);
@@ -419,12 +488,13 @@ export function MemoryStarfield({
       >
         <canvas
           ref={canvasRef}
+          tabIndex={0}
           role="img"
-          aria-label="记忆 3D 星图：点击星点聚焦；自动旋转可开关"
-          className="block h-full w-full touch-none outline-none"
+          aria-label="记忆 3D 星图：拖拽旋转、滚轮缩放、点击聚焦；方向键旋转、加减号缩放；自动旋转可开关"
+          className="block h-full w-full touch-none outline-none focus-visible:ring-2 focus-visible:ring-aurora-400/50"
         />
         <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-white/10 bg-black/35 px-2.5 py-1 text-[11px] text-white/60 backdrop-blur">
-          点击星点聚焦
+          拖拽旋转 · 滚轮缩放 · 点击聚焦
         </div>
       </div>
     </div>
