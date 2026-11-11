@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chooseChatSticker, isChatSticker, type ChatSticker } from './chat-stickers';
+import { isChatSticker, type ChatSticker } from './chat-stickers';
+import { stickerReplyPrompt } from './sticker-reply';
 import { CHAT_PERSONAS } from './chat-personas';
 import { getConversationStyle } from './cognitive/conversation/style/style-profile';
 import type { AiProvider, Attachment, Chat, Message, Prisma } from '@prisma/client';
@@ -393,7 +394,7 @@ export interface ConversationContext {
   messages: AiMessage[];
   citedMemoryIds: string[];
   cognitiveFailed: CognitiveModuleKey[];
-  sticker?: ChatSticker;
+  stickerInCooldown: boolean;
 }
 
 export async function buildConversation(input: {
@@ -419,10 +420,9 @@ export async function buildConversation(input: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: CONTEXT_MESSAGE_LIMIT
   });
+  const stickerInCooldown = historical.filter((message) => message.role === 'ASSISTANT')
+    .slice(0, 12).some((message) => isChatSticker(message.sticker));
   const trimmed = historical.reverse();
-  const sticker = input.attachments.length === 0
-    ? chooseChatSticker(input.currentContent, trimmed.filter((message) => message.role === 'ASSISTANT').reverse())
-    : undefined;
   const messages: AiMessage[] = [
     {
       role: 'system',
@@ -432,7 +432,7 @@ export async function buildConversation(input: {
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
         '不要声称自己看到了未提供的图片或文件。' +
         '用户纠正你时，用新信息继续回答。闲聊时从对方确实提到的细节接话，别补写没说过的经过。' +
-        (sticker ? '这轮界面会附上一张表情包。照常回答即可，无需描述图片或输出链接。' : '')
+        '\n\n' + stickerReplyPrompt(stickerInCooldown)
     }
   ];
 
@@ -542,7 +542,7 @@ export async function buildConversation(input: {
   }
   // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
   // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
-  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, ...(sticker ? { sticker } : {}) };
+  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {

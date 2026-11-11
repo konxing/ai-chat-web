@@ -22,6 +22,7 @@ import { prisma } from '@/lib/prisma';
 import { getAttachmentsForUser, imageSendSummary, publicAttachment } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
+import { StickerReply } from '@/lib/sticker-reply';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
 import { recordMemoryAccess } from '@/lib/cognitive/access';
@@ -117,7 +118,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       modelId: provider.modelId
     });
   }
-  const { messages, citedMemoryIds, cognitiveFailed, sticker } = await buildConversation({
+  const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown } = await buildConversation({
     chatId,
     userId: user.id,
     currentContent: body.content,
@@ -140,6 +141,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let content = '';
+      const stickerReply = new StickerReply(stickerInCooldown);
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
       // 审计问的是「这一轮发生过什么」，不是「模型有没有自己说 done」：
@@ -162,6 +164,11 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           /* 已关闭或已取消 */
         }
       };
+      const sendText = (text: string) => {
+        if (!text) return;
+        content += text;
+        send({ type: 'delta', text });
+      };
 
       try {
         for await (const event of streamChatCompletion({
@@ -169,8 +176,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           messages
         })) {
           if (event.type === 'delta' && event.text) {
-            content += event.text;
-            send({ type: 'delta', text: event.text });
+            sendText(stickerReply.push(event.text));
           } else if (event.type === 'usage') {
             inputTokens = event.inputTokens ?? inputTokens;
             outputTokens = event.outputTokens ?? outputTokens;
@@ -180,13 +186,15 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           }
         }
 
+        const { text, sticker } = stickerReply.finish();
+        sendText(text);
         const saved = await saveAssistantMessage({
           chatId,
-          content: content || '（模型没有返回文本）',
+          content: content.trim() ? content : sticker ? '' : '（模型没有返回文本）',
           providerId: provider.id,
           modelId: provider.modelId,
           status: 'COMPLETE',
-          sticker: content.trim() ? sticker : undefined,
+          sticker,
           inputTokens,
           outputTokens
         });
@@ -231,6 +239,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           void learnConversationPreference(user.id, content).catch(() => undefined);
         }
       } catch (err) {
+        sendText(stickerReply.finish().text);
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';
         const code = err instanceof ApiError ? err.code : 'AI_ERROR';
         log.warn('chat.stream_failed', {

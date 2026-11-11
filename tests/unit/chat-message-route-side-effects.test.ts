@@ -44,6 +44,7 @@ const ctx = vi.hoisted(() => ({
   holdTask: false,
   releaseTask: null as null | (() => void),
   modelCalls: 0,
+  replyChunks: ['正常回答'],
   abortRequest: null as null | (() => void),
   sawAbortedSignal: null as null | boolean
 }));
@@ -278,7 +279,7 @@ vi.mock('@/lib/ai', async () => {
       // 模型收到的 signal 必须是「没被中止」（路由压根没传）：这正是「切走也继续」的证据。
       ctx.sawAbortedSignal = signal ? signal.aborted : false;
     }
-    yield { type: 'delta', text: '正常回答' };
+    for (const text of ctx.replyChunks) yield { type: 'delta', text };
     yield { type: 'usage', inputTokens: 11, outputTokens: 7 };
     yield { type: 'done' };
   }
@@ -330,6 +331,7 @@ beforeEach(() => {
   ctx.holdTask = false;
   ctx.releaseTask = null;
   ctx.modelCalls = 0;
+  ctx.replyChunks = ['正常回答'];
   ctx.abortRequest = null;
   ctx.sawAbortedSignal = null;
   resetCognitiveTables();
@@ -485,18 +487,21 @@ describe('本轮失败时的落库与审计', () => {
 });
 
 it('persists an explicitly requested sticker and returns it with the completed assistant message', async () => {
-  const { text } = await post(undefined, '给我发个打招呼表情包');
+  ctx.replyChunks = ['来一张。\n[[ST', 'ICKER:requested:', 'wave]]'];
+  const { text } = await post(undefined, '我想看看你能不能发个表情包出来看看。');
   expect(text).toContain('"sticker":"wave"');
+  expect(text).not.toContain('[[ST');
   expect(assistantRows()[0]).toMatchObject({ sticker: 'wave', status: 'COMPLETE' });
 });
 
-it('attaches a sticker and preserves the full message for a request embedded in conversation', async () => {
-  const content = '跟我聊天感觉怎么样？不发个表情包给我吗？';
+it('attaches the model’s chosen sticker even when the user never asks for one', async () => {
+  ctx.replyChunks = ['这下真可以开香槟了。\n[[STICKER:auto:celebrate6]]'];
+  const content = '熬了好几个周末，原来大家都以为做不成的项目今天终于上线了。';
   const { text } = await post(undefined, content);
-  expect(text).toMatch(/"sticker":"[a-z0-9]+"/i);
-  expect(assistantRows()[0]?.sticker).toBeTruthy();
+  expect(text).toContain('"sticker":"celebrate6"');
+  expect(assistantRows()[0]?.sticker).toBe('celebrate6');
   expect(ctx.outbound[0]).toContainEqual({ role: 'user', content: [{ type: 'text', text: content }] });
-  expect(ctx.outbound[0]?.some((message) => typeof message.content === 'string' && message.content.includes('这轮界面会附上一张表情包'))).toBe(true);
+  expect(ctx.outbound[0]?.some((message) => typeof message.content === 'string' && message.content.includes('AI Chat 可以随回复发送本地表情包'))).toBe(true);
 });
 
 /**
