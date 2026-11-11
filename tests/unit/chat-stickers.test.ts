@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { chooseChatSticker, STICKER_COOLDOWN_REPLIES } from '@/lib/chat-stickers';
+import { existsSync } from 'node:fs';
+import { CHAT_STICKERS, chooseChatSticker, STICKER_COOLDOWN_REPLIES } from '@/lib/chat-stickers';
 
 describe('chat stickers', () => {
+  it('can request every catalog entry by name and each has a local image', () => {
+    expect(Object.keys(CHAT_STICKERS)).toHaveLength(60);
+    for (const [id, sticker] of Object.entries(CHAT_STICKERS)) {
+      expect(chooseChatSticker(`发一张「${sticker.alt}」表情包`, [])).toBe(id);
+      expect(existsSync(`public${sticker.src}`)).toBe(true);
+    }
+  });
   it('shows an explicitly requested sticker even during the automatic cooldown', () => {
     expect(chooseChatSticker('给我发个表情包', [{ sticker: 'laugh' }], () => 1)).toBe('wave');
     expect(chooseChatSticker('能不能给我发一张庆祝表情包？', [], () => 1)).toBe('celebrate');
@@ -12,6 +20,7 @@ describe('chat stickers', () => {
   it('samples only clearly playful or celebratory turns', () => {
     expect(chooseChatSticker('哈哈哈哈！', [], () => 0)).toBe('laugh');
     expect(chooseChatSticker('终于修好了！', [], () => 0)).toBe('celebrate');
+    expect(chooseChatSticker('终于修好了！', [], () => 0.08)).toBe('celebrate12');
     expect(chooseChatSticker('终于修好了！', [], () => 1 / 12)).toBeUndefined();
     expect(chooseChatSticker('哈哈，但我真的很难过', [], () => 0)).toBeUndefined();
     expect(chooseChatSticker('不要发表情包', [], () => 0)).toBeUndefined();
