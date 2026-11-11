@@ -79,6 +79,8 @@ const AUTOMATIC_STICKERS = {
   night: ['night', 'night1', 'night2', 'night3', 'night4', 'night6']
 } as const;
 
+const STICKER_REQUEST = /^(?:请|能不能|可不可以|可以|麻烦|顺便|再)?\s*(?:你)?(?:给我)?\s*(?:发|来)(?:我)?(?:一?个|一张|点)?[「“]?([^\r\n「」“”]{0,12}?)[」”]?(?:的)?(?:表情包|贴纸)(?:给我)?[吧呀吗嘛呢！!。？?\s]*$/u;
+
 /** Sample only after the message fits a light, clearly positive context. */
 export function chooseChatSticker(
   message: string,
@@ -86,10 +88,19 @@ export function chooseChatSticker(
   random: () => number = Math.random
 ): ChatSticker | undefined {
   const text = message.trim();
-  if (/(?:不要|别|禁止|不用|无需).{0,8}(?:表情包|贴纸)|\b(?:no|don['’]t send)\s+(?:stickers?|memes?)\b/i.test(text)) return;
-  const request = /^(?:请|能不能|可以|麻烦)?\s*(?:你)?(?:给我)?\s*(?:发|来)(?:我)?(?:一?个|一张|点)?[「“]?([^\r\n「」“”]{0,12}?)[」”]?(?:的)?(?:表情包|贴纸)[吧呀吗！!。？?\s]*$/u.exec(text);
-  if (request?.[1]?.trim()) return STICKER_BY_NAME.get(request[1].trim());
-  if (request) {
+  if (/(?:不要|别|禁止|不用|无需)[^，,。！？!?；;\n]{0,8}(?:表情包|贴纸)|\b(?:no|don['’]t send)\s+(?:stickers?|memes?)\b/i.test(text)) return;
+  for (const part of text.split(/(?<=[。！？!?，,；;\n])\s*/u)) {
+    const clause = part.trim().replace(/[,，；;]$/u, '');
+    // “不发个表情包给我吗？” is a request. A plain “不发表情包” is not.
+    const request = STICKER_REQUEST.exec(clause)
+      ?? (/^不(?:给我)?发.+(?:吗|嘛)[？?]?$/u.test(clause) ? STICKER_REQUEST.exec(clause.slice(1)) : null);
+    if (!request) continue;
+    const name = request[1]?.trim();
+    if (name) {
+      const named = STICKER_BY_NAME.get(name);
+      if (named) return named;
+      continue;
+    }
     const choices = STICKER_IDS.filter((id) => id !== recentReplies.find(({ sticker }) => isChatSticker(sticker))?.sticker);
     return choices[Math.floor(random() * choices.length)] ?? 'wave';
   }

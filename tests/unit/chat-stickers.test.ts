@@ -26,6 +26,15 @@ describe('chat stickers', () => {
     expect(chooseChatSticker('不要发表情包', [], () => 0)).toBeUndefined();
   });
 
+  it('recognizes conversational requests without mistaking a plain negation for one', () => {
+    const recent = [{ sticker: 'laugh' }];
+    expect(chooseChatSticker('跟我聊天感觉怎么样？不发个表情包给我吗？', recent, () => 0)).toBe('celebrate');
+    expect(chooseChatSticker('今天终于收尾了，顺便发个撒花表情包给我吧。', recent, () => 0)).toBe('celebrate3');
+    expect(chooseChatSticker('今天不发表情包。', [], () => 0)).toBeUndefined();
+    expect(chooseChatSticker('不发个表情包。', [], () => 0)).toBeUndefined();
+    expect(chooseChatSticker('表情包是怎么做出来的？', [], () => 0)).toBeUndefined();
+  });
+
   it('suppresses automatic stickers until enough text replies have intervened', () => {
     const textReplies = Array.from({ length: STICKER_COOLDOWN_REPLIES }, () => ({ sticker: null }));
     const sticker = { sticker: 'wave' };

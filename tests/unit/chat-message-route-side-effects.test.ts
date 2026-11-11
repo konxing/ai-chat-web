@@ -490,6 +490,15 @@ it('persists an explicitly requested sticker and returns it with the completed a
   expect(assistantRows()[0]).toMatchObject({ sticker: 'wave', status: 'COMPLETE' });
 });
 
+it('attaches a sticker and preserves the full message for a request embedded in conversation', async () => {
+  const content = '跟我聊天感觉怎么样？不发个表情包给我吗？';
+  const { text } = await post(undefined, content);
+  expect(text).toMatch(/"sticker":"[a-z0-9]+"/i);
+  expect(assistantRows()[0]?.sticker).toBeTruthy();
+  expect(ctx.outbound[0]).toContainEqual({ role: 'user', content: [{ type: 'text', text: content }] });
+  expect(ctx.outbound[0]?.some((message) => typeof message.content === 'string' && message.content.includes('这轮界面会附上一张表情包'))).toBe(true);
+});
+
 /**
  * 门槛 10 那条端到端：模块关掉以后，发给模型的上下文里到底有没有认知内容。
  *
