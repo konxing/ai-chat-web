@@ -51,6 +51,7 @@ import {
 import type { MemoryDto } from '@/lib/cognitive/memories';
 import type { ConfidenceBand } from '@/lib/cognitive/confidence';
 import { cn } from '@/lib/cn';
+import { CHAT_STICKERS } from '@/lib/chat-stickers';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
 import { Modal, Spinner } from '@/components/ui';
@@ -1576,6 +1577,17 @@ const MessageBubble = memo(function MessageBubble({
           </button>
         </div>
         <Markdown>{message.content}</Markdown>
+        {message.sticker ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className="mt-2 h-24 w-24 object-contain"
+            src={CHAT_STICKERS[message.sticker].src}
+            alt={CHAT_STICKERS[message.sticker].alt}
+            width={96}
+            height={96}
+            loading="lazy"
+          />
+        ) : null}
         {citationIds?.length ? <CitationNote ids={citationIds} getSource={getCitationSource} /> : null}
         {(message.inputTokens || message.outputTokens) && (
           <div className="mt-2 text-[10px] text-white/15">

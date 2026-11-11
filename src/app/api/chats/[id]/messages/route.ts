@@ -117,7 +117,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       modelId: provider.modelId
     });
   }
-  const { messages, citedMemoryIds, cognitiveFailed } = await buildConversation({
+  const { messages, citedMemoryIds, cognitiveFailed, sticker } = await buildConversation({
     chatId,
     userId: user.id,
     currentContent: body.content,
@@ -186,6 +186,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           providerId: provider.id,
           modelId: provider.modelId,
           status: 'COMPLETE',
+          sticker: content.trim() ? sticker : undefined,
           inputTokens,
           outputTokens
         });

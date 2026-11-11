@@ -484,6 +484,12 @@ describe('本轮失败时的落库与审计', () => {
   });
 });
 
+it('persists an explicitly requested sticker and returns it with the completed assistant message', async () => {
+  const { text } = await post(undefined, '给我发个表情包');
+  expect(text).toContain('"sticker":"wave"');
+  expect(assistantRows()[0]).toMatchObject({ sticker: 'wave', status: 'COMPLETE' });
+});
+
 /**
  * 门槛 10 那条端到端：模块关掉以后，发给模型的上下文里到底有没有认知内容。
  *

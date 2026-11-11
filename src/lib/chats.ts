@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { chooseChatSticker, isChatSticker, type ChatSticker } from './chat-stickers';
 import type { AiProvider, Attachment, Chat, Message, Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { decryptString, encryptString } from './crypto';
@@ -88,6 +89,7 @@ export function publicMessage(
     status: message.status,
     inputTokens: message.inputTokens,
     outputTokens: message.outputTokens,
+    ...(message.role === 'ASSISTANT' && isChatSticker(message.sticker) ? { sticker: message.sticker } : {}),
     attachments: (message.attachments || []).map(publicAttachment),
     createdAt: message.createdAt.toISOString()
   };
@@ -358,6 +360,7 @@ export async function saveAssistantMessage(input: {
   inputTokens?: number;
   outputTokens?: number;
   errorCode?: string;
+  sticker?: ChatSticker;
 }): Promise<Message> {
   const id = randomUUID();
   return prisma.message.create({
@@ -371,7 +374,8 @@ export async function saveAssistantMessage(input: {
       status: input.status,
       errorCode: input.errorCode?.slice(0, 64) ?? null,
       inputTokens: input.inputTokens ?? null,
-      outputTokens: input.outputTokens ?? null
+      outputTokens: input.outputTokens ?? null,
+      ...(input.status === 'COMPLETE' && input.sticker ? { sticker: input.sticker } : {})
     }
   });
 }
@@ -387,6 +391,7 @@ export interface ConversationContext {
   messages: AiMessage[];
   citedMemoryIds: string[];
   cognitiveFailed: CognitiveModuleKey[];
+  sticker?: ChatSticker;
 }
 
 export async function buildConversation(input: {
@@ -413,6 +418,9 @@ export async function buildConversation(input: {
     take: CONTEXT_MESSAGE_LIMIT
   });
   const trimmed = historical.reverse();
+  const sticker = input.attachments.length === 0
+    ? chooseChatSticker(input.currentContent, trimmed.filter((message) => message.role === 'ASSISTANT').reverse())
+    : undefined;
   const messages: AiMessage[] = [
     {
       role: 'system',
@@ -420,7 +428,9 @@ export async function buildConversation(input: {
         '你是一位可靠、温和的家庭 AI 助手。请使用用户当前使用的语言回答。' +
         '回答应准确、结构清晰；代码使用 Markdown 代码块；数学公式使用 LaTeX。' +
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
-        '不要声称自己看到了未提供的图片或文件。'
+        '不要声称自己看到了未提供的图片或文件。' +
+        '用户纠正你时，用新信息继续回答。闲聊时从对方确实提到的细节接话，别补写没说过的经过。' +
+        (sticker ? '这轮界面会附上一张表情包。照常回答即可，无需描述图片或输出链接。' : '')
     }
   ];
 
@@ -519,7 +529,7 @@ export async function buildConversation(input: {
   }
   // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
   // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
-  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed };
+  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, ...(sticker ? { sticker } : {}) };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {

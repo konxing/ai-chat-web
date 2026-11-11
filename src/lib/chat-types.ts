@@ -27,6 +27,7 @@ export interface ChatMessageDto {
   status: string;
   inputTokens: number | null;
   outputTokens: number | null;
+  sticker?: import('./chat-stickers').ChatSticker;
   attachments: AttachmentDto[];
   createdAt: string;
 }
