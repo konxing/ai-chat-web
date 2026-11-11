@@ -18,6 +18,7 @@ import {
 } from '@/lib/cognitive/memory-graph-display';
 import { CONTEXT_LABELS, TYPE_LABELS } from '@/lib/cognitive/memory-display';
 import type { GraphEdgeKind, MemoryGraph } from '@/lib/cognitive/memory-graph';
+import { MemoryStarfield, STAR_EDGE_COLORS, STAR_EDGE_DASHES } from './memory-starfield';
 
 /**
  * 记忆网络那一屏（任务书 8.2 的界面）。
@@ -47,25 +48,6 @@ import type { GraphEdgeKind, MemoryGraph } from '@/lib/cognitive/memory-graph';
 
 const GRAPH_URL = '/api/account/cognitive/graph';
 const PREFERENCES_URL = '/api/account/cognitive';
-
-/** 多圈布局为高密度节点留出间距。 */
-const CANVAS = 600;
-const CENTER = CANVAS / 2;
-const RINGS = [8, 16, 24, 32, 40];
-
-/** 四种线各自的画法。名字在 `GRAPH_EDGE_LABELS`，这里只给样子，图例和线共用同一个 kind。 */
-const EDGE_STROKES: Record<GraphEdgeKind, string> = {
-  relation: '#a78bfa',
-  update: '#e6edf6',
-  sameChat: '#8fa3c0',
-  coCitation: '#6b7f9c'
-};
-const EDGE_DASHES: Record<GraphEdgeKind, string> = {
-  relation: '1 3',
-  update: '0',
-  sameChat: '5 4',
-  coCitation: '2 4'
-};
 
 type GraphPayload = MemoryGraph & { chats: Record<string, string> };
 
@@ -131,28 +113,11 @@ export function MemoryGraphPanel() {
   const focus = useMemo(() => graph && selectedId ? memoryNeighborhood(graph, selectedId) : null, [graph, selectedId]);
   const weights = useMemo(() => graph ? graphNodeWeights(graph) : new Map<string, number>(), [graph]);
   const maxWeight = Math.max(1, ...weights.values());
-  const positions = useMemo(() => {
-    const nodes = focus ? [focus.selected, ...focus.neighbors.map(({ node }) => node)] : graph?.nodes ?? [];
-    const [center, ...outer] = nodes;
-    const points = new Map<string, { node: (typeof nodes)[number]; x: number; y: number }>();
-    if (center) points.set(center.id, { node: center, x: CENTER, y: CENTER });
-    let ringCount = 0;
-    let slots = 0;
-    while (slots < outer.length && ringCount < RINGS.length) slots += RINGS[ringCount++]!;
-    let offset = 0;
-    for (const [ring, capacity] of RINGS.slice(0, ringCount).entries()) {
-      const members = outer.slice(offset, offset + capacity);
-      const radius = (ring + 1) * (ringCount === 1 ? 164 : 225 / ringCount);
-      members.forEach((node, index) => {
-        const angle = Math.PI * (2 * (index + ring * 0.3) / members.length - 0.5);
-        points.set(node.id, { node, x: CENTER + radius * Math.cos(angle), y: CENTER + radius * Math.sin(angle) });
-      });
-      offset += capacity;
-    }
-    return points;
-  }, [graph, focus]);
-
   const selected = focus?.selected ?? null;
+  const viewNodes = useMemo(
+    () => (focus ? [focus.selected, ...focus.neighbors.map(({ node }) => node)] : graph?.nodes ?? []),
+    [graph, focus]
+  );
   const shownEdges = focus ? focus.neighbors.map(({ edge }) => edge) : graph?.edges ?? [];
   const drawable = graph !== null && isGraphDrawable(graph);
   /** 闸门句只在画得出图时摆：画不出来时那句「还不是一张图」已经把同一个条数说过了，两句同时出现就是重复。 */
@@ -235,80 +200,24 @@ export function MemoryGraphPanel() {
               <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(220px,1fr)]">
                 <div className="min-w-0 overflow-hidden rounded-2xl border border-slate-700/70 bg-[#0b1420]">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700/70 px-4 py-3 text-xs text-slate-300">
-                    <span className="font-medium text-slate-100">{focus ? '直接关系' : '网络总览'}</span>
-                    <span>{positions.size} 条记忆 · {shownEdges.length} 条关系</span>
+                    <span className="font-medium text-slate-100">{focus ? '直接关系' : '网络总览'} · 3D 星图</span>
+                    <span>{viewNodes.length} 条记忆 · {shownEdges.length} 条关系</span>
                   </div>
-                  <svg
-                    viewBox={`0 0 ${CANVAS} ${CANVAS}`}
-                    className="block w-full bg-[radial-gradient(ellipse_at_center,#16283d,transparent_72%)]"
-                    role="group"
-                    aria-label={focus ? '当前记忆的直接关系图' : '记忆之间的关系图'}
-                  >
-                    {shownEdges.map((edge) => {
-                      const from = positions.get(edge.from);
-                      const to = positions.get(edge.to);
-                      if (!from || !to) return null;
-                      return (
-                        <line
-                          key={`${edge.kind}-${edge.from}-${edge.to}`}
-                          x1={from.x}
-                          y1={from.y}
-                          x2={to.x}
-                          y2={to.y}
-                          stroke={EDGE_STROKES[edge.kind]}
-                          strokeDasharray={EDGE_DASHES[edge.kind]}
-                          strokeWidth={focus ? 1.7 : 1.2}
-                          opacity={focus ? 0.78 : edge.kind === 'relation' || edge.kind === 'update' ? 0.55 : 0.32}
-                        />
-                      );
-                    })}
-                    {Array.from(positions.values()).map(({ node, x, y }) => {
-                      const strength = Math.sqrt((weights.get(node.id) ?? 0) / maxWeight);
-                      const radius = 5 + 9 * strength;
-                      const color = GRAPH_CONTEXT_COLORS[node.context];
-                      const active = selectedId === node.id;
-                      const label = truncateNodeLabel(node.content);
-                      const selectNode = () => setSelectedId(active ? null : node.id);
-                      return (
-                        <g
-                          key={node.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`${node.content}，${weights.get(node.id) ?? 0} 条关系`}
-                          aria-pressed={active}
-                          onClick={selectNode}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              selectNode();
-                            }
-                          }}
-                          className="group cursor-pointer outline-none"
-                        >
-                          <title>{node.content}</title>
-                          <circle cx={x} cy={y} r={radius + 9} fill="transparent" />
-                          <circle cx={x} cy={y} r={radius + 6} fill={color} opacity={0.07 + strength * 0.27} pointerEvents="none" />
-                          <circle
-                            cx={x}
-                            cy={y}
-                            r={radius}
-                            fill={color}
-                            fillOpacity={0.65 + strength * 0.35}
-                            stroke={active || !node.isCurrent ? '#e2e8f0' : color}
-                            strokeDasharray={node.isCurrent ? '0' : '2 2'}
-                            strokeWidth={1}
-                          />
-                          <circle cx={x} cy={y} r={radius * 0.8} fill="#fff" opacity={strength * 0.58} pointerEvents="none" />
-                          <circle cx={x} cy={y} r={radius + 4} fill="none" stroke="#f1f5f9" className="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" pointerEvents="none" />
-                          {active || positions.size <= 9 ? (
-                            <text x={x} y={y + radius + 16} textAnchor="middle" fontSize={12} fill="#e2e8f0" pointerEvents="none" paintOrder="stroke" stroke="#0b1420" strokeWidth={3}>
-                              {label.length > 12 ? `${label.slice(0, 11)}…` : label}
-                            </text>
-                          ) : null}
-                        </g>
-                      );
-                    })}
-                  </svg>
+                  <div className="p-3">
+                    <MemoryStarfield
+                      nodes={viewNodes.map((node) => ({
+                        id: node.id,
+                        content: node.content,
+                        context: node.context,
+                        isCurrent: node.isCurrent,
+                        weight: weights.get(node.id) ?? 0
+                      }))}
+                      edges={shownEdges}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                      maxWeight={maxWeight}
+                    />
+                  </div>
                 </div>
                 {picker}
               </div>
@@ -322,8 +231,8 @@ export function MemoryGraphPanel() {
                         y1="3"
                         x2="26"
                         y2="3"
-                        stroke={EDGE_STROKES[kind as GraphEdgeKind]}
-                        strokeDasharray={EDGE_DASHES[kind as GraphEdgeKind]}
+                        stroke={STAR_EDGE_COLORS[kind as GraphEdgeKind]}
+                        strokeDasharray={STAR_EDGE_DASHES[kind as GraphEdgeKind].join(' ') || undefined}
                         strokeWidth={1.4}
                       />
                     </svg>
@@ -341,7 +250,7 @@ export function MemoryGraphPanel() {
                 ))}
               </div>
 
-              <p className="text-xs leading-relaxed text-slate-300">连接越多，节点越亮、越大。点的位置只为了铺开不重叠，不表示任何东西。选中一点后，只显示和它直接相连的记忆。</p>
+              <p className="text-xs leading-relaxed text-slate-300">连接越多，星点越亮、越大。3D 坐标只为了铺开并按主题聚簇，不表示真实距离；拖拽旋转、滚轮缩放、点击聚焦。选中一点后，只显示和它直接相连的记忆。</p>
             </div>
           ) : (
             <div className="space-y-3">

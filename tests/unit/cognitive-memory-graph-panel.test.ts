@@ -28,6 +28,8 @@ function stripComments(source: string): string {
 
 const PANEL = read('src/components/settings/memory-graph-panel.tsx');
 const PANEL_CODE = stripComments(PANEL);
+const STARFIELD = read('src/components/settings/memory-starfield.tsx');
+const STARFIELD_CODE = stripComments(STARFIELD);
 const WORKSPACE = read('src/components/settings/settings-workspace.tsx');
 const PACKAGE = read('package.json');
 
@@ -78,8 +80,8 @@ describe('这一屏说的话', () => {
     expect(PANEL_CODE).not.toMatch(/describeNotAGraph\([^)]*edges\.length\)/);
   });
 
-  it('点的位置不表示任何东西，这句话要摆在界面上', () => {
-    expect(PANEL).toContain('点的位置只为了铺开不重叠，不表示任何东西。');
+  it('点的位置不表示真实距离，这句话要摆在界面上', () => {
+    expect(PANEL).toContain('3D 坐标只为了铺开并按主题聚簇，不表示真实距离');
   });
 
   it('图例的三种线名来自 GRAPH_EDGE_LABELS，不在界面里另起一套', () => {
@@ -102,8 +104,8 @@ describe('画不画得出来只有一个判据', () => {
     expect(PANEL_CODE).not.toMatch(/edges\.length\s*>/);
   });
 
-  it('画得出来时是手写 SVG，画不出来时是记忆列表兜底', () => {
-    expect(PANEL).toContain('<svg');
+  it('画得出来时是 3D 星图，画不出来时是记忆列表兜底', () => {
+    expect(PANEL).toContain('<MemoryStarfield');
     expect(PANEL).toContain('graph.nodes.map');
   });
 
@@ -111,14 +113,16 @@ describe('画不画得出来只有一个判据', () => {
    * 没有图形库这件事是硬约束，不是洁癖：任务书要的是「从已有关系推导」，
    * 而 d3-force / cytoscape 这类库会替用户算出一张**位置有意义**的图——
    * 那批坐标既不在库里也不可解释，正是这一片判掉的东西。顺带解决客户端包体积。
+   * 3D 投影坐标在 memory-starfield 里自己算（Math.cos/sin），不引库。
    */
-  it('仓库里没有图布局依赖，这一屏的坐标是自己算的', () => {
+  it('仓库里没有图布局依赖，星图坐标是自己算的', () => {
     expect(PANEL_CODE).not.toMatch(/\bfrom\s+'(?:d3|cytoscape|vis-network|react-force-graph)[^']*'/);
-    for (const name of ['d3', 'cytoscape', 'vis-network', 'react-force-graph', 'viz.js']) {
+    expect(STARFIELD_CODE).not.toMatch(/\bfrom\s+'(?:d3|cytoscape|vis-network|react-force-graph|three)[^']*'/);
+    for (const name of ['d3', 'cytoscape', 'vis-network', 'react-force-graph', 'viz.js', 'three']) {
       expect(PACKAGE).not.toContain(`"${name}"`);
     }
-    expect(PANEL).toContain('Math.cos');
-    expect(PANEL).toContain('Math.sin');
+    expect(STARFIELD).toContain('Math.cos');
+    expect(STARFIELD).toContain('Math.sin');
   });
 });
 
