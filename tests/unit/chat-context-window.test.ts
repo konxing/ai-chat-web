@@ -122,7 +122,7 @@ describe('发给模型的历史窗口', () => {
     const history = out.slice(1, -1);
 
     expect(out).toHaveLength(41);
-    expect(out[0]).toContain('家庭 AI 助手');
+    expect(out[0]).toContain('AI Chat 的对话助手');
     expect(history).toHaveLength(39);
     expect(history[0]).toBe(textAt(62));
     expect(history[38]).toBe(textAt(100));
@@ -143,7 +143,7 @@ describe('发给模型的历史窗口', () => {
 
     const out = await build();
 
-    expect(out).toEqual([expect.stringContaining('家庭 AI 助手'), textAt(1), textAt(2), CURRENT]);
+    expect(out).toEqual([expect.stringContaining('AI Chat 的对话助手'), textAt(1), textAt(2), CURRENT]);
   });
 
   it('长会话不丢本轮那条用户消息', async () => {

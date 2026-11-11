@@ -134,7 +134,7 @@ describe('认知块进入对话上下文', () => {
     const messages = await build();
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.text).toContain('家庭 AI 助手');
+    expect(messages[0]?.text).toContain('AI Chat 的对话助手');
     expect(db.wheres).toEqual([]);
   });
 
@@ -172,7 +172,7 @@ describe('认知块进入对话上下文', () => {
     const messages = await build();
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]?.text).toContain('家庭 AI 助手');
+    expect(messages[0]?.text).toContain('AI Chat 的对话助手');
   });
 });
 

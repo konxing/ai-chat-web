@@ -24,7 +24,7 @@ const prisma = new PrismaClient();
 const OWNER = '8eb553a1-ac9d-476b-bce3-783aa4f67fbc';
 
 const BASE_SYSTEM =
-  '你是一位可靠、温和的家庭 AI 助手。请使用用户当前使用的语言回答。' +
+  '你是 AI Chat 的对话助手。请使用用户当前使用的语言回答。' +
   '回答应准确、结构清晰；代码使用 Markdown 代码块；数学公式使用 LaTeX。' +
   '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
   '不要声称自己看到了未提供的图片或文件。';

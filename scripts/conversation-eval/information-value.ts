@@ -14,7 +14,7 @@ import { renderGlobalPolicy } from '../../src/lib/cognitive/conversation/core/co
 import type { DialogueTurn } from './scenarios';
 
 const owner = process.env.CONVERSATION_EVAL_USER_ID ?? '8eb553a1-ac9d-476b-bce3-783aa4f67fbc';
-const baseSystem = '你是一位可靠、温和的家庭 AI 助手。请使用用户当前使用的语言回答，保持准确，不声称执行了未执行的操作。';
+const baseSystem = '你是 AI Chat 的对话助手。请使用用户当前使用的语言回答，保持准确，不声称执行了未执行的操作。';
 const strategies = {
   direct: '直接接话或完成能完成的部分。不要向用户提问，也不要编造缺失信息。',
   assumption: '如果需要假设，明确说出一个可纠正的假设，然后给出在该假设下有用的回答。不要向用户提问。',
