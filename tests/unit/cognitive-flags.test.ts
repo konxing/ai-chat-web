@@ -7,7 +7,6 @@ vi.mock('@/lib/config', () => ({
 }));
 
 import {
-  capabilityContextEnabled,
   consolidationEnabled,
   decayRankingEnabled,
   hybridRetrievalEnabled,
@@ -21,7 +20,6 @@ afterEach(() => {
   delete process.env.COGNITIVE_HYBRID_RETRIEVAL;
   delete process.env.COGNITIVE_MEMORY_DECAY;
   delete process.env.COGNITIVE_MEMORY_CONSOLIDATION;
-  delete process.env.COGNITIVE_CAPABILITY_CONTEXT;
   delete process.env.COGNITIVE_SOURCE_DIVE;
 });
 
@@ -46,16 +44,12 @@ describe('合并开关：后台配置优先、环境变量兜底', () => {
     expect(await hybridRetrievalEnabled()).toBe(false);
   });
 
-  it('上下文增强默认开保住溯源展开；能力观察没配置时回落 env（opt-in）', async () => {
+  it('上下文增强默认开启记忆溯源', async () => {
     expect(await sourceDiveEnabled()).toBe(true);
-    expect(await capabilityContextEnabled()).toBe(false);
-    process.env.COGNITIVE_CAPABILITY_CONTEXT = '1';
-    expect(await capabilityContextEnabled()).toBe(true);
   });
 
-  it('上下文增强后台关掉时两项一起关', async () => {
+  it('后台关闭上下文增强时关闭记忆溯源', async () => {
     ctx.settings.set('cognitiveContextEnhanced', false);
     expect(await sourceDiveEnabled()).toBe(false);
-    expect(await capabilityContextEnabled()).toBe(false);
   });
 });

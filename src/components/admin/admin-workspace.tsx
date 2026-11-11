@@ -534,8 +534,7 @@ function ConfigTab() {
             <div>
               <div className="text-[13px] font-medium text-white/80">上下文增强</div>
               <div className="mt-0.5 text-[11.5px] leading-relaxed text-white/35">
-                一个开关控制两项：记忆溯源展开（追问细节时回原始对话取原文）、能力观察注入对话。
-                默认开（保住溯源展开）；能力观察只有你在能力面板启用了维度才会真正注入。
+                开启后，追问记忆细节时可从原始对话查找相关原文。默认开启。
               </div>
             </div>
             <input

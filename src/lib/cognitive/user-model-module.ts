@@ -4,7 +4,6 @@ import { PROFILE_FRAMING, renderFramingHeader } from './response-policy';
 import type { CognitiveBlock, CognitiveModule, CognitiveTurn } from './manager';
 import { routeMemoryRetrieval } from './retrieval-router';
 import { PROFILE_SELECTION_POOL, selectRelevantProfileEntries } from './profile-selection';
-import { capabilityContextBlocks } from './capability-context';
 
 /**
  * 用户模型模块（任务书 8.2 / 8.3 的注入侧）。
@@ -56,9 +55,7 @@ async function readUserModel(turn: CognitiveTurn): Promise<CognitiveBlock[]> {
   // 与个人情况无关的纯知识问题不加载画像；减少无关个人资料的出站。
   if (routeMemoryRetrieval(turn.content).need === 'none') return [];
   const entries = await listProfileEntries(turn.userId, PROFILE_SELECTION_POOL);
-  const profiles = renderProfileBlock(selectRelevantProfileEntries(turn.content, entries, USER_MODEL_MAX_ITEMS));
-  const capabilityBlocks = await capabilityContextBlocks(turn.userId, turn.content);
-  return [...profiles, ...capabilityBlocks];
+  return renderProfileBlock(selectRelevantProfileEntries(turn.content, entries, USER_MODEL_MAX_ITEMS));
 }
 
 export const userModelModule: CognitiveModule = { key: 'userModel', read: readUserModel };

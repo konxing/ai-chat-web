@@ -22,7 +22,6 @@ import {
   BookOpen,
   Plus,
   Scale,
-  Activity,
   Shield,
   ShieldCheck,
   SlidersHorizontal,
@@ -55,7 +54,6 @@ const TimelinePanel = dynamic(() => import('./timeline-panel').then((m) => m.Tim
 const MemoryGraphPanel = dynamic(() => import('./memory-graph-panel').then((m) => m.MemoryGraphPanel), { loading: panelLoading });
 const ReflectionPanel = dynamic(() => import('./reflection-panel').then((m) => m.ReflectionPanel), { loading: panelLoading });
 const ProfilePanel = dynamic(() => import('./profile-panel').then((m) => m.ProfilePanel), { loading: panelLoading });
-const CapabilityPanel = dynamic(() => import('./capability-panel').then((m) => m.CapabilityPanel), { loading: panelLoading });
 const WikiPanel = dynamic(() => import('./wiki-panel').then((m) => m.WikiPanel), { loading: panelLoading });
 const ExperiencePanel = dynamic(() => import('./experience-panel').then((m) => m.ExperiencePanel), { loading: panelLoading });
 const ExpressionPanel = dynamic(() => import('./expression-panel').then((m) => m.ExpressionPanel), { loading: panelLoading });
@@ -103,7 +101,6 @@ type Tab =
   | 'decisions'
   | 'reflections'
   | 'userModel'
-  | 'capabilities'
   | 'wiki'
   | 'experience'
   | 'expression'
@@ -376,7 +373,6 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
               ['decisions', '决策', Scale],
               ['reflections', '洞察', Lightbulb],
               ['userModel', '画像', Fingerprint],
-              ['capabilities', '能力成长', Activity],
               ['wiki', '主题知识库', BookOpen],
               ['experience', '实践经验库', Lightbulb],
               ['expression', '表达偏好', SlidersHorizontal],
@@ -795,7 +791,6 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
 
           {tab === 'userModel' ? <ProfilePanel /> : null}
 
-          {tab === 'capabilities' ? <CapabilityPanel /> : null}
 
           {tab === 'wiki' ? <WikiPanel /> : null}
 

@@ -17,7 +17,7 @@ export interface SystemSettings {
   cognitiveAutoConfirmEnabled: boolean;
   /** 检索与整理增强（合并开关）：严格相关性检索 + 混合语义检索 + 衰减排序 + 记忆巩固。默认关。 */
   cognitiveRetrievalEnhanced: boolean;
-  /** 上下文增强（合并开关）：记忆溯源展开 + 能力观察注入。默认开（保住溯源展开）。 */
+  /** 上下文增强：记忆溯源展开，默认开。 */
   cognitiveContextEnhanced: boolean;
   /** 对话智能层总开关：默认关，打开后才在 system 里注入交流原则/模式/风格块。 */
   conversationLayerEnabled: boolean;
