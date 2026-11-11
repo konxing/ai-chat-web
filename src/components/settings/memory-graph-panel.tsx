@@ -250,7 +250,7 @@ export function MemoryGraphPanel() {
                 ))}
               </div>
 
-              <p className="text-xs leading-relaxed text-slate-300">连接越多，星点越亮、越大。3D 坐标只为了铺开并按主题聚簇，不表示真实距离；拖拽旋转、滚轮缩放、点击聚焦。选中一点后，只显示和它直接相连的记忆。</p>
+              <p className="text-xs leading-relaxed text-slate-300">连接越多，星点越亮、越大。3D 坐标只为了铺开并按主题聚簇，不表示真实距离；点击星点聚焦，自动旋转可开关。选中一点后，只显示和它直接相连的记忆。</p>
             </div>
           ) : (
             <div className="space-y-3">
