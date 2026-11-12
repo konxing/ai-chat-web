@@ -272,11 +272,10 @@ export async function storeUpload(input: {
   const finalPath = path.join(root, storageKey);
   const tmpPath = path.join(dir, `.${id}.tmp`);
   const encrypted = encryptBuffer(input.buffer, `file:${id}`);
-  await writeFile(tmpPath, encrypted, { mode: 0o600 });
-  await rename(tmpPath, finalPath);
-  await stat(finalPath);
-
   try {
+    await writeFile(tmpPath, encrypted, { mode: 0o600 });
+    await rename(tmpPath, finalPath);
+    await stat(finalPath);
     const attachment = await prisma.attachment.create({
       data: {
         id,
@@ -298,6 +297,7 @@ export async function storeUpload(input: {
     });
     return attachment;
   } catch (err) {
+    await unlink(tmpPath).catch(() => undefined);
     await unlink(finalPath).catch(() => undefined);
     throw err;
   }

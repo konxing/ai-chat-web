@@ -19,7 +19,7 @@ import {
   saveUserMessage
 } from '@/lib/chats';
 import { prisma } from '@/lib/prisma';
-import { getAttachmentsForUser, imageSendSummary, publicAttachment } from '@/lib/files';
+import { getAttachmentsForUser, imageSendSummary, publicAttachment, unlinkAttachmentFile } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
 import { StickerReply } from '@/lib/sticker-reply';
@@ -85,13 +85,19 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       where: { id: body.editMessageId, chatId, role: 'USER' }
     });
     if (!target) throw new ApiError(404, 'MESSAGE_NOT_FOUND', '要编辑的消息不存在');
-    userMessage = await prisma.$transaction(async (tx) => {
+    const edit = await prisma.$transaction(async (tx) => {
       const removed = await tx.message.findMany({
         where: { chatId, createdAt: { gt: target.createdAt } },
         select: { id: true }
       });
+      const removedFiles = removed.length ? await tx.attachment.findMany({
+        where: { userId: user.id, chatId, messageId: { in: removed.map((r) => r.id) } },
+        select: { id: true, storageKey: true }
+      }) : [];
+      if (removedFiles.length) {
+        await tx.attachment.deleteMany({ where: { id: { in: removedFiles.map((file) => file.id) } } });
+      }
       if (removed.length) {
-        await tx.attachment.deleteMany({ where: { messageId: { in: removed.map((r) => r.id) } } });
         await tx.message.deleteMany({ where: { id: { in: removed.map((r) => r.id) } } });
       }
       const updated = await tx.message.update({
@@ -107,8 +113,10 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           throw new ApiError(400, 'ATTACHMENT_STATE_CHANGED', '附件状态已变化，请重新上传');
         }
       }
-      return updated;
+      return { updated, removedFiles };
     });
+    userMessage = edit.updated;
+    for (const file of edit.removedFiles) await unlinkAttachmentFile(file);
   } else {
     userMessage = await saveUserMessage({
       chat,
@@ -151,7 +159,13 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       const send = (payload: unknown) => {
         if (clientGone) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          const frame = encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+          if (frame.byteLength > (controller.desiredSize ?? 0)) {
+            clientGone = true;
+            controller.error(new Error('Chat response client is too slow'));
+            return;
+          }
+          controller.enqueue(frame);
         } catch {
           // 连接已取消：剩下的字节无处可去，但生成和落库照常走完。
           clientGone = true;
@@ -310,7 +324,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       // 客户端取消只停写字节，生成照常走完（见 start 里的 clientGone）。
       markGone();
     }
-  });
+  }, { highWaterMark: 2 * 1024 * 1024, size: (frame) => frame.byteLength });
 
   return new Response(stream, {
     status: 200,

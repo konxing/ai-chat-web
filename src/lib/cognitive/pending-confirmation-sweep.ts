@@ -200,6 +200,7 @@ export interface AutoConfirmOutcome {
 }
 
 const lastAttemptAt = new Map<string, number>();
+let lastAttemptCleanupAt = 0;
 
 /**
  * 扫描入口：把这个用户超时未处理的条目交给模型裁决。
@@ -220,10 +221,16 @@ async function sweepOnce(userId: string): Promise<AutoConfirmOutcome | null> {
   const preferences = await getCognitivePreferences(userId).catch(() => null);
   if (!preferences || !preferences.memoryEnabled) return null;
 
-  const previous = lastAttemptAt.get(userId) ?? 0;
-  if (Date.now() - previous < AUTO_CONFIRM_RETRY_MS) return null;
-
   const now = new Date();
+  const timestamp = now.getTime();
+  if (timestamp - lastAttemptCleanupAt >= AUTO_CONFIRM_RETRY_MS) {
+    lastAttemptCleanupAt = timestamp;
+    for (const [id, attemptedAt] of lastAttemptAt) {
+      if (timestamp - attemptedAt >= AUTO_CONFIRM_RETRY_MS) lastAttemptAt.delete(id);
+    }
+  }
+  const previous = lastAttemptAt.get(userId);
+  if (previous !== undefined && timestamp - previous < AUTO_CONFIRM_RETRY_MS) return null;
   const cutoff = new Date(now.getTime() - AUTO_CONFIRM_AFTER_HOURS * 60 * 60 * 1000);
   const pending = await collectPending(userId, cutoff, now);
   if (pending.length === 0) return null;

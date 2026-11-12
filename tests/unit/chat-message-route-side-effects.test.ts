@@ -297,7 +297,7 @@ vi.mock('@/lib/ai', async () => {
   };
 });
 
-async function post(signal?: AbortSignal, content = '帮我解释一下这段代码') {
+async function post(signal?: AbortSignal, content = '帮我解释一下这段代码', beforeRead?: () => Promise<void>) {
   const { POST } = await import('@/app/api/chats/[id]/messages/route');
   const request = new Request(`http://127.0.0.1:3000/api/chats/${CHAT_ID}/messages`, {
     method: 'POST',
@@ -311,6 +311,7 @@ async function post(signal?: AbortSignal, content = '帮我解释一下这段代
     ...(signal ? { signal } : {})
   });
   const response = await POST(request, { params: Promise.resolve({ id: CHAT_ID }) });
+  await beforeRead?.();
   // writeAudit 是挂在 finally 里的游离 promise，给一个宏任务让它落地。
   const text = await response.text();
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -320,6 +321,15 @@ async function post(signal?: AbortSignal, content = '帮我解释一下这段代
 function assistantRows() {
   return ctx.rows.filter((row) => row.role === 'ASSISTANT');
 }
+
+it('caps unread stream data while completing and saving the answer', async () => {
+  ctx.replyChunks = Array.from({ length: 90_000 }, () => '字');
+  await expect(post(undefined, '生成测试文本', async () => {
+    await vi.waitFor(() => expect(assistantRows()[0]?.status).toBe('COMPLETE'));
+  })).rejects.toThrow('Chat response client is too slow');
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never)).toBe('字'.repeat(90_000));
+});
 
 /** 每个用例都从干净的一轮开始（模块作用域：下面两个 describe 共用这一份重置）。 */
 beforeEach(() => {
