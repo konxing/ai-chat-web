@@ -13,7 +13,7 @@ export async function GET() {
   } catch {
     return Response.json(
       { ok: false, status: 'degraded' },
-      { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      { status: 503, headers: { 'Cache-Control': 'no-store', 'X-AI-WebChat': '1' } }
     );
   }
 }
