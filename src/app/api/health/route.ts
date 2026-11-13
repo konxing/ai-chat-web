@@ -8,7 +8,7 @@ export async function GET() {
     await prisma.$queryRaw`SELECT 1`;
     return Response.json(
       { ok: true, status: 'healthy', time: new Date().toISOString() },
-      { headers: { 'Cache-Control': 'no-store' } }
+      { headers: { 'Cache-Control': 'no-store', 'X-AI-WebChat': '1' } }
     );
   } catch {
     return Response.json(

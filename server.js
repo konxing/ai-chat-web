@@ -32,11 +32,20 @@ const TRUSTED_PROXY_CIDRS = String(process.env.TRUSTED_PROXY_CIDRS || '127.0.0.1
 
 const prisma = new PrismaClient({ log: ['error'] });
 
+function writeLaunchLog(line) {
+  const filename = process.env.AI_WEBCHAT_LAUNCH_LOG;
+  if (filename) fs.appendFile(filename, line + '\n', () => {});
+}
+
 function log(event, fields = {}) {
-  console.log(JSON.stringify({ ts: new Date().toISOString(), level: 'info', event, ...fields }));
+  const line = JSON.stringify({ ts: new Date().toISOString(), level: 'info', event, ...fields });
+  console.log(line);
+  writeLaunchLog(line);
 }
 function logErr(event, fields = {}) {
-  console.error(JSON.stringify({ ts: new Date().toISOString(), level: 'error', event, ...fields }));
+  const line = JSON.stringify({ ts: new Date().toISOString(), level: 'error', event, ...fields });
+  console.error(line);
+  writeLaunchLog(line);
 }
 
 function normalizeIp(input) {
