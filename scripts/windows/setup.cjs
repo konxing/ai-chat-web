@@ -17,6 +17,8 @@ async function setup() {
     throw new Error('管理员资料格式无效');
 
   populate(process.env, { DATABASE_URL: database }, { override: true });
+  step = '生成数据库客户端';
+  run('node_modules/prisma/build/index.js', ['generate']);
 
   function run(file, args, input) {
     const result = spawnSync(process.execPath, [file, ...args], {
@@ -57,8 +59,6 @@ async function setup() {
   }
   populate(process.env, config, { override: true });
 
-  step = '生成数据库客户端';
-  run('node_modules/prisma/build/index.js', ['generate']);
   step = '应用数据库迁移';
   run('node_modules/prisma/build/index.js', ['migrate', 'deploy']);
   step = '构建网页';

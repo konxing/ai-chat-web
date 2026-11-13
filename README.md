@@ -15,6 +15,22 @@
 - **安全边界**：SameSite/HttpOnly/Secure Cookie、CSRF 双提交、CSP nonce、SSRF 防护（DNS 固定、私网阻断、禁跳转）、上传魔数检测、路径/文件名清洗、限速、审计脱敏。
 - **部署**：Dockerfile、Compose（App + PostgreSQL + Nginx）、裸机 systemd/Nginx/nftables 配置、TLS 1.2/1.3 + HSTS、日志轮转、健康检查、备份定时器。
 
+## Windows 本地使用（GitHub 源码 ZIP）
+
+1. 在 GitHub 项目首页点击 **Code → Download ZIP**，解压到本机。源码 ZIP 包含启动器源码，下面的命令会生成 EXE。
+2. 安装 Node.js 22，确保终端能找到 `node` 和 `npm`。安装并启动 PostgreSQL，使用 pgAdmin 创建一个空数据库，例如 `ai_webchat`。数据库账号需要有权限在该库创建表。
+3. 在解压后含有 `package.json` 的目录打开 PowerShell，执行以下命令。这一步只需在首次准备时运行。
+
+   ```powershell
+   npm.cmd ci
+   powershell.exe -NoProfile -File .\scripts\windows\build.ps1 -LauncherOnly
+   ```
+
+4. 双击生成的 **AI WebChat.exe**，填写 PostgreSQL 连接地址、管理员用户名、邮箱和密码。连接地址格式为 `postgresql://用户名:密码@127.0.0.1:5432/ai_webchat`。密码含 `@`、`#`、`%` 等字符时，先对密码部分做 URL 编码。
+5. 点击 **初始化并启动**。向导会构建网站、初始化数据库和管理员，然后启动本地后端并尝试打开浏览器。以后双击 EXE 进入管理窗口，可点「启动」和「打开聊天」。网页地址为 `http://127.0.0.1:3000`。
+
+保留 EXE、项目文件和向导生成的 `.env` 在同一个目录。`.env` 含数据库凭据和加密密钥，请妥善保存。[Windows 管理程序说明](scripts/windows/README.md)
+
 ## 快速开始（Docker Compose）
 
 ```bash
