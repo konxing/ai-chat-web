@@ -13,6 +13,7 @@ Object.assign(process.env, {
   APP_URL: address,
   TRUST_PROXY: 'false',
   COOKIE_SECURE: 'false',
+  ALLOW_INSECURE_COOKIES: 'true',
   AI_WEBCHAT_LAUNCH_LOG: path.join(logs, 'backend.log')
 });
 require('../../server.js');

@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Net;
+using System.Text;
+using System.Web.Script.Serialization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -41,14 +43,37 @@ internal static class Launcher
             Controls.Add(actions);
             Controls.Add(state);
             Controls.Add(header);
-            AddAction("启动", () => Run("Start"));
-            AddAction("停止", () => Run("Stop"));
-            AddAction("开启登录自启", () => Run("Enable"));
-            AddAction("关闭登录自启", () => Run("Disable"));
+            AddAction("启动", async () => await Run("Start"));
+            AddAction("停止", async () => await Run("Stop"));
+            AddAction("开启登录自启", async () => await Run("Enable"));
+            AddAction("关闭登录自启", async () => await Run("Disable"));
             AddAction("打开聊天", () => Open(Address));
             AddAction("查看日志", () => Open(Log));
             timer.Tick += async (sender, args) => await RefreshStatus();
-            Shown += async (sender, args) => { timer.Start(); await RefreshStatus(); };
+            Shown += async (sender, args) =>
+            {
+                timer.Start();
+                if (!File.Exists(Path.Combine(Root, ".env")))
+                {
+                    using (var setup = new SetupDialog())
+                    {
+                        if (setup.ShowDialog(this) == DialogResult.OK)
+                        {
+                            await Run("Start");
+                            for (int attempt = 0; attempt < 30 && !IsDisposed; attempt++)
+                            {
+                                if ((await Task.Run((Func<string>)ReadStatus)).StartsWith("正在运行"))
+                                {
+                                    Open(Address);
+                                    break;
+                                }
+                                await Task.Delay(500);
+                            }
+                        }
+                    }
+                }
+                await RefreshStatus();
+            };
             FormClosed += (sender, args) => timer.Dispose();
         }
 
@@ -59,7 +84,7 @@ internal static class Launcher
             actions.Controls.Add(button);
         }
 
-        private async void Run(string action)
+        private async Task Run(string action)
         {
             if (busy) return;
             busy = true;
@@ -108,6 +133,99 @@ internal static class Launcher
             }
             try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
             catch (Exception error) { MessageBox.Show(this, error.Message, "AI WebChat"); }
+        }
+    }
+
+    private sealed class SetupDialog : Form
+    {
+        private readonly TextBox database = new TextBox { UseSystemPasswordChar = true };
+        private readonly TextBox username = new TextBox();
+        private readonly TextBox email = new TextBox();
+        private readonly TextBox password = new TextBox { UseSystemPasswordChar = true };
+        private readonly Button install = new Button { Text = "初始化并启动", AutoSize = true };
+        private bool running;
+
+        public SetupDialog()
+        {
+            Text = "AI WebChat 首次运行";
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(560, 305);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            var fields = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(18) };
+            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124));
+            fields.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var help = new Label {
+                AutoSize = true,
+                Text = "请先安装 Node.js 和项目依赖，并准备一个空 PostgreSQL 数据库。\n数据库地址格式：postgresql://用户:密码@127.0.0.1:5432/数据库\n管理员密码须符合网站的强度要求。"
+            };
+            fields.Controls.Add(help);
+            fields.SetColumnSpan(help, 2);
+            AddField(fields, "数据库连接地址", database);
+            AddField(fields, "管理员用户名", username);
+            AddField(fields, "管理员邮箱", email);
+            AddField(fields, "管理员密码", password);
+            fields.Controls.Add(install);
+            Controls.Add(fields);
+            AcceptButton = install;
+            FormClosing += (sender, args) => { if (running) args.Cancel = true; };
+            install.Click += async (sender, args) =>
+            {
+                if (running) return;
+                running = true;
+                fields.Enabled = false;
+                install.Text = "正在初始化，请稍候…";
+                try
+                {
+                    var input = new JavaScriptSerializer().Serialize(new {
+                        database = database.Text.Trim(), username = username.Text.Trim(),
+                        email = email.Text.Trim(), password = password.Text
+                    });
+                    await Task.Run(() => RunSetup(input));
+                    password.Clear();
+                    database.Clear();
+                    running = false;
+                    DialogResult = DialogResult.OK;
+                }
+                catch (Exception error)
+                {
+                    MessageBox.Show(this, error.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                finally
+                {
+                    running = false;
+                    fields.Enabled = true;
+                    install.Text = "初始化并启动";
+                }
+            };
+        }
+
+        private static void AddField(TableLayoutPanel panel, string name, TextBox box)
+        {
+            panel.Controls.Add(new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left });
+            box.Dock = DockStyle.Top;
+            panel.Controls.Add(box);
+        }
+    }
+
+    private static void RunSetup(string input)
+    {
+        if (!File.Exists(Path.Combine(Root, "node_modules", "prisma", "build", "index.js")))
+            throw new InvalidOperationException("缺少项目依赖，请先准备完整的 AI WebChat 项目目录。");
+        var start = new ProcessStartInfo("node.exe", "scripts/windows/setup.cjs") {
+            WorkingDirectory = Root, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardError = true,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+        using (var process = Process.Start(start))
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(input);
+            process.StandardInput.BaseStream.Write(payload, 0, payload.Length);
+            process.StandardInput.Close();
+            string error = process.StandardError.ReadToEnd().Trim();
+            process.WaitForExit();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException("初始化未完成。请检查这一步：\n" + error);
         }
     }
 
