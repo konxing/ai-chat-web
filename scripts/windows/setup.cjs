@@ -6,15 +6,22 @@ const { PrismaClient } = require('@prisma/client');
 
 const pending = '.env.windows-setup.local';
 let step = '检查输入';
+function invalidInput(message) {
+  step = message;
+  throw new Error();
+}
+
 async function setup() {
   if (fs.existsSync('.env')) throw new Error('已有配置');
   const { database, username, email, password } = JSON.parse(fs.readFileSync(0, 'utf8'));
   if (typeof database !== 'string' || !/^postgres(?:ql)?:\/\//.test(database) || /[\s"']/u.test(database))
-    throw new Error('数据库地址格式无效');
-  if (typeof username !== 'string' || !/^[A-Za-z0-9_\u4e00-\u9fa5-]{3,32}$/.test(username) ||
-      typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) ||
-      typeof password !== 'string' || password.length < 12 || password.length > 200 || /[\r\n]/.test(password))
-    throw new Error('管理员资料格式无效');
+    invalidInput('数据库连接地址须以 postgresql:// 开头，不含空格或引号。');
+  if (typeof username !== 'string' || !/^[A-Za-z0-9_\u4e00-\u9fa5-]{3,32}$/.test(username))
+    invalidInput('管理员用户名须为 3–32 位字母、数字、下划线或中文。');
+  if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))
+    invalidInput('请填写有效的管理员邮箱，例如 admin@example.com。');
+  if (typeof password !== 'string' || password.length < 10 || password.length > 128 || /[\r\n]/.test(password))
+    invalidInput('管理员密码须为 10–128 个字符，不能包含换行。');
 
   populate(process.env, { DATABASE_URL: database }, { override: true });
   step = '生成数据库客户端';
