@@ -1,6 +1,7 @@
 const { spawnSync } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
+const path = require('node:path');
 const { parse, populate } = require('dotenv');
 const { PrismaClient } = require('@prisma/client');
 
@@ -32,15 +33,38 @@ async function setup() {
     invalidInput('请检查数据库地址，需填写主机、用户名和数据库名，密码中的特殊字符需做 URL 编码。');
   }
   if (address.hash) invalidInput('数据库地址含有 #，如果它属于数据库密码，请写成 %23。');
+  if (!fs.existsSync('node_modules/typescript/bin/tsc') ||
+      !fs.existsSync('node_modules/tailwindcss/package.json') ||
+      !fs.existsSync('node_modules/vitest/package.json')) {
+    invalidInput('缺少构建依赖。请在项目目录运行 npm.cmd ci --include=dev，再重试。');
+  }
   populate(process.env, { DATABASE_URL: database }, { override: true });
   step = '生成数据库客户端';
   run('node_modules/prisma/build/index.js', ['generate']);
 
   function run(file, args, input) {
     const result = spawnSync(process.execPath, [file, ...args], {
-      input, encoding: 'utf8', windowsHide: true, timeout: 600000
+      input, encoding: 'utf8', windowsHide: true, timeout: 600000, maxBuffer: 8 * 1024 * 1024
     });
-    if (result.error || result.status !== 0) throw new Error();
+    if (!result.error && result.status === 0) return;
+    const secrets = [
+      database, address.password, decodeURIComponent(address.password),
+      password, process.env.APP_SECRET, process.env.MASTER_KEY
+    ].filter(Boolean).sort((a, b) => b.length - a.length);
+    let output = [result.stdout, result.stderr, result.error?.code].filter(Boolean).join('\n');
+    for (const secret of secrets) output = output.replaceAll(secret, '[已隐藏]');
+    output = output.replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, '[数据库地址已隐藏]');
+    const log = path.join('dist', 'windows', 'setup-error.log');
+    const failure = result.error?.code === 'ETIMEDOUT' ? '超过 10 分钟' : `退出状态 ${result.status ?? result.error?.code ?? '未知'}`;
+    step += `（${failure}）`;
+    try {
+      fs.mkdirSync(path.dirname(log), { recursive: true });
+      fs.writeFileSync(log, `${step}\n${output}`, { mode: 0o600 });
+      step += `\n请查看项目目录中的 ${log}。`;
+    } catch {
+      step += '\n无法写入诊断日志，请检查项目目录权限。';
+    }
+    throw new Error();
   }
 
   step = '检查数据库连接及现有账号';
