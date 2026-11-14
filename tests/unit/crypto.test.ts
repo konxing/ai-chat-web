@@ -73,6 +73,11 @@ describe('ChaCha20-Poly1305 (v2) string encryption', () => {
     useKeys('kc', keyB);
     expect(() => decryptString(payload, '')).toThrow();
   });
+
+  it('rejects conflicting key material under the active key id', () => {
+    useKeys('ka', keyA, { ka: keyB });
+    expect(() => encryptString('value')).toThrow('MASTER_KEYRING conflicts');
+  });
 });
 
 describe('encrypted binary files (FAC2)', () => {

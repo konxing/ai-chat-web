@@ -77,7 +77,12 @@ export function loadEnv(): AppEnv {
     }
     for (const [id, key] of Object.entries(ring)) {
       if (!/^[A-Za-z0-9_-]{1,16}$/.test(id)) throw new Error(`Invalid key id: ${id}`);
-      masterKeys.set(id, decodeKey(key, `MASTER_KEYRING.${id}`));
+      const decoded = decodeKey(key, `MASTER_KEYRING.${id}`);
+      const existing = masterKeys.get(id);
+      if (existing && !existing.equals(decoded)) {
+        throw new Error('MASTER_KEYRING conflicts with MASTER_KEY for MASTER_KEY_ID');
+      }
+      masterKeys.set(id, decoded);
     }
   }
 
