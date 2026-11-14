@@ -222,7 +222,8 @@ async function main() {
         console.warn(`rotate: missing attachment file ${attachment.storageKey}`);
         continue;
       }
-      if (encrypted.length < 5 || encrypted.subarray(0, 4).toString('ascii') !== 'FAC1') {
+      const magic = encrypted.subarray(0, 4).toString('ascii');
+      if (encrypted.length < 5 || (magic !== 'FAC1' && magic !== 'FAC2')) {
         // 单个坏文件不该让整轮轮换在半途停下：它继续用旧密钥可读，旧密钥此刻还在环里。
         stats.badFiles += 1;
         console.warn(`rotate: 跳过无法识别的文件格式 ${attachment.storageKey}`);

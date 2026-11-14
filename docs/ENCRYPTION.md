@@ -10,17 +10,19 @@
 | --- | --- | --- |
 | 密码 | Argon2id m=19456 KiB, t=2, p=1 | 独立随机盐，标准 PHC 字符串 |
 | 会话 / CSRF | 32 字节 CSPRNG，SHA-256 存储 | 数据库泄露不能还原 token |
-| 字段加密 | AES-256-GCM，12 字节随机 IV，16 字节 tag | 带 AAD，防记录搬移 |
-| 文件加密 | AES-256-GCM + `FAC1` 容器 | 随机存储 key，原文件名也加密 |
+| 字段加密 | **ChaCha20-Poly1305（v2）**，12 字节随机 nonce，16 字节 tag | 带 AAD，防记录搬移；旧 v1（AES-256-GCM）仅保留解密 |
+| 文件加密 | **ChaCha20-Poly1305 + `FAC2` 容器** | 随机存储 key，原文件名也加密；旧 `FAC1`（AES-GCM）仅保留解密 |
 | 验证码 | 6 位 CSPRNG，HMAC-SHA256 绑定 tokenId、purpose、email、code | 10 分钟、单次、最多 5 次错误 |
-| 备份 | scrypt N=2^15 r=8 p=1 + AES-256-GCM | 独立备份口令 |
+| 备份 | scrypt N=2^15 r=8 p=1 + **ChaCha20-Poly1305（FACBACKUP2）** | 独立备份口令；旧 FACBACKUP1（AES-GCM）仍可恢复 |
 | 完整性 | SHA-256 | 附件与备份清单 |
 
-字段密文格式：
+字段密文格式（新写入一律 v2）：
 
 ```
-enc:v1:<keyId>:<iv-b64url>:<tag-b64url>:<ciphertext-b64url>
+enc:v2:<keyId>:<iv-b64url>:<tag-b64url>:<ciphertext-b64url>
 ```
+
+旧数据仍为 `enc:v1:`（AES-256-GCM），读取时按版本自动选择算法；`rotate-keys` 会把它们重加密为 v2。
 
 AAD 绑定：
 
@@ -32,21 +34,29 @@ AAD 绑定：
   `fieldName` 让同一行里 A 列的密文搬到 B 列也解不开。记忆家族用列名，决策 / 反思 / 画像用
   历史短名；两套口径与 25 个密文列的唯一出处是 `src/lib/cognitive/encrypted-columns.ts`。
 
-把一条记录的密文复制到另一条记录会导致 GCM 认证失败，而不是静默解密。
+把一条记录的密文复制到另一条记录会导致 Poly1305 认证失败，而不是静默解密。
 
-文件容器：
-
-```
-magic "FAC1" (4) | keyIdLen (1) | keyId (1..16) | IV (12) | tag (16) | ciphertext
-```
-
-备份容器：
+文件容器（新写入 FAC2；旧 FAC1 仍可读）：
 
 ```
-magic "FACBACKUP1" (10) | salt (16) | IV (12) | tag (16) | AES-GCM(gzip tar)
+magic "FAC2" (4) | keyIdLen (1) | keyId (1..16) | nonce (12) | tag (16) | ciphertext
+```
+
+备份容器（新写入 FACBACKUP2；旧 FACBACKUP1 仍可恢复）：
+
+```
+magic "FACBACKUP2" (10) | salt (16) | nonce (12) | tag (16) | ChaCha20-Poly1305(gzip tar)
 ```
 
 备份内部：`manifest.json`（含 db.dump / uploads.tar.gz 的 SHA-256、字节数、创建时间）+ `db.dump`（pg_dump custom）+ `uploads.tar.gz`。
+
+## 为什么是 ChaCha20-Poly1305（v2）
+
+- **AEAD 认证加密**：256 位密钥、96 位随机 nonce、128 位 Poly1305 tag，机密性与完整性一体；AAD 绑定记录归属，密文搬移即认证失败。
+- **纯软件常量时间**：不依赖 AES-NI 硬件指令，在无 AES 加速的 CPU（部分 ARM/老旧 VPS）上吞吐稳定且通常更快，也避免表实现 AES 的缓存侧信道面。
+- **更干净的安全界**：相比 GCM 的 GHASH，Poly1305 的一次性 MAC 安全归约更直接，没有 GCM 在多消息/短 tag 场景下的forgery 界松弛问题。
+- 诚实说明：在带 AES-NI 的服务器上 AES-GCM 硬件吞吐可能更高；选 ChaCha20-Poly1305 是为了**跨平台一致的常量时间性能与更稳妥的 AEAD 默认**，不是宣称在所有硬件上都更快。
+- **向后兼容**：v1（`enc:v1:` / `FAC1` / `FACBACKUP1`，AES-256-GCM）只保留解密；新写入一律 v2。`rotate-keys` 与一次正常备份/恢复即可把存量迁到 v2；未迁移前旧数据照常可读。
 
 ## 主密钥与 keyring
 
@@ -84,7 +94,7 @@ npm run rotate-keys -- --new-key-id k2
 - 逐表逐行重加密认知层全部 **25 个密文列**（九个模型；24 个字符串 + 1 个 Bytes 向量）。
   清单来自 `COGNITIVE_ENCRYPTED_COLUMNS`，脚本不手抄 AAD：新增密文列漏登记时，
   单元测试的「schema ↔ 表逐列对照」会直接红；
-- 解密每个 `FAC1` 文件并用新 key 原子重写（同一目录临时文件 + rename）；
+- 解密每个 `FAC1`/`FAC2` 文件并用新 key 原子重写为 `FAC2`（同一目录临时文件 + rename）；
 - 跳过已在新 key 上的记录/文件；无法识别的文件格式会告警并跳过，不再中断整轮轮换；
 - **在改动任何数据之前**把新密钥写入 `ROTATE_KEY_DIR`（默认 `BACKUP_DIR/key-rotation`，文件已存在则拒绝覆盖）：轮换中途失败时，已改成新密钥的那部分数据仍然解得开；
 - 只打印文件路径，不把密钥打印到 stdout（stdout 会进 journald 与 SSH 会话记录），也**不会**自动改 `.env`，避免误覆盖；
@@ -93,21 +103,21 @@ npm run rotate-keys -- --new-key-id k2
 Windows 上文件权限从目录继承，`0o600` 不起作用。按 [DEPLOYMENT.md 第 13 节](DEPLOYMENT.md) 的基线把 `D:\FamilyAIChat` 收紧后，`backups\key-rotation` 会继承下来，只有属主、SYSTEM 和 Administrators 能读，无需额外操作。没做那套基线时，至少把这个目录单独收紧到当前用户，例如
 `icacls "D:\\FamilyAIChat\\backups\\key-rotation" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"`。
 
-测试证据：集成测试在隔离数据库中执行了真实轮换（k1 → it2），确认所有 Chat 标题前缀为 `enc:v1:it2:`，重启后聊天、消息、附件仍可解密；单元测试覆盖篡改密文/tag/AAD、旧 key 解密、未知 key id 失败。
+测试证据：集成测试在隔离数据库中执行了真实轮换（k1 → it2），确认所有 Chat 标题前缀为 `enc:v2:it2:`，重启后聊天、消息、附件仍可解密；单元测试覆盖 v2 篡改密文/tag/AAD、旧 v1/FAC1 解密兼容、旧 key 解密、未知 key id 失败。
 
 ## 备份加密
 
 `BACKUP_PASSPHRASE` 与主密钥独立。备份口令至少 12 字符，建议 24+ 随机字符，放在与主密钥不同的密码管理器条目中。
 
 - 备份文件即使泄露，没有口令无法解密；
-- 恢复前会校验 magic、GCM tag、manifest 中的 SHA-256；
+- 恢复前会校验 magic、AEAD tag（Poly1305 / 旧 GCM）、manifest 中的 SHA-256；
 - `npm run backup` 默认只保留最新 30 份 `.facbackup`（`BACKUP_KEEP`，`--keep 0` 关闭），只删除自己命名的备份文件，其它文件不碰；
 - `pg_dump` / `pg_restore` 的数据库口令通过 `PGPASSWORD` 环境变量传给子进程，不出现在命令行上（本机上任何进程都能读到 argv）；
 - 恢复旧备份时，应用必须拥有该备份中密文对应的 key id（通常需要保留历史 `MASTER_KEYRING`）。如果已经删除旧 key，旧备份中的聊天字段将无法解密。
 
 ## 密钥存放建议
 
-1. **单机家庭部署**：`.env` 由服务账号持有，`chmod 600`，磁盘加密（LUKS）可选；离线备份主密钥。
+1. **单机私人部署**：`.env` 由服务账号持有，`chmod 600`，磁盘加密（LUKS）可选；离线备份主密钥。
 2. **systemd**：可用 `LoadCredential=` 把密钥文件挂到 `$CREDENTIALS_DIRECTORY`，再由启动脚本导出为环境变量；注意不要写入日志。
 3. **Docker**：可用 Compose secrets / 外部 secret manager 注入环境变量；不要把密钥写进镜像、compose 文件或 Git。
 4. **更高隔离**：接入 KMS/HSM 需要改造 `keyFor()` 为远程解包/加密调用；当前版本未集成，文档不宣称具备该能力。

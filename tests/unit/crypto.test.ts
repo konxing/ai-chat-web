@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createCipheriv, randomBytes } from 'node:crypto';
 import {
+  bufferKeyId,
   cipherKeyId,
   currentKeyId,
   decryptBuffer,
@@ -27,13 +29,13 @@ beforeEach(() => {
   useKeys('ka', keyA);
 });
 
-describe('AES-256-GCM string encryption', () => {
+describe('ChaCha20-Poly1305 (v2) string encryption', () => {
   it('round-trips Unicode plaintext with AAD', () => {
-    const ciphertext = encryptString('家庭聊天 · secret 🔐', 'message:abc');
-    expect(ciphertext.startsWith('enc:v1:ka:')).toBe(true);
-    expect(ciphertext).not.toContain('家庭聊天');
+    const ciphertext = encryptString('私人聊天 · secret 🔐', 'message:abc');
+    expect(ciphertext.startsWith('enc:v2:ka:')).toBe(true);
+    expect(ciphertext).not.toContain('私人聊天');
     expect(cipherKeyId(ciphertext)).toBe('ka');
-    expect(decryptString(ciphertext, 'message:abc')).toBe('家庭聊天 · secret 🔐');
+    expect(decryptString(ciphertext, 'message:abc')).toBe('私人聊天 · secret 🔐');
   });
 
   it('uses a fresh IV for every encryption', () => {
@@ -54,7 +56,7 @@ describe('AES-256-GCM string encryption', () => {
     expect(() => decryptString(tamperedTag.join(':'), 'message:abc')).toThrow();
 
     expect(() => decryptString(payload, 'message:other')).toThrow();
-    expect(() => decryptString('enc:v2:ka:a:b:c')).toThrow();
+    expect(() => decryptString('enc:v9:ka:a:b:c')).toThrow();
   });
 
   it('decrypts data encrypted under an old key kept in the keyring', () => {
@@ -73,11 +75,11 @@ describe('AES-256-GCM string encryption', () => {
   });
 });
 
-describe('encrypted binary files (FAC1)', () => {
+describe('encrypted binary files (FAC2)', () => {
   it('round-trips binary data with AAD and records the key id', () => {
     const plain = Buffer.from([0, 1, 2, 255, 254, 10, 13]);
     const encrypted = encryptBuffer(plain, 'file:one');
-    expect(encrypted.subarray(0, 4).toString('ascii')).toBe('FAC1');
+    expect(encrypted.subarray(0, 4).toString('ascii')).toBe('FAC2');
     expect(encrypted[4]).toBe(2);
     expect(encrypted.subarray(5, 7).toString('utf8')).toBe('ka');
     expect(encrypted.includes(plain)).toBe(false);
@@ -103,6 +105,34 @@ describe('encrypted binary files (FAC1)', () => {
     const encrypted = encryptBuffer(Buffer.from('old file'), 'file:legacy');
     useKeys('kb', keyB, { ka: keyA });
     expect(decryptBuffer(encrypted, 'file:legacy').toString()).toBe('old file');
+  });
+});
+
+describe('legacy v1 / FAC1 (AES-256-GCM) read compatibility', () => {
+  const b64url = (b: Buffer) => b.toString('base64url');
+  const legacyKey = Buffer.alloc(32, 1);
+
+  it('decrypts a v1 string written by the old AES-256-GCM code', () => {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', legacyKey, iv, { authTagLength: 16 });
+    cipher.setAAD(Buffer.from('message:legacy', 'utf8'));
+    const ct = Buffer.concat([cipher.update('old secret', 'utf8'), cipher.final()]);
+    const payload = ['enc:v1:ka', b64url(iv), b64url(cipher.getAuthTag()), b64url(ct)].join(':');
+    expect(cipherKeyId(payload)).toBe('ka');
+    expect(decryptString(payload, 'message:legacy')).toBe('old secret');
+    expect(() => decryptString(payload, 'message:other')).toThrow();
+  });
+
+  it('decrypts a FAC1 buffer written by the old AES-256-GCM code', () => {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', legacyKey, iv, { authTagLength: 16 });
+    cipher.setAAD(Buffer.from('file:legacy', 'utf8'));
+    const plain = Buffer.from('old file bytes');
+    const ct = Buffer.concat([cipher.update(plain), cipher.final()]);
+    const keyId = Buffer.from('ka', 'utf8');
+    const container = Buffer.concat([Buffer.from('FAC1'), Buffer.from([keyId.length]), keyId, iv, cipher.getAuthTag(), ct]);
+    expect(bufferKeyId(container)).toBe('ka');
+    expect(decryptBuffer(container, 'file:legacy').equals(plain)).toBe(true);
   });
 });
 

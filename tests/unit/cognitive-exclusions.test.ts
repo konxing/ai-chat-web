@@ -148,7 +148,7 @@ describe('记录排除', () => {
 
     const [row] = [...db.rows.values()];
     expect(row?.contentCiphertext).not.toContain('我住在杭州');
-    expect(String(row?.contentCiphertext)).toMatch(/^enc:v1:/);
+    expect(String(row?.contentCiphertext)).toMatch(/^enc:v2:/);
   });
 
   it('同一句话第二次删不会多出第二行', async () => {

@@ -16,7 +16,8 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 
-const MAGIC = Buffer.from('FACBACKUP1');
+const MAGIC = Buffer.from('FACBACKUP2');
+const LEGACY_MAGIC = Buffer.from('FACBACKUP1');
 const HEADER = 10 + 16 + 12 + 16;
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
 
@@ -115,7 +116,8 @@ async function main() {
     await handle.close();
   }
   const magic = header.subarray(0, 10);
-  if (!magic.equals(MAGIC)) throw new Error('备份文件标识无效');
+  const isLegacy = magic.equals(LEGACY_MAGIC);
+  if (!isLegacy && !magic.equals(MAGIC)) throw new Error('备份文件标识无效');
   const salt = header.subarray(10, 26);
   const iv = header.subarray(26, 38);
   const tag = header.subarray(38, 54);
@@ -130,8 +132,8 @@ async function main() {
   try {
     console.error('restore: verifying and decrypting');
     const key = crypto.scryptSync(passphrase, salt, 32, SCRYPT);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAAD(MAGIC);
+    const decipher = crypto.createDecipheriv(isLegacy ? 'aes-256-gcm' : 'chacha20-poly1305', key, iv, { authTagLength: 16 });
+    decipher.setAAD(magic);
     decipher.setAuthTag(tag);
     await pipeline(
       fs.createReadStream(source, { start: HEADER }),

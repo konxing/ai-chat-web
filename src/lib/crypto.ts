@@ -8,8 +8,27 @@ import {
 } from 'node:crypto';
 import { loadEnv } from './env';
 
-const STRING_PREFIX = 'enc:v1';
-const FILE_MAGIC = Buffer.from('FAC1', 'ascii');
+const STRING_PREFIX = 'enc:v2';
+const FILE_MAGIC = Buffer.from('FAC2', 'ascii');
+const LEGACY_FILE_MAGIC = Buffer.from('FAC1', 'ascii');
+
+/**
+ * v2 起字段/文件 AEAD 改用 ChaCha20-Poly1305（RFC 8439）：纯软件常量时间、不依赖 AES-NI，
+ * AEAD 安全界比 GCM 的 GHASH 更干净；256 位密钥、96 位随机 nonce、128 位 tag，AAD 与 keyring 轮换不变。
+ * v1（AES-256-GCM / FAC1）仅保留**解密**兼容，新写入一律 v2。
+ */
+type AeadVersion = 'v1' | 'v2';
+// 分支用字面量算法名，命中 Node 的 AEAD 重载（联合类型会落到通用 Transform 重载）。
+function newCipher(key: Buffer, iv: Buffer, legacy: boolean) {
+  return legacy
+    ? createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 })
+    : createCipheriv('chacha20-poly1305', key, iv, { authTagLength: 16 });
+}
+function newDecipher(key: Buffer, iv: Buffer, legacy: boolean) {
+  return legacy
+    ? createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 })
+    : createDecipheriv('chacha20-poly1305', key, iv, { authTagLength: 16 });
+}
 
 function b64url(buf: Buffer): string {
   return buf.toString('base64url');
@@ -33,7 +52,7 @@ export function currentKeyId(): string {
 export function encryptString(plaintext: string, aad = ''): string {
   const keyId = currentKeyId();
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', keyFor(keyId), iv, { authTagLength: 16 });
+  const cipher = newCipher(keyFor(keyId), iv, false);
   if (aad) cipher.setAAD(Buffer.from(aad, 'utf8'));
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -42,14 +61,14 @@ export function encryptString(plaintext: string, aad = ''): string {
 
 export function decryptString(payload: string, aad = ''): string {
   const parts = payload.split(':');
-  if (parts.length !== 6 || parts[0] !== 'enc' || parts[1] !== 'v1') {
+  if (parts.length !== 6 || parts[0] !== 'enc' || (parts[1] !== 'v1' && parts[1] !== 'v2')) {
     throw new Error('Unsupported ciphertext format');
   }
-  const [, , keyId, ivB64, tagB64, ctB64] = parts;
+  const [, version, keyId, ivB64, tagB64, ctB64] = parts;
   const iv = fromB64url(ivB64);
   const tag = fromB64url(tagB64);
   if (iv.length !== 12 || tag.length !== 16) throw new Error('Invalid ciphertext parameters');
-  const decipher = createDecipheriv('aes-256-gcm', keyFor(keyId), iv, { authTagLength: 16 });
+  const decipher = newDecipher(keyFor(keyId), iv, version === 'v1');
   if (aad) decipher.setAAD(Buffer.from(aad, 'utf8'));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(fromB64url(ctB64)), decipher.final()]).toString('utf8');
@@ -58,7 +77,7 @@ export function decryptString(payload: string, aad = ''): string {
 /** Returns the key id stored in a ciphertext, without decrypting it. */
 export function cipherKeyId(payload: string): string | null {
   const parts = payload.split(':');
-  if (parts.length !== 6 || parts[0] !== 'enc' || parts[1] !== 'v1') return null;
+  if (parts.length !== 6 || parts[0] !== 'enc' || (parts[1] !== 'v1' && parts[1] !== 'v2')) return null;
   return parts[2];
 }
 
@@ -67,7 +86,7 @@ export function encryptBuffer(plaintext: Buffer, aad = ''): Buffer {
   const keyIdBuf = Buffer.from(keyId, 'utf8');
   if (keyIdBuf.length > 16) throw new Error('Key id too long');
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', keyFor(keyId), iv, { authTagLength: 16 });
+  const cipher = newCipher(keyFor(keyId), iv, false);
   if (aad) cipher.setAAD(Buffer.from(aad, 'utf8'));
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -83,7 +102,8 @@ export function encryptBuffer(plaintext: Buffer, aad = ''): Buffer {
 
 export function decryptBuffer(payload: Buffer, aad = ''): Buffer {
   if (payload.length < 4 + 1 + 12 + 16) throw new Error('Invalid encrypted file');
-  if (!payload.subarray(0, 4).equals(FILE_MAGIC)) throw new Error('Invalid file magic');
+  const isLegacy = payload.subarray(0, 4).equals(LEGACY_FILE_MAGIC);
+  if (!isLegacy && !payload.subarray(0, 4).equals(FILE_MAGIC)) throw new Error('Invalid file magic');
   const keyIdLen = payload[4];
   if (keyIdLen < 1 || keyIdLen > 16) throw new Error('Invalid key id length');
   let offset = 5;
@@ -94,7 +114,7 @@ export function decryptBuffer(payload: Buffer, aad = ''): Buffer {
   offset += 12;
   const tag = payload.subarray(offset, offset + 16);
   offset += 16;
-  const decipher = createDecipheriv('aes-256-gcm', keyFor(keyId), iv, { authTagLength: 16 });
+  const decipher = newDecipher(keyFor(keyId), iv, isLegacy);
   if (aad) decipher.setAAD(Buffer.from(aad, 'utf8'));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(payload.subarray(offset)), decipher.final()]);
@@ -103,7 +123,7 @@ export function decryptBuffer(payload: Buffer, aad = ''): Buffer {
 /** `cipherKeyId` 的 Bytes 版：只读包头的 keyId，不解密。格式不对返回 null。 */
 export function bufferKeyId(payload: Buffer): string | null {
   if (!Buffer.isBuffer(payload) || payload.length < 5 + 1 + 12 + 16) return null;
-  if (!payload.subarray(0, 4).equals(FILE_MAGIC)) return null;
+  if (!payload.subarray(0, 4).equals(FILE_MAGIC) && !payload.subarray(0, 4).equals(LEGACY_FILE_MAGIC)) return null;
   const keyIdLen = payload[4];
   if (keyIdLen < 1 || keyIdLen > 16) return null;
   if (payload.length < 5 + keyIdLen + 12 + 16) return null;

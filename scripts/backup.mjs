@@ -3,8 +3,9 @@
  * Encrypted backup utility.
  *
  * Produces one `.facbackup` file containing:
- *   header: magic "FACBACKUP1" | salt(16) | iv(12) | authTag(16) | ciphertext
- *   ciphertext: gzip tar of manifest.json + db.dump + uploads.tar.gz
+ *   header: magic "FACBACKUP2" | salt(16) | iv(12) | authTag(16) | ciphertext
+ *   ciphertext: ChaCha20-Poly1305(gzip tar of manifest.json + db.dump + uploads.tar.gz)
+ *   (legacy "FACBACKUP1" = AES-256-GCM; restore.mjs still reads it)
  *
  * Usage: node scripts/backup.mjs [--out DIR] [--keep N] [--json]
  * Requires: pg_dump, tar, BACKUP_PASSPHRASE, DATABASE_URL, UPLOAD_DIR.
@@ -18,7 +19,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 
-const MAGIC = Buffer.from('FACBACKUP1');
+const MAGIC = Buffer.from('FACBACKUP2');
 const SCRYPT = { N: 1 << 15, r: 8, p: 1, maxmem: 128 * 1024 * 1024 };
 
 function loadDotEnv() {
@@ -201,7 +202,7 @@ async function main() {
     const salt = crypto.randomBytes(16);
     const iv = crypto.randomBytes(12);
     const key = crypto.scryptSync(passphrase, salt, 32, SCRYPT);
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const cipher = crypto.createCipheriv('chacha20-poly1305', key, iv, { authTagLength: 16 });
     cipher.setAAD(MAGIC);
     // Encrypt to a temporary file first, then assemble header + tag + ciphertext atomically.
     const cipherFile = path.join(work, 'payload.enc');

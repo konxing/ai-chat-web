@@ -161,7 +161,7 @@ describe('记录证据', () => {
     await record({ kind: 'contradicts', origin: 'userConfirmed', sourceMessageId: 'msg-1', note: '项目已经换成 PostgreSQL' });
 
     expect(String(db.rows[0]?.noteCiphertext)).not.toContain('PostgreSQL');
-    expect(String(db.rows[0]?.noteCiphertext)).toMatch(/^enc:v1:/);
+    expect(String(db.rows[0]?.noteCiphertext)).toMatch(/^enc:v2:/);
 
     const { listEvidence } = await evidence();
     const [entry] = await listEvidence('mem-1', USER);

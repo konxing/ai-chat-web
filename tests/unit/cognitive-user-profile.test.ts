@@ -114,7 +114,7 @@ describe('画像条目：写进去就是确认过的', () => {
     const { createProfileEntry } = await service();
     await createProfileEntry(input({ content: '我下个月要去京都出差' }));
     const row = rows()[0];
-    expect(String(row.contentCiphertext).startsWith('enc:v1')).toBe(true);
+    expect(String(row.contentCiphertext).startsWith('enc:v2')).toBe(true);
     expect(JSON.stringify(row)).not.toContain('京都');
   });
 
