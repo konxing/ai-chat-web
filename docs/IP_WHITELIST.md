@@ -6,7 +6,7 @@
 
 | 层 | 位置 | 作用 | 动态性 |
 | --- | --- | --- | --- |
-| 1 | 云安全组 / 防火墙 | 只放行家庭 IP 到 80/443；SSH 仅管理 IP | 云控制台变更 |
+| 1 | 云安全组 / 防火墙 | 只放行可信 IP 到 80/443；SSH 仅管理 IP | 云控制台变更 |
 | 2 | nftables | 主机层默认丢弃 80/443，直连 3000 丢弃 | `sync:firewall` 生成，`--apply` 生效 |
 | 3 | Nginx | TLS、限速、`auth_request /_ip_gate` 动态询问应用 | ≤ 2×`IP_CACHE_MS` |
 | 4 | Node `server.js` | 所有请求（含 `_next/static`、API、健康检查）先过白名单 | ≤ 2×`IP_CACHE_MS`（默认约 2 秒） |
@@ -83,7 +83,7 @@ sudo nft delete table inet family_ai_chat
 
 ## 云安全组
 
-- 入站：80/443 仅允许家庭公网 IP/CIDR；22 仅管理 IP；其他全部拒绝。
+- 入站：80/443 仅允许可信公网 IP/CIDR；22 仅管理 IP；其他全部拒绝。
 - 出站：限制到 PostgreSQL（如本机）、SMTP、AI Provider；不需要全开。
 - IPv6 同样配置；不要只配 IPv4。
 - 修改前记录当前 IP，保留云厂商 Web 控制台/串口控制台。

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * 三条钉子：
  *
  * 一、**前缀就是隔离墙。** 虚拟用户名一律 `acc_<runId>_<序号>`，清理只认这个前缀，
- * 而且逐行复核角色——一行 OWNER 混进来也不删。真实家庭账号（konxing / zbh）
+ * 而且逐行复核角色——一行 OWNER 混进来也不删。真实用户账号（konxing / zbh）
  * 不在前缀里，路径上根本够不到。
  *
  * 二、**runId 不合法就什么都不做。** 太短、带大写、带符号的 runId 会让

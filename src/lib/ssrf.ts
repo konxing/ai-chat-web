@@ -173,7 +173,7 @@ export async function safeFetch(
       signal,
       headers: {
         ...(init.headers as Record<string, string> | undefined),
-        'User-Agent': 'FamilyAIChat/1.0'
+        'User-Agent': 'AIChat/1.0'
       }
     });
     if ([301, 302, 303, 307, 308].includes(response.status)) {

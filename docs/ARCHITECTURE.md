@@ -6,7 +6,7 @@
 浏览器
   │  HTTPS / HTTP(301)
   ▼
-① 云安全组（可选，最外层）        只放行 80/443，来源=家庭 IP
+① 云安全组（可选，最外层）        只放行 80/443，来源=可信 IP
   ▼
 ② nftables（可选，主机层）        默认丢弃 80/443，直连 3000 丢弃
   ▼
@@ -22,7 +22,7 @@
   │   requireOwner → 角色
   │   requireOwnerPassword → 敏感操作二次验证
   ▼
-⑥ PostgreSQL + 本地磁盘           加密字段 / FAC1 加密文件
+⑥ PostgreSQL + 本地磁盘           加密字段 / FAC2 加密文件
 ```
 
 四层网络防护都可以独立生效。即使 Nginx 配置被绕过，`server.js` 仍会拒绝未授权 IP；即使有人直接访问 3000，nftables/绑定地址/白名单仍拦。App 层永远默认拒绝。
@@ -42,7 +42,7 @@
 1. `POST /api/chats/[id]/messages`：会话 + CSRF + 同源校验，校验聊天归属（`userId`），读取加密历史，解密后构建上下文。
 2. 服务器从管理员/用户配置的 provider 解密 API Key（仅服务器内存），进行 SSRF 校验与 DNS 固定，向 OpenAI 兼容接口发起流式请求。
 3. 响应以 `text/event-stream` 透传给浏览器；Nginx `proxy_buffering off` 保证逐字到达。
-4. 用户消息与助手消息以 AES-256-GCM 密文落库；中断时保存 `PARTIAL`/`ERROR` 状态。
+4. 用户消息与助手消息以 ChaCha20-Poly1305（v2）密文落库；中断时保存 `PARTIAL`/`ERROR` 状态。
 5. 浏览器端用 `react-markdown` + `remark-gfm` + `remark-math/rehype-katex` 渲染；代码块可复制。
 
 ### 认知读侧（每一轮回答之前）
@@ -91,7 +91,7 @@
 
 1. `POST /api/upload`（multipart）限制大小与字段；根据魔数识别类型，仅允许图片、PDF、DOCX、TXT/MD/CSV、常见音频。
 2. 文件名清洗（防路径穿越/XSS），SHA-256 记录；文本类解析（PDF/DOCX/TXT）后按 3000 字符、200 重叠分块，分块与提取文本加密。
-3. 文件内容用 `FAC1` 容器加密写盘，数据库只存随机 `storageKey`。下载时校验附件归属，解密后以安全头返回。
+3. 文件内容用 `FAC2` 容器加密写盘，数据库只存随机 `storageKey`。下载时校验附件归属，解密后以安全头返回。
 4. 语音优先浏览器原生语音识别；若不支持且配置了音频模型，则 `MediaRecorder` 录音并调用 `/api/stt` 转写。
 
 ### 管理后台
@@ -110,7 +110,7 @@
 | `src/lib/auth.ts` | `requireUser` / `requireOwner` / 二次密码校验 |
 | `src/lib/session.ts` | 不透明会话 token、CSRF、过期/撤销 |
 | `src/lib/password.ts` | Argon2id 哈希与密码策略 |
-| `src/lib/crypto.ts` | AES-256-GCM、keyring、FAC1、SHA-256/HMAC |
+| `src/lib/crypto.ts` | ChaCha20-Poly1305(v2)/AES-GCM(v1 读)、keyring、FAC2/FAC1、SHA-256/HMAC |
 | `src/lib/ip.ts` | IPv4/IPv6/CIDR 规范化与匹配 |
 | `src/lib/ssrf.ts` | URL 校验、DNS pinning、重定向阻断 |
 | `src/lib/ai.ts` / `providers.ts` | OpenAI 兼容流式调用、能力与参数 |

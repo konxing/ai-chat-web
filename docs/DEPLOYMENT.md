@@ -117,7 +117,7 @@ curl -sI https://chat.example.com/login | grep -i strict-transport
 
 在云控制台（不是本仓库）配置：
 
-- 入站 80/443：仅家庭公网 IP/CIDR；IPv6 也配置。
+- 入站 80/443：仅可信公网 IP/CIDR；IPv6 也配置。
 - 入站 22：仅管理 IP；最好通过 VPN/堡垒机。
 - 其他入站：拒绝。
 - 出站：至少 DNS、SMTP、AI Provider；不需要全开。
@@ -327,7 +327,7 @@ npm run db:migrate      # 生产：prisma migrate deploy
 反思扫描的触发）。要求与限制：
 
 - **单实例假设**：每个实例都会启动 worker。多副本不会重复执行（条件 UPDATE + fencing token），
-  但抢输的一方会白占一次 `attempts`；家庭单实例部署不需要额外配置。
+  但抢输的一方会白占一次 `attempts`；单实例部署不需要额外配置。
 - worker 的异常全部被吞掉：`server.js` 直接 `await app.prepare()`，`register()` 抛错会让端口不监听，
   所以它的失败只能从日志看（`cognitive.task_*`、`cognitive.read_failed`、`cognitive.write_failed`）。
 - 任务表只装欠着的活：成功与作废都删行；判死（`DEAD`）的行留下给「失败任务」屏与 `logs:prune`。
@@ -347,7 +347,7 @@ npm run rotate-keys -- --new-key-id k2 --dry-run   # 先看数
 npm run rotate-keys -- --new-key-id k2             # 真正执行
 ```
 
-脚本会重裹：聊天标题、消息、Provider Key、附件名/文本/分块、FAC1 文件，
+脚本会重裹：聊天标题、消息、Provider Key、附件名/文本/分块、FAC1/FAC2 文件，
 以及认知层全部 **25 个密文列**（由 `cognitive-encrypted-columns` 表驱动，逐行、逐列）。
 新密钥先落盘再动数据；旧密钥留在 `MASTER_KEYRING`。确认服务正常后再移除旧 key。
 **移除旧 key 之前，历史备份可能解不开；请先确认备份策略。**

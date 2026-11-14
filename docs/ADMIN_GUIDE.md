@@ -75,7 +75,7 @@ printf '%s\n' "$NEW_PASSWORD" | npx tsx scripts/emergency.ts --reset-owner-passw
 ### 服务状态
 Node 版本、运行时长、负载、内存、磁盘、数据库连通性与延迟/大小/版本、当前 APP_URL/NODE_ENV。只读。
 
-## 邀请家庭成员
+## 邀请成员
 
 1. 系统配置 → 打开“允许注册”。
 2. 把站点地址与注册说明线下发给家人；他们用邮箱验证码注册（SMTP 必须已配置，否则验证码只出现在服务器日志）。

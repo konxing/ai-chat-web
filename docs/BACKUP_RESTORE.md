@@ -6,12 +6,12 @@
 
 - `manifest.json`：格式版本、创建时间、db.dump / uploads.tar.gz 的 SHA-256 与大小；
 - `db.dump`：`pg_dump --format=custom --no-owner --no-privileges`；
-- `uploads.tar.gz`：整个上传目录（含 FAC1 加密文件）。
+- `uploads.tar.gz`：整个上传目录（含 FAC1/FAC2 加密文件）。
 
 整个 tar 包用备份口令派生的密钥加密：
 
 ```
-"FACBACKUP1" (10) | salt (16) | IV (12) | tag (16) | AES-256-GCM(gzip tar)
+"FACBACKUP2" (10) | salt (16) | nonce (12) | tag (16) | ChaCha20-Poly1305(gzip tar)；旧 FACBACKUP1 仍可恢复
 scrypt(N=2^15, r=8, p=1)
 ```
 
@@ -107,7 +107,7 @@ Docker 中恢复的注意点：
 3. `prisma migrate deploy`；
 4. `npm run restore -- <备份> --yes`（或 `--db-only` + 手动上传目录）；
 5. 重新配置 Nginx/nftables/云安全组；
-6. 先只允许管理 IP，验证后再逐步放行家庭 IP。
+6. 先只允许管理 IP，验证后再逐步放行可信 IP。
 
 ## 保留策略
 
@@ -124,7 +124,7 @@ Docker 中恢复的注意点：
 - 创建加密备份并下载；
 - 校验 SHA-256 与 sidecar 一致；
 - 将备份恢复到独立测试数据库（`family_chat_test_restore`），确认用户/聊天可读；
-- 篡改备份字节后恢复失败（GCM/清单校验）；
+- 篡改备份字节后恢复失败（AEAD/清单校验）；
 - 主密钥轮换后重启仍可解密历史聊天与附件（认知层 25 个密文列自 11-06 起也进轮换覆盖表，见
   [ENCRYPTION.md](ENCRYPTION.md)）；
 - 恢复脚本的 `--db-only` 路径由脚本参数与单元/集成流程覆盖（完整双恢复未重复执行）。

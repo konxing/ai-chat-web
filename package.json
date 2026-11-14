@@ -2,7 +2,7 @@
   "name": "family-ai-chat",
   "version": "1.0.0",
   "private": true,
-  "description": "Private, self-hosted AI chat for a family, with IP allowlisting, per-user isolation and encrypted storage.",
+  "description": "Private, self-hosted AI chat with IP allowlisting, per-user isolation and encrypted storage.",
   "scripts": {
     "dev": "node server.js --dev",
     "build": "prisma generate && next build",

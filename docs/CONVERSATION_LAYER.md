@@ -8,7 +8,7 @@
 ### 现有聊天调用链
 - 入口：`src/app/api/chats/[id]/messages/route.ts` → `buildConversation()`（`src/lib/chats.ts:378`）
   → `streamChatCompletion()`（`src/lib/ai.ts:133`）。流式 SSE 保持不变。
-- System Prompt 现状：`chats.ts:402-411` 一段硬编码字符串（可靠温和家庭助手 + 语言 + Markdown/LaTeX + 文档优先 + 不声称看到未提供文件）。
+- System Prompt 现状：`chats.ts:402-411` 一段硬编码字符串（可靠温和助手 + 语言 + Markdown/LaTeX + 文档优先 + 不声称看到未提供文件）。
 - 认知块：`chats.ts:415-424` `runCognitiveReads()` 产出若干 `system` 块，排在历史之前；`citedMemoryIds` 只记真进提示词的记忆 id。
 - 历史窗口：`chats.ts:396-436` 最近 `CONTEXT_MESSAGE_LIMIT` 条、字符预算 40_000，ERROR 行排除、PARTIAL 保留。
 - Token 统计：`ai.ts:120-127` `parseUsage()` 读 `prompt_tokens/completion_tokens`，messages 路由落库 `inputTokens/outputTokens`。

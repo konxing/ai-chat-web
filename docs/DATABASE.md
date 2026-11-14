@@ -197,7 +197,7 @@ npm run bootstrap -- ...  # 唯一 OWNER + 初始 IP + 默认设置
 
 - 数据库与上传目录一起备份，格式见 [BACKUP_RESTORE.md](BACKUP_RESTORE.md)。
 - 建议保留 7 份日备份 + 1 份月备份；备份文件本身已加密，仍应存放在不同介质/账户。
-- 日志表可按需在运维窗口清理（`IpAccessLog`、`LoginLog`），但不要删除 `AuditLog` 中与安全事件相关的记录；家庭规模通常无需自动清理。
+- 日志表可按需在运维窗口清理（`IpAccessLog`、`LoginLog`），但不要删除 `AuditLog` 中与安全事件相关的记录；小规模通常无需自动清理。
 
 ## 性能参数（PostgreSQL）
 
@@ -211,7 +211,7 @@ npm run bootstrap -- ...  # 唯一 OWNER + 初始 IP + 默认设置
 | `shared_buffers` | 128 MB | 物理内存的 1/4 | postmaster（要重启） | 默认值。家用机器内存富余时上调能减少密文列的重复读盘。 |
 | `max_connections` | 100 | 保持 | postmaster（要重启） | 要和连接串里的 `connection_limit` 一起看：应用池 + `pg_dump` + 迁移 + 手工 psql 必须共用这 100 个槽位。 |
 
-应用侧对应地把连接串写成 `... ?schema=public&connection_limit=8&pool_timeout=10`（`.env.example` 和 `docker-compose.yml` 已同步）。显式上限的意义不是「更快」，而是把占用钉死：Prisma 的默认池大小是 `物理核数 × 2 + 1`，本机 8 个物理核，单实例默认就能开到 17 条连接，而 `server.js`、`prisma migrate`、备份脚本、手工 psql 共用同一个 `max_connections = 100`。家庭规模的真实并发远小于 8，钉在 8 条不会造成排队，同时给备份和迁移留足余量。
+应用侧对应地把连接串写成 `... ?schema=public&connection_limit=8&pool_timeout=10`（`.env.example` 和 `docker-compose.yml` 已同步）。显式上限的意义不是「更快」，而是把占用钉死：Prisma 的默认池大小是 `物理核数 × 2 + 1`，本机 8 个物理核，单实例默认就能开到 17 条连接，而 `server.js`、`prisma migrate`、备份脚本、手工 psql 共用同一个 `max_connections = 100`。小规模的真实并发远小于 8，钉在 8 条不会造成排队，同时给备份和迁移留足余量。
 
 `context = user` 的三个参数可以零停机改掉，按库设置即可，不需要重启也不需要改配置文件：
 
@@ -225,7 +225,7 @@ psql -U family_chat -d family_chat -c "SHOW random_page_cost;"
 
 想全实例生效就用 `ALTER SYSTEM SET ...` + `SELECT pg_reload_conf();`，同样不用重启。只有 `shared_buffers` / `max_connections` 需要重启：Linux 走 `systemctl restart postgresql`，Windows 改 `D:\FamilyAIChat\pgdata\postgresql.conf` 后重启 PostgreSQL 服务。
 
-一条反直觉的记录，避免后来的人「优化」错方向：密文列是 base64 字符串，TOAST 压缩对它是有效的——实测 `enc:v1:` 载荷用 deflate 能从 100% 压到约 75%（省的是 base64 那 25% 冗余，不是密文本身）。所以不要把这些列改成 `STORAGE EXTERNAL` 关掉压缩，那只会让磁盘和 IO 都多花约三分之一。
+一条反直觉的记录，避免后来的人「优化」错方向：密文列是 base64 字符串，TOAST 压缩对它是有效的——实测 `enc:v2:` 载荷用 deflate 能从 100% 压到约 75%（省的是 base64 那 25% 冗余，不是密文本身）。所以不要把这些列改成 `STORAGE EXTERNAL` 关掉压缩，那只会让磁盘和 IO 都多花约三分之一。
 
 ## 读写路径上已经做掉的事
 
@@ -256,7 +256,7 @@ psql -U family_chat -d family_chat -c "SHOW random_page_cost;"
 
 1. **B（在现有索引上补第三列）确认无效**。它不改变计划：优化器仍然先用 `[userId, supersededAt]` 捞出全部候选行，再做 top-N heapsort，因为 `supersededAt IS NULL` 和 `origin NOT IN` 的谓词夹在中间，第三列的有序性用不上。8000 行 3.365 → 2.848 ms、40000 行 13.536 → 14.989 ms 都在噪声里，等于白付一次写放大和一次迁移。
 2. **只有 C 这种偏索引（把 `supersededAt IS NULL` 放进 WHERE）能变成有序 Index Scan**，收益也真实（40000 行 13.5 ms → 0.75 ms；按 8 条截断的那条读法在 8000 行是 4.033 → 0.055 ms、40000 行 12.480 → 0.033 ms）。但它在**行数小的时候优化器根本不选**（320 行那一档仍是 Sort），要见效至少得单用户上千条活记忆。
-3. **真库现在 `MemoryItem` 是 0 行**（`Attachment` 同样 0 行），家庭规模的量级离触发条件还远。
+3. **真库现在 `MemoryItem` 是 0 行**（`Attachment` 同样 0 行），小规模的量级离触发条件还远。
 
 偏偏 C 表达不出来：Prisma 的 `@@index` 不支持 partial index 谓词，只能写裸 SQL DDL。而这个仓库 `prisma/migrations/` 下 12 个迁移**没有任何一处手写索引 DDL**，索引全部由 schema 声明——引入第一条裸 SQL 索引，就成了「声明式 schema 之外、下一次 `migrate dev` 的 shadow-DB diff 可能生成 `DROP INDEX`」的机制性风险。这个漂移我只做了推理、本机没有影子库无法实测，所以不为它承担未经检验的风险。
 

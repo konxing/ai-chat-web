@@ -15,7 +15,7 @@ import { memory } from './memory-factory';
  * 三、第二个 retracted（s27-m7）与第二个 userConfirmed（s21-m7、s26-m7），把来源档位铺满。
  *
  * 规矩与前两批完全一致（见 fixture-types 文件头）：正文逐字出自声明会话的原话、日期用相对天数、
- * gold 是封闭集合。所有故事全部虚构，未使用任何真实家庭成员的聊天记录。
+ * gold 是封闭集合。所有故事全部虚构，未使用任何真实用户的聊天记录。
  */
 
 export const BATCH2_STORIES: EvalStory[] = [

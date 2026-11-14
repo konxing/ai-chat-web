@@ -23,7 +23,7 @@
 
 ## 加密
 
-- 对称加密：AES-256-GCM，96-bit 随机 IV，128-bit tag；密文格式 `enc:v1:<keyId>:<iv>:<tag>:<ciphertext>`（base64url）。
+- 对称加密：ChaCha20-Poly1305（v2），96-bit 随机 nonce，128-bit tag；密文格式 `enc:v2:<keyId>:<iv>:<tag>:<ciphertext>`（base64url）；旧 `enc:v1:`（AES-256-GCM）仅保留解密。
 - AAD 绑定上下文，防止把密文从一条记录搬到另一条记录：
   - `chat-title:<chatId>`
   - `message:<messageId>`
@@ -38,11 +38,11 @@
     写侧永远只写新口径。
 - 覆盖率：九个认知模型共 25 个密文列（24 字符串 + 1 Bytes 向量），全部在上表登记；
   `tests/unit/cognitive-rotate-coverage.test.ts` 按 schema 逐列对照，漏一列就红。
-- 文件容器 `FAC1`：magic(4) + keyIdLen(1) + keyId + IV(12) + tag(16) + ciphertext；上传文件不以明文落盘。
+- 文件容器 `FAC2`：magic(4) + keyIdLen(1) + keyId + nonce(12) + tag(16) + ciphertext；旧 `FAC1` 仍可读；上传文件不以明文落盘。
 - 完整性：附件元数据记录 SHA-256；下载解密后按原始字节返回；备份清单对 db.dump 与 uploads.tar.gz 记录 SHA-256，恢复前校验。
 - 主密钥：32 字节随机，base64 存放于服务器 `.env`（权限 0600），不进入数据库、代码仓库或聊天内容；支持 `MASTER_KEYRING` 保存旧密钥用于轮换。生产可把 `.env` 由 systemd `LoadCredential`/Docker secret 注入环境，文件本身仍应限制为服务账号可读。
-- 轮换：`npm run rotate-keys -- --new-key-id k2` 逐条重加密聊天标题、消息、Provider Key、附件名/文本/分块、FAC1 文件，以及认知层全部 25 个密文列（覆盖表驱动）；旧 key 保留在 keyring，重启后验证；确认无误后再移除旧 key。**删除旧 key 前，旧备份可能无法解密其历史字段。**
-- 备份：独立 `BACKUP_PASSPHRASE`，scrypt(N=2^15, r=8, p=1) 派生密钥，AES-256-GCM，magic `FACBACKUP1`；备份内容包含数据库 dump 与上传归档。备份口令与主密钥应分开保管。
+- 轮换：`npm run rotate-keys -- --new-key-id k2` 逐条重加密聊天标题、消息、Provider Key、附件名/文本/分块、FAC1/FAC2 文件（重写为 FAC2），以及认知层全部 25 个密文列（覆盖表驱动）；旧 key 保留在 keyring，重启后验证；确认无误后再移除旧 key。**删除旧 key 前，旧备份可能无法解密其历史字段。**
+- 备份：独立 `BACKUP_PASSPHRASE`，scrypt(N=2^15, r=8, p=1) 派生密钥，ChaCha20-Poly1305，magic `FACBACKUP2`（旧 `FACBACKUP1` 仍可恢复）；备份内容包含数据库 dump 与上传归档。备份口令与主密钥应分开保管。
 
 ## Web 安全
 
@@ -101,7 +101,7 @@
 关系描述同理。
 
 **向量不落明文。** 本机 PostgreSQL 没有 pgvector，Prisma 也没有 `Vector` 类型；
-向量以 `FAC1` 密文存进 `MemoryItem.embeddingCiphertext`（Bytes），
+向量以 `FAC2` 密文（旧 `FAC1` 可读）存进 `MemoryItem.embeddingCiphertext`（Bytes），
 读时应用层解密、内存里算余弦，并受维度与数据量上限约束。没有「为了查询方便
 先把明文向量写库」的路径——那会绕开 5.2 的整字段加密。
 
@@ -118,7 +118,7 @@
 
 ## 残余风险与限制
 
-- 应用层限速是单进程内存实现；多实例部署需要 Redis/Nginx 统一限速（当前家庭单实例范围）。
+- 应用层限速是单进程内存实现；多实例部署需要 Redis/Nginx 统一限速（当前单实例范围）。
 - 认知层的密文与主密钥仍在同一台机器、同一个进程环境里；它能防的是「数据库/备份泄露」，
   不防「拿到服务器同用户权限」。更强的隔离同样需要 KMS/HSM，本项目未集成。
 - 向量召回只在代码层完成，尚未用真实 embedding 端点实测；当前线上读侧走关键词，
@@ -128,6 +128,6 @@
 - 主密钥在进程环境中可见；拥有服务器 root/同用户权限的攻击者可读取。更强的隔离需要 KMS/HSM 或独立密钥服务，本项目未集成。
 - 第三方 AI 提供商仍会看到其收到的内容；请选择可信提供商，不要发送不希望外传的信息。
 - 备份口令遗失无法恢复；主密钥遗失则数据库密文与附件不可恢复。
-- Nginx `auth_request` 每个请求多一次内部调用；在家庭规模下可接受，极高流量需改为缓存/专用鉴权服务。
-- 未做浏览器端恶意扩展、已被攻陷的家庭设备、物理访问服务器等威胁的防护。
+- Nginx `auth_request` 每个请求多一次内部调用；在小规模下可接受，极高流量需改为缓存/专用鉴权服务。
+- 未做浏览器端恶意扩展、已被攻陷的用户设备、物理访问服务器等威胁的防护。
 - 自动化测试覆盖 API/网络/加密/恢复，但未包含真实 SMTP、真实第三方模型、真实云安全组与浏览器自动化；见测试报告。

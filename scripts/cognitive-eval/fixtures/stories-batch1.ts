@@ -16,7 +16,7 @@ import { memory } from './memory-factory';
  *     那几条捞不捞得回来，就是下一次要不要上向量的第一手依据。
  *
  * 规矩与第一批完全一致（见 fixture-types 文件头）：正文逐字出自声明会话的原话、日期用相对天数、
- * gold 是封闭集合。所有故事全部虚构，未使用任何真实家庭成员的聊天记录。
+ * gold 是封闭集合。所有故事全部虚构，未使用任何真实用户的聊天记录。
  */
 
 export const BATCH1_STORIES: EvalStory[] = [
