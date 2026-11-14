@@ -34,11 +34,13 @@ function halfWidthField(label: string, max: number) {
     .trim()
     .min(1)
     .max(max)
-    .refine((value) => firstNonHalfWidth(value) === null, (value) => {
+    .superRefine((value, ctx) => {
       const bad = firstNonHalfWidth(value);
-      return {
+      if (bad === null) return;
+      ctx.addIssue({
+        code: 'custom',
         message: `${label} 含非半角字符「${bad === ' ' ? '空格' : bad}」，请只用英文半角字符（中文输入法常把 : 打成 ：）`
-      };
+      });
     });
 }
 

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
@@ -15,7 +16,7 @@ const MB = 1024 * 1024;
 
 function png(size: number): Buffer {
   const buffer = Buffer.alloc(size);
-  buffer.write('\x89PNG\r\n\x1a\n', 0, 'binary');
+  readFileSync('public/stickers/wave.png').copy(buffer);
   return buffer;
 }
 

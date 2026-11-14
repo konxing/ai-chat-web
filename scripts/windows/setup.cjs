@@ -69,7 +69,7 @@ async function setup() {
   step = '应用数据库迁移';
   run('node_modules/prisma/build/index.js', ['migrate', 'deploy']);
   step = '构建网页';
-  run('node_modules/next/dist/bin/next', ['build']);
+  run('node_modules/next/dist/bin/next', ['build', '--webpack']);
   step = '创建管理员，请检查密码是否符合要求';
   run('node_modules/tsx/dist/cli.mjs', ['scripts/bootstrap.ts', '--username', username, '--email', email,
     '--password-stdin', '--allow-ip', '127.0.0.1', '--site-name', 'AI Chat'], password);

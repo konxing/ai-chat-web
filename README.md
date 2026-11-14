@@ -18,7 +18,7 @@
 ## Windows 本地使用（GitHub 源码 ZIP）
 
 1. 在 GitHub 项目首页点击 **Code → Download ZIP**，解压到本机。源码 ZIP 包含启动器源码，下面的命令会生成 EXE。
-2. 安装 Node.js 22，确保终端能找到 `node` 和 `npm`。安装并启动 PostgreSQL，使用 pgAdmin 创建一个空数据库，例如 `ai_webchat`。数据库账号需要有权限在该库创建表。
+2. 安装 Node.js 22 的最新维护版（至少 22.12），确保终端能找到 `node` 和 `npm`。安装并启动 PostgreSQL，使用 pgAdmin 创建一个空数据库，例如 `ai_webchat`。数据库账号需要有权限在该库创建表。
 3. 在解压后含有 `package.json` 的目录打开 PowerShell，执行以下命令。这一步只需在首次准备时运行。
 
    ```powershell

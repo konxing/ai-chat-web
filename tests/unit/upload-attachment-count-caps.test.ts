@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 /**
@@ -14,12 +15,10 @@ vi.mock('@/lib/prisma', () => ({
   }
 }));
 
-const PNG_SIGNATURE = '\x89PNG\r\n\x1a\n';
+const PNG_FIXTURE = readFileSync('public/stickers/wave.png');
 
 function png(): Buffer {
-  const buffer = Buffer.alloc(512);
-  buffer.write(PNG_SIGNATURE, 0, 'binary');
-  return buffer;
+  return PNG_FIXTURE;
 }
 
 function uuids(count: number): string[] {

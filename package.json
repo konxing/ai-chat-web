@@ -5,7 +5,7 @@
   "description": "Private, self-hosted AI chat with IP allowlisting, per-user isolation and encrypted storage.",
   "scripts": {
     "dev": "node server.js --dev",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build --webpack",
     "start": "NODE_ENV=production node server.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
@@ -29,13 +29,13 @@
     "@prisma/client": "6.11.1",
     "argon2": "0.44.0",
     "dotenv": "16.6.1",
-    "file-type": "19.6.0",
+    "file-type": "22.3.0",
     "ipaddr.js": "2.2.0",
-    "katex": "0.16.22",
+    "katex": "0.19.1",
     "lucide-react": "0.468.0",
-    "mammoth": "1.10.0",
-    "next": "^15.5.28",
-    "nodemailer": "6.10.1",
+    "mammoth": "1.13.0",
+    "next": "16.4.6",
+    "nodemailer": "10.5.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-markdown": "10.1.0",
@@ -43,9 +43,9 @@
     "rehype-katex": "7.0.1",
     "remark-gfm": "4.0.1",
     "remark-math": "6.0.0",
-    "undici": "6.21.0",
+    "undici": "6.29.1",
     "unpdf": "1.2.2",
-    "zod": "3.25.76"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "22.15.30",
@@ -53,11 +53,14 @@
     "@types/react": "19.1.6",
     "@types/react-dom": "19.1.5",
     "autoprefixer": "10.4.21",
-    "postcss": "8.5.4",
+    "postcss": "8.5.33",
     "prisma": "6.11.1",
     "tailwindcss": "3.4.17",
     "tsx": "4.20.3",
     "typescript": "5.8.3",
-    "vitest": "3.2.4"
+    "vitest": "5.1.0"
+  },
+  "overrides": {
+    "katex": "$katex"
   }
 }

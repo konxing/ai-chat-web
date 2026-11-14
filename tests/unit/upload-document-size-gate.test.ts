@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -99,7 +100,7 @@ describe('50MB 以上的文档跳过文本抽取', () => {
 
   it('图片不受这条闸影响：它本来就不抽文本', async () => {
     const png = Buffer.alloc(2 * MB);
-    png.write('\x89PNG\r\n\x1a\n', 0, 'binary');
+    readFileSync('public/stickers/wave.png').copy(png);
 
     const info = await inspect(png, 'photo.png', 'image/png');
 
