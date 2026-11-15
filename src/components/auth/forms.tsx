@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Eye, EyeOff, Mail, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, EyeOff, Mail } from 'lucide-react';
 import { apiFetch, codeSentMessage, errorMessage } from '@/lib/client-api';
 import { Alert, Spinner } from '@/components/ui';
 
@@ -38,10 +38,9 @@ function PasswordInput({
       />
       <button
         type="button"
-        className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-white/35 transition hover:bg-white/5 hover:text-white/70"
+        className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-white/60 transition hover:bg-white/5 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400"
         onClick={() => setShow((s) => !s)}
         aria-label={show ? '隐藏密码' : '显示密码'}
-        tabIndex={-1}
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -49,7 +48,7 @@ function PasswordInput({
   );
 }
 
-export function LoginForm({ registrationOpen }: { registrationOpen: boolean }) {
+export function LoginForm() {
   const router = useRouter();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -73,7 +72,7 @@ export function LoginForm({ registrationOpen }: { registrationOpen: boolean }) {
   };
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className="space-y-5" aria-busy={busy}>
       {error ? <Alert tone="error">{error}</Alert> : null}
       <div>
         <label className="label" htmlFor="identifier">
@@ -85,8 +84,7 @@ export function LoginForm({ registrationOpen }: { registrationOpen: boolean }) {
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
           autoComplete="username"
-          placeholder="例如：xiaoming 或 name@example.com"
-          autoFocus
+          placeholder="输入用户名或邮箱"
           required
           maxLength={254}
         />
@@ -96,26 +94,16 @@ export function LoginForm({ registrationOpen }: { registrationOpen: boolean }) {
           <label className="label mb-0" htmlFor="password">
             密码
           </label>
-          <Link href="/forgot" className="text-[12px] text-white/40 transition hover:text-aurora-300">
+          <Link href="/forgot" className="rounded-sm text-xs text-aurora-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400">
             忘记密码？
           </Link>
         </div>
         <PasswordInput id="password" value={password} onChange={setPassword} autoComplete="current-password" />
       </div>
       <button type="submit" className="btn-primary w-full py-3" disabled={busy}>
-        {busy ? <Spinner /> : <ShieldCheck className="h-4 w-4" />}
-        {busy ? '正在验证…' : '登录 AI Chat'}
+        {busy ? <Spinner /> : <ArrowRight aria-hidden="true" className="h-4 w-4" />}
+        {busy ? '正在登录…' : '登录'}
       </button>
-      {registrationOpen ? (
-        <p className="pt-1 text-center text-[13px] text-white/35">
-          还没有账号？
-          <Link href="/register" className="ml-1.5 text-aurora-300 transition hover:text-aurora-200">
-            使用邮箱注册
-          </Link>
-        </p>
-      ) : (
-        <p className="pt-1 text-center text-[12px] text-white/25">本空间当前仅限管理员创建账号</p>
-      )}
     </form>
   );
 }

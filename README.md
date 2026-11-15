@@ -22,12 +22,14 @@
 3. 在解压后含有 `package.json` 的目录打开 PowerShell，执行以下命令。这一步只需在首次准备时运行。
 
    ```powershell
-   npm.cmd ci
-   powershell.exe -NoProfile -File .\scripts\windows\build.ps1 -LauncherOnly
+   npm.cmd ci --include=dev
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\build.ps1 -LauncherOnly
    ```
 
-4. 双击生成的 **AI WebChat.exe**，填写 PostgreSQL 连接地址、管理员用户名、邮箱和密码。连接地址格式为 `postgresql://用户名:密码@127.0.0.1:5432/ai_webchat`。密码含 `@`、`#`、`%` 等字符时，先对密码部分做 URL 编码。
-5. 点击 **初始化并启动**。向导会构建网站、初始化数据库和管理员，然后启动本地后端并尝试打开浏览器。以后双击 EXE 进入管理窗口，可点「启动」和「打开聊天」。网页地址为 `http://127.0.0.1:3000`。
+4. 双击项目根目录的 **AI WebChat.exe**。按向导填写数据库主机、端口、库名、账号和密码。库名填你在 pgAdmin 里创建的名称。也可以用高级选项填写完整连接地址。
+5. 创建网站管理员账号并点击 **开始初始化**。完成后点击 **启动并打开聊天**，用刚创建的账号登录。在管理后台配置至少一个模型后即可聊天。之后双击 EXE 可管理本地服务，网页地址为 `http://127.0.0.1:3000`。
+
+向导可以把附件和备份放在其他盘，例如 `D:\AIWebChat`。聊天和账户数据存放在 PostgreSQL 中，其物理位置由 PostgreSQL 的数据目录决定。初始化失败时，向导会显示出错步骤，可改正后重试。
 
 保留 EXE、项目文件和向导生成的 `.env` 在同一个目录。`.env` 含数据库凭据和加密密钥，请妥善保存。[Windows 管理程序说明](scripts/windows/README.md)
 

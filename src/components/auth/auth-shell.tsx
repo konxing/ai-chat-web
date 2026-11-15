@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { KeyRound, LockKeyhole, Network, ShieldCheck } from 'lucide-react';
+import { Check, LockKeyhole, MessageSquareText } from 'lucide-react';
 import { BrandMark, BrandWordmark } from '@/components/brand';
 
 export function AuthShell({
@@ -19,68 +19,72 @@ export function AuthShell({
   wide?: boolean;
 }) {
   return (
-    <main className="relative flex min-h-dvh flex-col lg:grid lg:grid-cols-[1.06fr_1fr]">
-      <section className="relative hidden overflow-hidden border-r border-white/[0.08] bg-[#101923] lg:flex lg:flex-col lg:justify-between lg:p-12 xl:p-16">
-        <div className="pointer-events-none absolute -left-24 top-1/3 h-96 w-96 rounded-full bg-aurora-400/10 blur-[90px]" />
-        <div className="pointer-events-none absolute -right-20 bottom-10 h-72 w-72 rounded-full bg-violet-500/10 blur-[80px]" />
-        <Link href="/" className="relative inline-flex items-center gap-3 text-white/80">
-          <BrandWordmark name={siteName} />
-        </Link>
-
-        <div className="relative max-w-lg">
-          <div className="mb-7 flex h-16 w-16 items-center justify-center rounded-2xl border border-aurora-400/20 bg-aurora-400/[0.07]">
-            <ShieldCheck className="h-7 w-7 text-aurora-300" />
-          </div>
-          <h2 className="text-[clamp(2.125rem,3.5vw,3.25rem)] font-semibold leading-[1.22] tracking-tight text-white">
-            和 AI 对话，
-            <br />
-            从一个问题开始。
-          </h2>
-          <p className="mt-5 max-w-sm text-sm leading-7 text-white/65">
-            只向授权的网络和账号开放。对话与凭证在服务器上加密保存。
-          </p>
-          <div className="mt-9 space-y-3 text-[12.5px] text-white/60">
-            <div className="flex items-center gap-3">
-              <Network className="h-4 w-4 text-aurora-400/80" />
-              <span>默认拒绝 · IPv4 / IPv6 白名单</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <LockKeyhole className="h-4 w-4 text-aurora-400/80" />
-              <span>Argon2id 口令 · AES-256-GCM 存储</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <KeyRound className="h-4 w-4 text-aurora-400/80" />
-              <span>API Key 不出服务器，仅密文落库</span>
-            </div>
-          </div>
-        </div>
-
-        <p className="relative text-[10px] uppercase tracking-[0.28em] text-white/20">
-          Private instance · No public sign-up entry
-        </p>
-      </section>
-
-      <section className="flex flex-1 flex-col px-5 py-6 sm:px-8 lg:justify-center lg:px-12">
-        <div className="mb-8 flex items-center justify-between lg:hidden">
-          <Link href="/" className="flex items-center gap-2.5">
-            <BrandMark size={28} />
-            <span className="text-[15px] font-medium text-white/85">{siteName}</span>
+    <main className="flex min-h-dvh items-center justify-center px-4 py-6 sm:px-8 sm:py-10">
+      <div className="grid w-full max-w-[1152px] overflow-hidden rounded-[1.75rem] border border-white/10 bg-[#0d131b] shadow-[0_26px_100px_-42px_#000] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <aside className="auth-showcase relative hidden min-w-0 flex-col overflow-hidden border-r border-white/10 p-10 lg:flex xl:p-12">
+          <Link href="/" className="relative w-fit max-w-full rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400">
+            <BrandWordmark name={siteName} compact />
           </Link>
-          <span className="chip text-[10px] text-white/35">授权网络</span>
-        </div>
 
-        <div className={`mx-auto w-full ${wide ? 'max-w-[560px]' : 'max-w-[420px]'} animate-fade-up`}>
-          <div className="mb-7">
-            <h1 className="text-[26px] font-semibold tracking-wide text-white">{title}</h1>
-            <p className="mt-2 text-sm leading-relaxed text-white/60">{subtitle}</p>
+          <div className="relative my-auto pt-12">
+            <h2 className="text-[clamp(2rem,3.1vw,2.75rem)] font-semibold leading-[1.24] tracking-tight text-white">
+              从一个问题开始
+            </h2>
+            <p className="mt-3 max-w-[24rem] text-sm leading-7 text-[#adbfca]">
+              整理思路、讨论方案，或者继续上次的对话。
+            </p>
+
+            <div className="mt-7 overflow-hidden rounded-2xl border border-white/[0.13] bg-[#0c151c]/90 shadow-[0_25px_55px_-27px_#000]">
+              <div className="flex items-center gap-2.5 border-b border-white/10 bg-white/[0.025] px-4 py-3 text-xs font-medium text-[#c4d1da]">
+                <MessageSquareText aria-hidden="true" className="h-4 w-4 text-aurora-300" />
+                示例对话
+              </div>
+              <div className="space-y-4 p-4 sm:p-5">
+                <p className="ml-auto w-fit rounded-2xl rounded-br-md border border-aurora-400/20 bg-[#16382f] px-3.5 py-2.5 text-[13px] leading-6 text-[#d8f7ec]">
+                  帮我梳理一下今天的工作。
+                </p>
+                <div className="flex items-start gap-2.5">
+                  <BrandMark size={26} className="mt-1" />
+                  <div className="min-w-0 rounded-2xl rounded-tl-md border border-white/10 bg-[#18222c] px-3.5 py-2.5 text-[13px] leading-6 text-[#d5dfe6]">
+                    先按优先级分组，再安排时间。
+                    <ul className="mt-1.5 space-y-1">
+                      {['列出今天必须完成的事项', '给重点工作留出完整时间'].map((item) => (
+                        <li key={item} className="flex items-start gap-2">
+                          <Check aria-hidden="true" className="mt-1 h-3.5 w-3.5 shrink-0 text-aurora-300" />
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="panel p-5 sm:p-7">{children}</div>
-          {footer ? <div className="mt-5 text-center text-[12.5px] text-white/35">{footer}</div> : null}
-          <p className="mt-8 flex items-center justify-center gap-1.5 text-[10.5px] tracking-wide text-white/20">
-            <ShieldCheck className="h-3 w-3" /> 当前连接已通过网络白名单校验
+
+          <p className="relative mt-9 flex items-center gap-2 text-xs text-[#a4b8bf]">
+            <LockKeyhole aria-hidden="true" className="h-4 w-4 shrink-0 text-aurora-300/80" />
+            对话记录在服务器上加密保存
           </p>
-        </div>
-      </section>
+        </aside>
+
+        <section className="flex min-w-0 flex-col justify-center px-5 py-8 sm:px-10 sm:py-12">
+          <Link href="/" className="mb-9 w-fit max-w-full rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400 lg:hidden">
+            <BrandWordmark name={siteName} compact />
+          </Link>
+          <div className={`mx-auto w-full ${wide ? 'max-w-[480px]' : 'max-w-[370px]'}`}>
+            <div className="mb-6">
+              <h1 className="text-[clamp(1.625rem,4vw,2.125rem)] font-semibold leading-tight tracking-tight text-white">{title}</h1>
+              <p className="mt-2.5 text-sm leading-6 text-[#a4b3c2]">{subtitle}</p>
+            </div>
+            {children}
+            {footer ? (
+              <div className="mt-6 border-t border-white/10 pt-5 text-center text-[13px] leading-6 text-[#a4b3c2]">
+                {footer}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

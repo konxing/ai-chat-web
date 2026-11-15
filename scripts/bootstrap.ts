@@ -5,7 +5,7 @@ import 'dotenv/config';
 import { createInterface } from 'node:readline';
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { hashPassword, passwordPolicyError } from '../src/lib/password';
+import { hashPassword, passwordPolicyError, verifyPassword } from '../src/lib/password';
 import { normalizeCidr } from '../src/lib/ip';
 import { seedDefaultSettings, updateSystemSettings } from '../src/lib/config';
 
@@ -21,6 +21,7 @@ interface Args {
   noLoopback: boolean;
   skipIps: boolean;
   siteName?: string;
+  setupId?: string;
   help: boolean;
 }
 
@@ -45,6 +46,7 @@ function parseArgs(argv: string[]): Args {
     else if (arg === '--no-loopback') args.noLoopback = true;
     else if (arg === '--skip-ip') args.skipIps = true;
     else if (arg === '--site-name') args.siteName = argv[++i];
+    else if (arg === '--setup-id') args.setupId = argv[++i] ?? '';
     else if (arg === '--help' || arg === '-h') args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -151,13 +153,14 @@ async function main() {
     printHelp();
     return;
   }
+  if (args.setupId !== undefined && (!/^[a-f0-9]{32}$/.test(args.setupId) || args.resetPassword)) {
+    throw new Error('初始化编号无效');
+  }
 
   const envPassword = args.generatePassword ? generateStrongPassword() : await readPasswordFromStdin();
   if (!envPassword) throw new Error('密码不能为空');
   const username = args.username ? validateUsername(args.username) : '';
   const email = args.email ? validateEmail(args.email) : '';
-
-  const ownerCount = await prisma.user.count({ where: { role: 'OWNER' } });
 
   if (args.resetPassword) {
     if (!username) throw new Error('--reset-password 需要 --username');
@@ -193,16 +196,10 @@ async function main() {
     return;
   }
 
-  if (ownerCount > 0) {
-    throw new Error('超级管理员已存在。使用 --reset-password 进行密码恢复；不会创建第二个管理员。');
-  }
   if (!username || !email) throw new Error('首次初始化必须提供 --username 和 --email');
 
   const policy = passwordPolicyError(envPassword, { username, email });
   if (policy) throw new Error(policy);
-
-  const existing = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
-  if (existing) throw new Error('用户名或邮箱已被占用');
 
   const passwordHash = await hashPassword(envPassword);
 
@@ -230,6 +227,21 @@ async function main() {
   }
 
   const owner = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(241270, 1)`;
+    const previous = await tx.user.findFirst({ where: { role: 'OWNER' } });
+    if (previous) {
+      const receipt = args.setupId && await tx.auditLog.findFirst({
+        where: { actorId: previous.id, action: 'system.bootstrap', targetId: args.setupId },
+        select: { id: true }
+      });
+      if (receipt && previous.status === 'ACTIVE' && previous.username === username &&
+          previous.email === email && await verifyPassword(previous.passwordHash, envPassword)) {
+        return previous;
+      }
+      throw new Error('超级管理员已存在，或填写的资料与上次初始化不一致。');
+    }
+    const existing = await tx.user.findFirst({ where: { OR: [{ username }, { email }] } });
+    if (existing) throw new Error('用户名或邮箱已被占用');
     const user = await tx.user.create({
       data: {
         username,
@@ -258,6 +270,7 @@ async function main() {
         actorLabel: `${user.username} (bootstrap CLI)`,
         action: 'system.bootstrap',
         targetType: 'system',
+        targetId: args.setupId,
         ip: 'server-cli',
         status: 'SUCCESS',
         after: { username: user.username, email: user.email, ipRules: Array.from(rules.values()).map((r) => r.cidr) }

@@ -14,7 +14,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
     }
     $source = Join-Path $PSScriptRoot 'Launcher.cs'
-    & $compiler /nologo /codepage:65001 /target:winexe '/out:AI WebChat.exe' /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll $source
+    $icon = Join-Path $PSScriptRoot 'app.ico'
+    & $compiler /nologo /codepage:65001 /target:winexe '/out:AI WebChat.exe' "/win32icon:$icon" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll $source
     if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed.' }
 } finally {
     Pop-Location
