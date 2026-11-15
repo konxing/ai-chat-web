@@ -135,6 +135,7 @@ export async function* streamChatCompletion(input: {
   messages: AiMessage[];
   signal?: AbortSignal;
   timeoutMs?: number;
+  reasoningEffort?: string;
 }): AsyncGenerator<StreamEvent> {
   const { provider } = input;
   if (!capabilitiesOf(provider).includes('text')) {
@@ -147,7 +148,8 @@ export async function* streamChatCompletion(input: {
     model: provider.modelId,
     messages: input.messages,
     stream: true,
-    ...providerParams(provider)
+    ...providerParams(provider),
+    ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {})
   };
 
   const safe = await safeFetch(target, url, {

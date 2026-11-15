@@ -170,6 +170,7 @@ function shouldLog(key, windowMs) {
 }
 
 function accessLog(entry) {
+  if (!entry.allowed && !allowDeniedTelemetry()) return;
   prisma.ipAccessLog
     .create({
       data: {
@@ -184,6 +185,19 @@ function accessLog(entry) {
     .catch((err) => logErr('ipguard.log_failed', { error: String(err) }));
 }
 
+let deniedWindow = 0;
+let deniedSamples = 0;
+function allowDeniedTelemetry() {
+  const second = Math.floor(Date.now() / 1000);
+  if (second !== deniedWindow) {
+    deniedWindow = second;
+    deniedSamples = 0;
+  }
+  if (deniedSamples >= 10) return false;
+  deniedSamples++;
+  return true;
+}
+
 function deny(res, ip, reason) {
   const body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>403 · Access denied</title><style>html,body{height:100%;margin:0}body{background:#07090f;color:#e7ecf5;display:grid;place-items:center;font-family:-apple-system,Segoe UI,sans-serif}.box{text-align:center;padding:32px;max-width:520px}h1{font-size:20px;font-weight:600;letter-spacing:.02em;margin:0 0 12px}p{color:#8b96a9;font-size:14px;line-height:1.7;margin:0}code{color:#8ff0d0;font-size:13px}</style></head><body><div class="box"><h1>Access denied</h1><p>当前网络地址不在访问白名单中。此站点仅允许经服务器所有者授权的 IP 访问。</p><p style="margin-top:14px">Your IP: <code>${String(ip || 'unknown').replace(/[^0-9a-fA-F:.]/g, '')}</code></p></div></body></html>`;
   res.writeHead(403, {
@@ -196,7 +210,7 @@ function deny(res, ip, reason) {
     'Referrer-Policy': 'no-referrer'
   });
   res.end(body);
-  if (shouldLog(`denylog:${ip || 'unknown'}`, 5000)) {
+  if (shouldLog(`denylog:${ip || 'unknown'}`, 5000) && allowDeniedTelemetry()) {
     log('ipguard.denied', { ip, reason });
   }
 }
@@ -297,6 +311,11 @@ async function main() {
     try {
       const allowed = await guard(req, res);
       if (!allowed) return;
+      if (req.url === '/_internal/ip-check') {
+        res.writeHead(req.method === 'GET' && TRUST_PROXY ? 204 : 404, { 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
       addSecurityHeaders(res);
       attachGzip(req, res);
       await handle(req, res);

@@ -41,6 +41,7 @@ import {
   X
 } from 'lucide-react';
 import { apiFetch, attachmentUrl, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
+import { isReasoningLevel, reasoningLabels, type ReasoningLevel, type ReasoningOptions } from '@/lib/reasoning-levels';
 import {
   CITATION_LOAD_FAILED_NOTE,
   CITATION_NOTE,
@@ -151,6 +152,8 @@ export function ChatWorkspace({
   const [localProviderId, setLocalProviderId] = useState<string>(
     initialChat?.providerId ?? providers.find((p) => p.isDefault)?.id ?? providers[0]?.id ?? ''
   );
+  const [reasoningByProvider, setReasoningByProvider] = useState<Record<string, ReasoningOptions>>({});
+  const [reasoningByChat, setReasoningByChat] = useState<Partial<Record<string, ReasoningLevel>>>({});
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -204,6 +207,22 @@ export function ChatWorkspace({
 
   const selectedProviderId = chat?.providerId ?? localProviderId;
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
+  const reasoningOptions = reasoningByProvider[selectedProviderId];
+  const reasoningKey = `${chat?.id ?? 'draft'}:${selectedProviderId}`;
+  const reasoningChoice = reasoningByChat[reasoningKey];
+  const reasoningEffort = reasoningChoice && reasoningOptions?.levels.includes(reasoningChoice)
+    ? reasoningChoice : undefined;
+  useEffect(() => {
+    if (!selectedProviderId || reasoningOptions) return;
+    const controller = new AbortController();
+    void apiFetch<ReasoningOptions>(`/api/account/providers/${selectedProviderId}/reasoning`, {
+      signal: controller.signal
+    }).then((options) => {
+      if (controller.signal.aborted) return;
+      setReasoningByProvider((previous) => ({ ...previous, [selectedProviderId]: options }));
+    }).catch(() => undefined);
+    return () => controller.abort();
+  }, [selectedProviderId, reasoningOptions]);
   const attachmentWarning = selectedProvider && pending.length > 0
     ? pending.some((item) => item.kind === 'IMAGE') && !selectedProvider.capabilities.includes('vision')
       ? '当前模型不支持图片输入，请切换模型或移除图片。'
@@ -350,6 +369,9 @@ export function ChatWorkspace({
     activeIdRef.current = null;
     chatIdRef.current = null;
     setChat(null);
+    setReasoningByChat((previous) => Object.fromEntries(
+      Object.entries(previous).filter(([key]) => !key.startsWith('draft:'))
+    ));
     setOptimisticUser(null);
     setStreamText('');
     setStreamError('');
@@ -390,6 +412,11 @@ export function ChatWorkspace({
       if (navigationRef.current !== navigation) return null;
       activeIdRef.current = created.id;
       chatIdRef.current = created.id;
+      if (reasoningEffort && created.providerId === selectedProviderId) {
+        setReasoningByChat((previous) => ({
+          ...previous, [`${created.id}:${selectedProviderId}`]: reasoningEffort
+        }));
+      }
       setChat({
         id: created.id,
         title: created.title,
@@ -407,7 +434,7 @@ export function ChatWorkspace({
       if (navigationRef.current === navigation) setNotice(errorMessage(err));
       return null;
     }
-  }, [selectedProviderId]);
+  }, [selectedProviderId, reasoningEffort]);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -548,7 +575,7 @@ export function ChatWorkspace({
           Accept: 'text/event-stream',
           ...csrfHeader()
         },
-        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined }),
+        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined, reasoningEffort }),
         credentials: 'same-origin',
         signal: controller.signal
       });
@@ -689,7 +716,7 @@ export function ChatWorkspace({
       composerBusyRef.current = false;
       setSending(false);
     }
-  }, [draft, pending, editingId, attachmentWarning, ensureChat, refreshChat, refreshChats]);
+  }, [draft, pending, editingId, attachmentWarning, ensureChat, reasoningEffort, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
@@ -1130,6 +1157,24 @@ export function ChatWorkspace({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
+            {reasoningOptions?.levels.length ? (
+              <select
+                aria-label="思考程度"
+                title="思考程度"
+                value={reasoningEffort ?? ''}
+                disabled={sending}
+                onChange={(event) => {
+                  const level = event.target.value;
+                  setReasoningByChat((previous) => ({
+                    ...previous, [reasoningKey]: isReasoningLevel(level) ? level : undefined
+                  }));
+                }}
+                className="max-w-[29vw] rounded-full border border-white/10 bg-[#171e29] px-2 py-2 text-xs text-white/85 [color-scheme:dark] focus-visible:outline-aurora-400 sm:max-w-none"
+              >
+                <option value="">思考 · 默认{reasoningOptions.defaultLevel ? `（${reasoningLabels[reasoningOptions.defaultLevel]}）` : ''}</option>
+                {reasoningOptions.levels.map((level) => <option key={level} value={level}>{reasoningLabels[level]}</option>)}
+              </select>
+            ) : null}
             <div className="relative flex items-center">
               <select
                 aria-label="选择模型"

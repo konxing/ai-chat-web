@@ -22,6 +22,7 @@ import { prisma } from '@/lib/prisma';
 import { getAttachmentsForUser, imageSendSummary, publicAttachment, unlinkAttachmentFile } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
+import { getReasoningOptions } from '@/lib/provider-reasoning';
 import { StickerReply } from '@/lib/sticker-reply';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
@@ -68,6 +69,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     }
   }
   if (!provider) provider = await resolveDefaultProvider(user.id);
+  if (body.reasoningEffort && !(await getReasoningOptions(provider)).levels.includes(body.reasoningEffort)) {
+    throw new ApiError(400, 'UNSUPPORTED_REASONING_EFFORT', '当前模型不支持该思考程度，请选择默认');
+  }
 
   const attachments = await getAttachmentsForUser(body.attachmentIds, user.id, chatId);
   const caps = capabilitiesOf(provider);
@@ -187,6 +191,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       try {
         for await (const event of streamChatCompletion({
           provider,
+          reasoningEffort: body.reasoningEffort,
           messages
         })) {
           if (event.type === 'delta' && event.text) {

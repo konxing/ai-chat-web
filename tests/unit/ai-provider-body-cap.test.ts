@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/http';
 import { resetEnvCacheForTests } from '@/lib/env';
 import { encryptString } from '@/lib/crypto';
 import { streamChatCompletion, transcribeAudio } from '@/lib/ai';
+import { getReasoningOptions } from '@/lib/provider-reasoning';
 
 /**
  * 模型返回体的体积上限。SSE 分支早就有 2MB 的 buffer 守卫，但另外三条读整包的路径没有：
@@ -50,13 +51,29 @@ beforeAll(async () => {
   resetEnvCacheForTests();
 
   server = http.createServer((req, res) => {
-    req.resume();
     const path = req.url || '';
     const respond = (status: number, type: string, body: string) => {
       res.writeHead(status, { 'content-type': type });
       res.end(body);
       res.on('error', () => undefined);
     };
+    if (path === '/reasoning/models') {
+      respond(200, 'application/json', JSON.stringify({ data: [
+        { id: 'different-model', effort: { supported_levels: ['medium'] } },
+        { id: 'probe-model', effort: { supported_levels: ['low', 'high', 'max', 'high', 'unknown'], default_level: 'high' } }
+      ] }));
+      return;
+    }
+    if (path === '/reasoning/chat/completions') {
+      let body = '';
+      req.setEncoding('utf8').on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        const effort = JSON.parse(body).reasoning_effort;
+        respond(200, 'application/json', JSON.stringify({ choices: [{ message: { content: effort ?? 'default' } }] }));
+      });
+      return;
+    }
+    req.resume();
     if (path.startsWith('/fat/chat/completions')) {
       // 合法 JSON，只是巨大：不设上限的实现会整包读进内存并成功解析出 6M 字符。
       respond(200, 'application/json', JSON.stringify({ choices: [{ message: { content: HUGE_TEXT } }] }));
@@ -92,6 +109,13 @@ afterAll(async () => {
 });
 
 describe('模型返回体的体积上限', () => {
+  it('reads the selected model’s declared effort and preserves upstream defaults on the wire', async () => {
+    const model = provider('reasoning', ['text']);
+    const options = await getReasoningOptions(model);
+    expect(options).toEqual({ levels: ['low', 'high', 'max'], defaultLevel: 'high' });
+    expect(await drain(streamChatCompletion({ provider: model, messages: [] }))).toBe('default');
+    expect(await drain(streamChatCompletion({ provider: model, messages: [], reasoningEffort: 'low' }))).toBe('low');
+  });
   it('非流式 JSON 超过上限时报错，而不是整包吞下', async () => {
     let caught: unknown;
     try {
