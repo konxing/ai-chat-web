@@ -4,6 +4,7 @@ import { ApiError } from './http';
 import { decryptProviderKey, capabilitiesOf } from './providers';
 import { joinApiPath, resolveProviderTarget, safeFetch } from './ssrf';
 import { log } from './logger';
+import { deepSeekCitationUrls, supportsDeepSeekWeb, type DeepSeekWebMode } from './deepseek-web';
 
 export type ChatContentPart =
   | { type: 'text'; text: string }
@@ -15,10 +16,11 @@ export interface AiMessage {
 }
 
 export interface StreamEvent {
-  type: 'delta' | 'usage' | 'done';
+  type: 'delta' | 'usage' | 'citations' | 'done';
   text?: string;
   inputTokens?: number;
   outputTokens?: number;
+  citations?: string[];
 }
 
 const MAX_OUTPUT_CHARS = 200_000;
@@ -126,6 +128,15 @@ function parseUsage(payload: Record<string, unknown>): { inputTokens?: number; o
   return { inputTokens: input, outputTokens: output };
 }
 
+function parseStreamData(data: string): Record<string, unknown> | null {
+  try {
+    const payload: unknown = JSON.parse(data);
+    return payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Calls an OpenAI-compatible /chat/completions endpoint and yields text deltas.
  * The provider key is decrypted only in this server-side function and never sent to the client.
@@ -136,6 +147,7 @@ export async function* streamChatCompletion(input: {
   signal?: AbortSignal;
   timeoutMs?: number;
   reasoningEffort?: string;
+  webTool?: DeepSeekWebMode;
 }): AsyncGenerator<StreamEvent> {
   const { provider } = input;
   if (!capabilitiesOf(provider).includes('text')) {
@@ -144,12 +156,18 @@ export async function* streamChatCompletion(input: {
   const apiKey = decryptProviderKey(provider);
   const target = await resolveProviderTarget(provider.baseUrl);
   const url = joinApiPath(provider.baseUrl, '/chat/completions');
+  const webTool = input.webTool && supportsDeepSeekWeb(provider) ? input.webTool : undefined;
+  const toolGuidance: AiMessage = {
+    role: 'system',
+    content: '需要联网时，仅使用当前任务所需的公开信息。不要把用户的私密内容、凭据或记忆用于公开查询。区分网页来源与自己的判断。'
+  };
   const body: Record<string, unknown> = {
     model: provider.modelId,
-    messages: input.messages,
+    messages: webTool ? [toolGuidance, ...input.messages] : input.messages,
     stream: true,
     ...providerParams(provider),
-    ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {})
+    ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
+    ...(webTool ? { tools: [{ type: webTool === 'read' ? 'deepseek_read_url' : 'deepseek_web_search' }] } : {})
   };
 
   const safe = await safeFetch(target, url, {
@@ -209,8 +227,11 @@ export async function* streamChatCompletion(input: {
       const payload = JSON.parse(raw) as Record<string, unknown>;
       const choices = payload.choices as Array<Record<string, unknown>> | undefined;
       const message = choices?.[0]?.message as Record<string, unknown> | undefined;
+      if (webTool) checkDeepSeekToolResponse(payload, choices?.[0]?.finish_reason);
       const text = extractTextFromDelta(message?.content);
       if (text) yield { type: 'delta', text };
+      const citations = webTool ? deepSeekCitationUrls(message?.annotations) : [];
+      if (citations.length) yield { type: 'citations', citations };
       yield { type: 'usage', ...parseUsage(payload) };
       yield { type: 'done' };
       return;
@@ -244,13 +265,10 @@ export async function* streamChatCompletion(input: {
             yield { type: 'done' };
             return;
           }
-          let parsed: Record<string, unknown>;
-          try {
-            parsed = JSON.parse(data) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
+          const parsed = parseStreamData(data);
+          if (!parsed) continue;
           const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
+          if (webTool) checkDeepSeekToolResponse(parsed, choices?.[0]?.finish_reason);
           const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
           const text = extractTextFromDelta(delta?.content);
           if (text) {
@@ -260,22 +278,25 @@ export async function* streamChatCompletion(input: {
             }
             yield { type: 'delta', text };
           }
+          const citations = webTool ? deepSeekCitationUrls(delta?.annotations) : [];
+          if (citations.length) yield { type: 'citations', citations };
           if (parsed.usage) usage = { ...usage, ...parseUsage(parsed) };
         }
       }
       if (buffer.startsWith('data:')) {
-        const data = buffer.slice(5).trim();
-        if (data && data !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(data) as Record<string, unknown>;
-            const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
-            const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
-            const text = extractTextFromDelta(delta?.content);
-            if (text) yield { type: 'delta', text };
-            if (parsed.usage) usage = { ...usage, ...parseUsage(parsed) };
-          } catch {
-            /* ignore trailing partial */
+        const parsed = parseStreamData(buffer.slice(5).trim());
+        if (parsed) {
+          const choices = parsed.choices as Array<Record<string, unknown>> | undefined;
+          if (webTool) checkDeepSeekToolResponse(parsed, choices?.[0]?.finish_reason);
+          const delta = choices?.[0]?.delta as Record<string, unknown> | undefined;
+          const text = extractTextFromDelta(delta?.content);
+          if (produced + text.length > MAX_OUTPUT_CHARS) {
+            throw new ApiError(502, 'AI_RESPONSE_TOO_LARGE', '模型返回内容过长，已停止');
           }
+          if (text) yield { type: 'delta', text };
+          const citations = webTool ? deepSeekCitationUrls(delta?.annotations) : [];
+          if (citations.length) yield { type: 'citations', citations };
+          if (parsed.usage) usage = { ...usage, ...parseUsage(parsed) };
         }
       }
       yield { type: 'usage', ...usage };
@@ -290,6 +311,13 @@ export async function* streamChatCompletion(input: {
   } finally {
     await safe.close();
   }
+}
+
+function checkDeepSeekToolResponse(payload: Record<string, unknown>, finishReason: unknown): void {
+  if (finishReason === 'content_filter') {
+    throw new ApiError(502, 'AI_CONTENT_FILTERED', 'DeepSeek 未返回本轮内容');
+  }
+  if (payload.error) throw new ApiError(502, 'AI_WEB_TOOL_ERROR', 'DeepSeek 联网请求未完成，请稍后重试');
 }
 
 export async function transcribeAudio(input: {

@@ -17,7 +17,7 @@ function genericResponse() {
       : channel === 'file'
         ? '验证码会写入服务器本地邮件目录（当前为测试模式，不会真实发送邮件）'
         : '我们已发送重置验证码，请检查收件箱（含垃圾邮件目录）';
-  return { sent: true, channel, message: `如果该邮箱已注册，${where}` };
+  return { sent: true, channel, message: `如果该邮箱已绑定，${where}` };
 }
 
 export async function POST(req: Request) {
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     }
 
     const user = await prisma.user.findUnique({ where: { email: body.email } });
-    if (user && user.status === 'ACTIVE') {
+    if (user && user.status === 'ACTIVE' && user.emailVerified) {
       const issued = await issueEmailToken({
         email: body.email,
         purpose: 'RESET',

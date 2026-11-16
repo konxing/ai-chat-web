@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
-import { CHAT_STICKERS } from '@/lib/chat-stickers';
-import { StickerReply } from '@/lib/sticker-reply';
+import { CHAT_STICKERS, chatStickerImage, type PersonalStickerId } from '@/lib/chat-stickers';
+import { StickerReply, stickerReplyPrompt } from '@/lib/sticker-reply';
 
 describe('model-selected stickers', () => {
   it('accepts every catalog entry and maps it to a local asset', () => {
@@ -42,5 +42,27 @@ describe('model-selected stickers', () => {
     const reply = new StickerReply(false);
     expect(reply.push('文字 [' )).toBe('文字 ');
     expect(reply.finish()).toEqual({ text: '[', sticker: undefined });
+  });
+
+  it('uses per-turn aliases for personal stickers and rejects guessed or stale identifiers', () => {
+    const id = `u${'1'.repeat(32)}` as PersonalStickerId;
+    const choices = [{ id, label: '猫猫鼓掌' }];
+    expect(stickerReplyPrompt(false, choices)).toContain('"personal1":"猫猫鼓掌"');
+    expect(stickerReplyPrompt(false, choices)).not.toContain(id);
+
+    const reply = new StickerReply(false, choices);
+    expect(reply.push('好耶！\n[[STICKER:auto:pers')).toBe('好耶！\n');
+    expect(reply.push('onal1]]')).toBe('');
+    expect(reply.finish().sticker).toBe(id);
+    expect(chatStickerImage(id).src).toBe(`/api/account/stickers/${id}`);
+
+    for (const candidate of [id, 'personal2']) {
+      const unavailable = new StickerReply(false, choices);
+      unavailable.push(`[[STICKER:requested:${candidate}]]`);
+      expect(unavailable.finish().sticker).toBeUndefined();
+    }
+    const emptyLibrary = new StickerReply(false);
+    emptyLibrary.push('[[STICKER:requested:personal1]]');
+    expect(emptyLibrary.finish().sticker).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { BookOpen, Bot, Brain, Compass, Fingerprint, History, Lightbulb, Lock, Network, Scale, ShieldCheck, SlidersHorizontal, UserRound } from 'lucide-react';
+import { BookOpen, Bot, Brain, Compass, Fingerprint, History, Lightbulb, Lock, Network, Scale, ShieldCheck, SlidersHorizontal, Smile, UserRound } from 'lucide-react';
 
 export const SETTINGS_TABS = [
   ['profile', '个人资料', UserRound],
@@ -6,6 +6,7 @@ export const SETTINGS_TABS = [
   ['models', '我的模型', Bot],
   ['overview', '个人智能层', Compass],
   ['expression', '表达偏好', SlidersHorizontal],
+  ['stickers', '表情包', Smile],
   ['about', '安全说明', Lock]
 ] as const;
 

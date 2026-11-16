@@ -61,8 +61,42 @@ export const CHAT_STICKERS = {
   wave12: { src: '/stickers/wave12.png', alt: '猫猫探头' }
 } as const;
 
-export type ChatSticker = keyof typeof CHAT_STICKERS;
+export type BuiltInSticker = keyof typeof CHAT_STICKERS;
+export type PersonalStickerId = `u${string}`;
+export type ChatSticker = BuiltInSticker | PersonalStickerId;
+
+export const PERSONAL_STICKER_MAX_BYTES = 3 * 1024 * 1024;
+export const PERSONAL_STICKER_MAX_ITEMS = 60;
+export const PERSONAL_STICKER_TOTAL_BYTES = 50 * 1024 * 1024;
+export const PERSONAL_STICKER_LABEL_LIMIT = 24;
+
+export interface PersonalStickerDto {
+  id: PersonalStickerId;
+  label: string;
+  size: number;
+  enabled: boolean;
+}
+
+export function isBuiltInSticker(value: unknown): value is BuiltInSticker {
+  return typeof value === 'string' && Object.hasOwn(CHAT_STICKERS, value);
+}
+
+export function isPersonalStickerId(value: unknown): value is PersonalStickerId {
+  return typeof value === 'string' && /^u[a-f0-9]{32}$/.test(value);
+}
 
 export function isChatSticker(value: unknown): value is ChatSticker {
-  return typeof value === 'string' && Object.hasOwn(CHAT_STICKERS, value);
+  return isBuiltInSticker(value) || isPersonalStickerId(value);
+}
+
+export function personalStickerUrl(id: PersonalStickerId) {
+  return `/api/account/stickers/${id}`;
+}
+
+export function chatStickerImage(id: ChatSticker): { src: string; alt: string } {
+  return isBuiltInSticker(id) ? CHAT_STICKERS[id] : { src: personalStickerUrl(id), alt: '自定义表情包' };
+}
+
+export function stickerCiphertextContext(kind: 'label' | 'image', userId: string, id: string) {
+  return `personal-sticker-${kind}:${userId}:${id}`;
 }

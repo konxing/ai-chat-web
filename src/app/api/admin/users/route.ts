@@ -9,7 +9,10 @@ export const dynamic = 'force-dynamic';
 
 const createUserSchema = z.object({
   username: usernameSchema,
-  email: emailSchema,
+  email: z.preprocess(
+    (value) => (typeof value === 'string' && !value.trim() ? null : value),
+    emailSchema.nullish()
+  ),
   displayName: z.string().trim().max(64).optional().nullable(),
   confirmPassword: z.string().min(1).max(200)
 });
@@ -37,7 +40,7 @@ export async function POST(req: Request) {
       await writeAdminAudit(req, user, {
         action: 'admin.user.create',
         targetType: 'user',
-        after: { username: body.username, email: body.email },
+        after: { username: body.username, email: body.email ?? null },
         status: 'FAILURE',
         error: err instanceof Error ? err.message : String(err)
       });

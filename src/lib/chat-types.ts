@@ -75,7 +75,7 @@ export interface ChatSettings {
 export interface AdminUserDto {
   id: string;
   username: string;
-  email: string;
+  email: string | null;
   emailVerified: boolean;
   role: 'OWNER' | 'USER';
   status: 'ACTIVE' | 'DISABLED';

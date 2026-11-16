@@ -172,7 +172,7 @@ async function main() {
     await prisma.$transaction([
       prisma.user.update({
         where: { id: owner.id },
-        data: { passwordHash, status: 'ACTIVE', emailVerified: owner.emailVerified ?? new Date() }
+        data: { passwordHash, status: 'ACTIVE', emailVerified: owner.email ? owner.emailVerified ?? new Date() : null }
       }),
       prisma.session.updateMany({
         where: { userId: owner.id, revokedAt: null },
@@ -291,7 +291,7 @@ async function main() {
   console.log('');
   console.log('✓ 超级管理员初始化完成');
   console.log(`  用户名：${owner.username}`);
-  console.log(`  邮箱：${owner.email}`);
+  console.log(`  邮箱：${owner.email ?? '未绑定'}`);
   console.log(`  角色：OWNER（唯一超级管理员）`);
   console.log(`  IP 规则：${rules.size ? Array.from(rules.values()).map((r) => r.cidr).join(', ') : '无（默认拒绝全部）'}`);
   if (args.generatePassword) console.log(`  一次性密码（请立即保存）：${envPassword}`);

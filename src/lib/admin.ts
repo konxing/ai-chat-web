@@ -45,7 +45,7 @@ export function writeAdminAudit(
 export interface PublicUser {
   id: string;
   username: string;
-  email: string;
+  email: string | null;
   emailVerified: boolean;
   role: 'OWNER' | 'USER';
   status: 'ACTIVE' | 'DISABLED';
@@ -68,7 +68,7 @@ export function publicUser(
     id: user.id,
     username: user.username,
     email: user.email,
-    emailVerified: Boolean(user.emailVerified),
+    emailVerified: Boolean(user.email && user.emailVerified),
     role: user.role,
     status: user.status,
     displayName: user.displayName,
@@ -159,14 +159,14 @@ function generateTemporaryPassword(): string {
 
 export async function createManagedUser(input: {
   username: string;
-  email: string;
+  email?: string | null;
   displayName?: string | null;
 }): Promise<{ user: PublicUser; temporaryPassword: string }> {
   const username = input.username.trim();
-  const email = input.email.trim().toLowerCase();
+  const email = input.email?.trim().toLowerCase() || null;
   const existing = await prisma.user.findFirst({
-    where: { OR: [{ username }, { email }] },
-    select: { username: true, email: true }
+    where: email ? { OR: [{ username }, { email }] } : { username },
+    select: { username: true }
   });
   if (existing) {
     throw new ApiError(
@@ -177,17 +177,27 @@ export async function createManagedUser(input: {
   }
   const temporaryPassword = generateTemporaryPassword();
   const passwordHash = await hashPassword(temporaryPassword);
-  const user = await prisma.user.create({
-    data: {
-      username,
-      email,
-      emailVerified: new Date(),
-      passwordHash,
-      role: 'USER',
-      status: 'ACTIVE',
-      displayName: input.displayName?.trim().slice(0, 64) || username
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        username,
+        email,
+        emailVerified: email === null ? null : new Date(),
+        passwordHash,
+        role: 'USER',
+        status: 'ACTIVE',
+        displayName: input.displayName?.trim().slice(0, 64) || username
+      }
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const fields = error.meta?.target;
+      const usernameConflict = Array.isArray(fields) && fields.includes('username');
+      throw new ApiError(409, 'USER_EXISTS', usernameConflict || !email ? '用户名已被占用' : '邮箱已被注册');
     }
-  });
+    throw error;
+  }
   log.info('admin.user_created', { userId: user.id });
   return { user: publicUser(user), temporaryPassword };
 }
@@ -246,11 +256,18 @@ export async function setUserEmail(userId: string, email: string): Promise<Publi
     select: { id: true }
   });
   if (clash) throw new ApiError(409, 'EMAIL_EXISTS', '邮箱已被其他账号使用');
-  const updated = await prisma.user.update({
-    where: { id: userId },
-    data: { email: normalized, emailVerified: new Date() }
-  });
-  return publicUser(updated);
+  try {
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { email: normalized, emailVerified: new Date() }
+    });
+    return publicUser(updated);
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      throw new ApiError(409, 'EMAIL_EXISTS', '邮箱已被其他账号使用');
+    }
+    throw error;
+  }
 }
 
 export async function deleteManagedUser(userId: string, actorId: string): Promise<void> {

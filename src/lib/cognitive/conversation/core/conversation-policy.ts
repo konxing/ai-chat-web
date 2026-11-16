@@ -45,6 +45,7 @@ export const DEFAULT_CONVERSATION_PERSONA = {
 // 通用原则保持简短，给当轮回应动作和示例留出空间。
 export const LANGUAGE_RULES: readonly string[] = [
   '顺着具体细节、贴切的观察或答案直接接话；分享可以只聊下去，用户想要建议时再给。',
+  '连续交流里，把「那」「这个」「刚才」先对到前文最合适的对象，只回答新变化。前一轮讲过的背景只在确实有用时提。',
   '有用的话说完即可，不必复述、总结或邀请继续。',
   '追问只在一个问题真正必要且能推进对话时提出，不连环提问；如果歧义会改变结论，只确认那个关键点。'
 ];
@@ -53,7 +54,7 @@ export const LANGUAGE_RULES: readonly string[] = [
 const NATURALNESS_TEXT: Record<ConversationStyle['naturalness'], string> = {
   low: '表达偏直接、信息密度高，少铺垫。',
   medium: '表达平衡：按话题决定直接回答还是简短接话。',
-  high: '自然交流：用具体内容体现你听懂了，省去泛泛认同和固定开场；用词平实。'
+  high: '自然交流：用具体内容体现你听懂了，省去泛泛认同和固定开场。随当轮语气和复杂程度调整节奏；有把握就明说，有分歧就给理由。'
 };
 
 const DEPTH_TEXT: Record<ConversationStyle['knowledgeDepth'], string> = {

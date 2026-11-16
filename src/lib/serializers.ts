@@ -9,7 +9,7 @@ export function publicUser(user: User) {
     displayName: user.displayName,
     role: user.role,
     status: user.status,
-    emailVerified: !!user.emailVerified,
+    emailVerified: Boolean(user.email && user.emailVerified),
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null
   };

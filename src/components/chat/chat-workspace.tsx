@@ -22,6 +22,7 @@ import {
   Copy,
   Download,
   FileText,
+  Globe,
   Lightbulb,
   History,
   LogOut,
@@ -42,6 +43,7 @@ import {
 } from 'lucide-react';
 import { apiFetch, attachmentUrl, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
 import { isReasoningLevel, reasoningLabels, type ReasoningLevel, type ReasoningOptions } from '@/lib/reasoning-levels';
+import { supportsDeepSeekWeb, type DeepSeekWebMode } from '@/lib/deepseek-web';
 import {
   CITATION_LOAD_FAILED_NOTE,
   CITATION_NOTE,
@@ -52,7 +54,7 @@ import {
 import type { MemoryDto } from '@/lib/cognitive/memories';
 import type { ConfidenceBand } from '@/lib/cognitive/confidence';
 import { cn } from '@/lib/cn';
-import { CHAT_STICKERS } from '@/lib/chat-stickers';
+import { chatStickerImage, type ChatSticker } from '@/lib/chat-stickers';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
 import { Modal, Spinner } from '@/components/ui';
@@ -147,6 +149,7 @@ export function ChatWorkspace({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [webTool, setWebTool] = useState<DeepSeekWebMode | ''>('');
   const [streamText, setStreamText] = useState('');
   const [streamError, setStreamError] = useState('');
   const [localProviderId, setLocalProviderId] = useState<string>(
@@ -207,6 +210,7 @@ export function ChatWorkspace({
 
   const selectedProviderId = chat?.providerId ?? localProviderId;
   const selectedProvider = providers.find((p) => p.id === selectedProviderId) ?? null;
+  const canUseWebTool = selectedProvider ? supportsDeepSeekWeb(selectedProvider) : false;
   const reasoningOptions = reasoningByProvider[selectedProviderId];
   const reasoningKey = `${chat?.id ?? 'draft'}:${selectedProviderId}`;
   const reasoningChoice = reasoningByChat[reasoningKey];
@@ -347,6 +351,7 @@ export function ChatWorkspace({
       setStreamError('');
       setOptimisticUser(null);
       setPending([]);
+      setWebTool('');
       try {
         const data = await apiFetch<{ chat: ChatDetailDto }>(`/api/chats/${id}`);
         if (navigationRef.current !== navigation) return;
@@ -369,6 +374,7 @@ export function ChatWorkspace({
     activeIdRef.current = null;
     chatIdRef.current = null;
     setChat(null);
+    setWebTool('');
     setReasoningByChat((previous) => Object.fromEntries(
       Object.entries(previous).filter(([key]) => !key.startsWith('draft:'))
     ));
@@ -576,7 +582,10 @@ export function ChatWorkspace({
           Accept: 'text/event-stream',
           ...csrfHeader()
         },
-        body: JSON.stringify({ content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined, reasoningEffort }),
+        body: JSON.stringify({
+          content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined, reasoningEffort,
+          webTool: canUseWebTool && webTool ? webTool : undefined
+        }),
         credentials: 'same-origin',
         signal: controller.signal
       });
@@ -597,6 +606,7 @@ export function ChatWorkspace({
         await refreshChat(chatId);
         return;
       }
+      if (navigationRef.current === navigation) setWebTool('');
       if (!response.body) {
         if (navigationRef.current === navigation) setStreamError('当前浏览器不支持流式响应');
         return;
@@ -717,7 +727,7 @@ export function ChatWorkspace({
       composerBusyRef.current = false;
       setSending(false);
     }
-  }, [draft, pending, editingId, attachmentWarning, ensureChat, reasoningEffort, refreshChat, refreshChats]);
+  }, [draft, pending, editingId, attachmentWarning, ensureChat, reasoningEffort, canUseWebTool, webTool, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -755,6 +765,7 @@ export function ChatWorkspace({
 
   const changeModel = useCallback(
     async (providerId: string) => {
+      setWebTool('');
       setLocalProviderId(providerId);
       if (!chat) return;
       try {
@@ -1434,6 +1445,28 @@ export function ChatWorkspace({
                   ) : null}
                 </button>
                 <div className="flex-1" />
+                {canUseWebTool ? (
+                  <label
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-white/80"
+                    title="仅用于本条消息。DeepSeek 可能联网查询，请使用公开链接。"
+                  >
+                    <Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                    <select
+                      aria-label="本轮 DeepSeek 联网工具"
+                      value={webTool}
+                      disabled={sending}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setWebTool(value === 'search' || value === 'read' ? value : '');
+                      }}
+                      className="h-8 max-w-[32vw] bg-transparent [color-scheme:dark]"
+                    >
+                      <option value="">联网：关闭</option>
+                      <option value="search">联网搜索</option>
+                      <option value="read">读取公开链接</option>
+                    </select>
+                  </label>
+                ) : null}
                 {sending ? (
                   <button type="button" className="btn-ghost h-9 gap-1.5 border-white/10 px-3 text-[12px]" onClick={stopStreaming}>
                     <Square className="h-3 w-3 fill-current" /> 停止
@@ -1624,17 +1657,7 @@ const MessageBubble = memo(function MessageBubble({
           </button>
         </div>
         <Markdown>{message.content}</Markdown>
-        {message.sticker ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            className="mt-2 h-24 w-24 object-contain"
-            src={CHAT_STICKERS[message.sticker].src}
-            alt={CHAT_STICKERS[message.sticker].alt}
-            width={96}
-            height={96}
-            loading="lazy"
-          />
-        ) : null}
+        {message.sticker ? <MessageSticker key={message.sticker} id={message.sticker} /> : null}
         {citationIds?.length ? <CitationNote ids={citationIds} getSource={getCitationSource} /> : null}
         {(message.inputTokens || message.outputTokens) && (
           <div className="mt-2 text-[10px] text-white/15">
@@ -1645,6 +1668,25 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+function MessageSticker({ id }: { id: ChatSticker }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const image = chatStickerImage(id);
+  return imageFailed ? (
+    <p className="mt-2 text-xs text-white/60">这张表情包暂时无法显示</p>
+  ) : (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className="mt-2 h-24 w-24 object-contain"
+      src={image.src}
+      alt={image.alt}
+      width={96}
+      height={96}
+      loading="lazy"
+      onError={() => setImageFailed(true)}
+    />
+  );
+}
 
 /**
  * 「这一轮带上了哪几条长期记忆」（任务书 8.2）。收起态只是一句提示，点开才去取记忆原文。

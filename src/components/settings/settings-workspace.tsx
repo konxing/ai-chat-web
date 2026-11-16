@@ -49,12 +49,13 @@ const ProfilePanel = dynamic(() => import('./profile-panel').then((m) => m.Profi
 const WikiPanel = dynamic(() => import('./wiki-panel').then((m) => m.WikiPanel), { loading: panelLoading });
 const ExperiencePanel = dynamic(() => import('./experience-panel').then((m) => m.ExperiencePanel), { loading: panelLoading });
 const ExpressionPanel = dynamic(() => import('./expression-panel').then((m) => m.ExpressionPanel), { loading: panelLoading });
+const StickersPanel = dynamic(() => import('./stickers-panel').then((m) => m.StickersPanel), { loading: panelLoading });
 const CognitiveSettingsPanel = dynamic(() => import('./cognitive-settings-panel').then((m) => m.CognitiveSettingsPanel), { loading: panelLoading });
 
 interface AccountUser {
   id: string;
   username: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   role: 'OWNER' | 'USER';
   status: string;
@@ -228,7 +229,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
       setEmailPassword('');
       setEmailCode('');
       setEmailNotice('');
-      push('邮箱已更新');
+      push(user.email ? '邮箱已更新' : '邮箱已绑定');
     } catch (err) {
       setEmailError(errorMessage(err));
     } finally {
@@ -407,12 +408,12 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
                     <div className="label">邮箱</div>
                     <div className="field flex flex-wrap items-center gap-2 text-white/70">
                       <Mail className="h-4 w-4 text-white/35" />
-                      {user.email}
-                      {user.emailVerified ? (
+                      {user.email ?? '未绑定'}
+                      {user.email && (user.emailVerified ? (
                         <span className="badge badge-green">已验证</span>
                       ) : (
                         <span className="badge badge-amber">未验证</span>
-                      )}
+                      ))}
                     </div>
                   </div>
                   <div>
@@ -445,9 +446,9 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
               </section>
 
               <section className="panel p-5 sm:p-6">
-                <h2 className="text-[16px] font-semibold text-white">更换邮箱</h2>
+                <h2 className="text-[16px] font-semibold text-white">{user.email ? '更换邮箱' : '绑定邮箱'}</h2>
                 <p className="mt-1 text-[12.5px] text-white/40">
-                  更换后需要输入发送到新邮箱的验证码。验证码 10 分钟内有效，仅可使用一次。
+                  {user.email ? '需要验证新邮箱。验证码 10 分钟内有效，仅可使用一次。' : '验证邮箱后，可用邮箱登录和找回密码。'}
                 </p>
                 {emailNotice ? (
                   <div className="mt-4">
@@ -514,7 +515,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
                       />
                     </div>
                     <button type="submit" className="btn-primary" disabled={emailBusy}>
-                      {emailBusy ? <Spinner /> : <Check className="h-4 w-4" />} 确认更换
+                      {emailBusy ? <Spinner /> : <Check className="h-4 w-4" />} {user.email ? '确认更换' : '确认绑定'}
                     </button>
                     <button
                       type="button"
@@ -780,6 +781,8 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           {tab === 'experience' ? <ExperiencePanel /> : null}
 
           {tab === 'expression' ? <ExpressionPanel /> : null}
+
+          {tab === 'stickers' ? <StickersPanel /> : null}
 
           {tab === 'about' ? (
             <section className="panel space-y-5 p-5 sm:p-6">

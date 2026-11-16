@@ -97,7 +97,7 @@ export function UsersTab() {
   async function resetPassword(user: AdminUser) {
     const ok = await confirm({
       title: `重置「${user.username}」的密码？`,
-      description: '系统会生成一个一次性临时密码，并立即注销该用户所有设备上的登录。临时密码只显示一次。',
+      description: '系统会生成临时密码，并立即注销该用户所有设备上的登录。临时密码只显示一次。',
       confirmText: '重置密码',
       tone: 'danger'
     });
@@ -213,8 +213,8 @@ export function UsersTab() {
                             ) : null}
                           </div>
                           <div className="truncate text-[11.5px] text-white/35">
-                            @{user.username} · {user.email}
-                            {!user.emailVerified ? '（未验证）' : ''}
+                            @{user.username} · {user.email ?? '未绑定邮箱'}
+                            {user.email && !user.emailVerified ? '（未验证）' : ''}
                           </div>
                         </div>
                       </div>
@@ -243,7 +243,7 @@ export function UsersTab() {
                         <button
                           type="button"
                           className="btn-icon"
-                          title="修改邮箱"
+                          title={user.email ? '修改邮箱' : '绑定邮箱'}
                           onClick={() => setEmailTarget(user)}
                         >
                           <Mail className="h-4 w-4" />
@@ -422,7 +422,7 @@ function CreateUserModal({
         method: 'POST',
         json: {
           username: username.trim(),
-          email: email.trim(),
+          email: email.trim() || null,
           displayName: displayName.trim() || null,
           confirmPassword: password
         }
@@ -440,7 +440,7 @@ function CreateUserModal({
       open={open}
       onClose={onClose}
       title="新建账号"
-      description="系统会生成一次性临时密码，并通过安全渠道告知对方。"
+      description="创建后会显示临时密码，请通过安全渠道交给用户。"
       width="520px"
     >
       <form onSubmit={submit} className="space-y-3">
@@ -458,16 +458,20 @@ function CreateUserModal({
           />
         </div>
         <div>
-          <label className="label">邮箱</label>
+          <label className="label" htmlFor="new-managed-user-email">邮箱（可选）</label>
           <input
+            id="new-managed-user-email"
             className="field"
             type="email"
-            required
+            maxLength={254}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="name@example.com"
             autoComplete="off"
           />
+          <p className="mt-1 text-[11.5px] leading-relaxed text-white/45">
+            可留空，用用户名登录。填写时请确认邮箱属于该用户，创建时无需验证码。
+          </p>
         </div>
         <div>
           <label className="label">昵称（可选）</label>
@@ -510,7 +514,7 @@ function EmailModal({
 
   useEffect(() => {
     if (user) {
-      setEmail(user.email);
+      setEmail(user.email ?? '');
       setError('');
     }
   }, [user]);
@@ -537,14 +541,14 @@ function EmailModal({
   }
 
   return (
-    <Modal open={Boolean(user)} onClose={onClose} title="修改用户邮箱" description={`账号：${user?.username ?? ''}`} width="480px">
+    <Modal open={Boolean(user)} onClose={onClose} title={user?.email ? '修改用户邮箱' : '为用户绑定邮箱'} description={`账号：${user?.username ?? ''}`} width="480px">
       <form onSubmit={submit} className="space-y-3">
         <div>
           <label className="label">新邮箱</label>
           <input className="field" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </div>
         <p className="text-[11.5px] leading-relaxed text-white/35">
-          管理员修改邮箱后，该邮箱会直接标记为已验证。请确认邮箱确实属于该用户。
+          管理员登记的邮箱可直接用于登录和找回密码。请确认邮箱属于该用户。
         </p>
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="flex justify-end gap-2">

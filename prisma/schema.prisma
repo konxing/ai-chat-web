@@ -234,7 +234,7 @@ enum ReflectionStatus {
 model User {
   id            String     @id @default(uuid())
   username      String     @unique @db.VarChar(32)
-  email         String     @unique @db.VarChar(254)
+  email         String?    @unique @db.VarChar(254)
   emailVerified DateTime?
   passwordHash  String
   role          Role       @default(USER)
@@ -272,6 +272,7 @@ model User {
   capabilitySnapshots CapabilitySnapshot[]
   interventionRecords InterventionRecord[]
   attachments         Attachment[]
+  personalStickers    PersonalSticker[]
   loginLogs           LoginLog[]
   auditLogs           AuditLog[]           @relation("AuditActor")
   ipRulesCreated      IpRule[]             @relation("IpRuleCreator")
@@ -331,7 +332,7 @@ model Message {
   errorCode         String?       @db.VarChar(64)
   inputTokens       Int?
   outputTokens      Int?
-  sticker           String?       @db.VarChar(24)
+  sticker           String?       @db.VarChar(40)
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -346,6 +347,23 @@ model Message {
   capabilityEvidences CapabilityEvidence[] @relation("CapabilityEvidenceSource")
 
   @@index([chatId, createdAt])
+}
+
+model PersonalSticker {
+  id               String   @id @db.VarChar(33)
+  userId           String
+  labelCiphertext  String   @db.Text
+  imageCiphertext  Bytes
+  mime             String   @db.VarChar(32)
+  size             Int
+  digest           String   @db.Char(64)
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, digest])
+  @@index([userId, createdAt])
 }
 
 model Attachment {

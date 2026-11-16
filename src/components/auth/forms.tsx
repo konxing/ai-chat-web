@@ -410,7 +410,7 @@ export function ForgotForm() {
       {error ? <Alert tone="error">{error}</Alert> : null}
       <div>
         <label className="label" htmlFor="forgot-email">
-          注册邮箱
+          已绑定邮箱
         </label>
         <input
           id="forgot-email"

@@ -17,7 +17,7 @@ export default async function ForgotPage() {
     <AuthShell
       siteName={settings.siteName}
       title="重置密码"
-      subtitle="通过注册邮箱验证身份。无论邮箱是否存在，响应都保持一致。"
+      subtitle="使用已绑定的邮箱重置密码。没有绑定邮箱时，请联系管理员。"
       footer={
         <>
           想起了密码？

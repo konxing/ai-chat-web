@@ -1,4 +1,4 @@
-/* Rotate the AES-256-GCM master key without losing data.
+/* Rotate the encryption master key without losing data.
  *
  * Usage:
  *   npm run rotate-keys -- --new-key-id k2027 [--new-key <base64>] [--dry-run]
@@ -10,9 +10,8 @@
  * MASTER_KEYRING for rollback.
  *
  * Coverage is two lists, deliberately different in kind:
- * - The five non-cognitive families (chat title, message, provider key, attachment
- *   name/text/chunks, attachment file) keep their AAD spellings inline below.
- *   Changing one character strands every historical row, so they are not table-driven.
+ * - Chat titles, messages, provider keys, attachments and personal stickers
+ *   use the same AAD coordinates as their readers.
  * - The cognitive columns come from `src/lib/cognitive/encrypted-columns.ts` — one
  *   row per `*Ciphertext` column in the nine cognitive models. Adding a column there
  *   is what makes it rotate; a new column missing from that table fails a unit test.
@@ -112,7 +111,8 @@ async function main() {
   process.env.MASTER_KEYRING = JSON.stringify(ring);
   const nextKeyring = JSON.stringify({ ...ring });
 
-  const { decryptString, encryptString, cipherKeyId, decryptBuffer, encryptBuffer } = await import('../src/lib/crypto');
+  const { decryptString, encryptString, cipherKeyId, decryptBuffer, encryptBuffer, bufferKeyId } = await import('../src/lib/crypto');
+  const { stickerCiphertextContext } = await import('../src/lib/chat-stickers');
   const { COGNITIVE_ENCRYPTED_COLUMNS, cognitiveColumnCoord, rotateColumnPayload } = await import(
     '../src/lib/cognitive/encrypted-columns'
   );
@@ -134,6 +134,7 @@ async function main() {
     providers: 0,
     attachments: 0,
     files: 0,
+    stickers: 0,
     cognitive: 0,
     skippedFiles: 0,
     missingFiles: 0,
@@ -246,6 +247,46 @@ async function main() {
       plain.fill(0);
     }
 
+    // Personal stickers contain images, so only lift a small batch of ciphertext into memory.
+    let afterStickerId = '';
+    while (true) {
+      const stickers = await prisma.personalSticker.findMany({
+        where: { id: { gt: afterStickerId } },
+        select: { id: true, userId: true, labelCiphertext: true, imageCiphertext: true },
+        orderBy: { id: 'asc' },
+        take: 5
+      });
+      if (!stickers.length) break;
+      for (const sticker of stickers) {
+        const labelAad = stickerCiphertextContext('label', sticker.userId, sticker.id);
+        const imageAad = stickerCiphertextContext('image', sticker.userId, sticker.id);
+        const label = rotateString(sticker.labelCiphertext, labelAad);
+        const image = Buffer.from(sticker.imageCiphertext.buffer, sticker.imageCiphertext.byteOffset, sticker.imageCiphertext.byteLength);
+        const rotateImage = bufferKeyId(image) !== args.newKeyId;
+        if (!label && !rotateImage) continue;
+        let imageCiphertext: Uint8Array<ArrayBuffer> | undefined;
+        if (rotateImage) {
+          const plain = decryptBuffer(image, imageAad);
+          imageCiphertext = new Uint8Array(encryptBuffer(plain, imageAad));
+          plain.fill(0);
+        }
+        if (!args.dryRun) {
+          const where = { id: sticker.id, userId: sticker.userId };
+          if (imageCiphertext) {
+            await prisma.personalSticker.updateMany({ where, data: { imageCiphertext } });
+          }
+          if (label) {
+            await prisma.personalSticker.updateMany({
+              where: { ...where, labelCiphertext: sticker.labelCiphertext },
+              data: { labelCiphertext: label }
+            });
+          }
+        }
+        stats.stickers += 1;
+      }
+      afterStickerId = stickers[stickers.length - 1].id;
+    }
+
     // 认知侧二十五个密文列：模型、列、AAD 口径全部来自那张表。
     // 这里不手抄任何一段封口串——抄一份就会漏一列，这次的缺口就是这么来的。
     for (const entry of COGNITIVE_ENCRYPTED_COLUMNS) {
@@ -273,7 +314,7 @@ async function main() {
     console.log(
       `rotate: ${args.dryRun ? 'would rotate' : 'rotated'} ` +
         `${stats.chats} chats, ${stats.messages} messages, ${stats.providers} provider keys, ` +
-        `${stats.attachments} attachment records, ${stats.files} files, ` +
+        `${stats.attachments} attachment records, ${stats.files} files, ${stats.stickers} personal stickers, ` +
         `${stats.cognitive} cognitive columns` +
         `${stats.skippedFiles ? `, ${stats.skippedFiles} files already on new key` : ''}` +
         `${stats.missingFiles ? `, ${stats.missingFiles} missing files` : ''}` +

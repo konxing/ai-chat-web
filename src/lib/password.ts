@@ -29,7 +29,7 @@ const COMMON_PASSWORDS = new Set([
 
 export interface PasswordPolicyContext {
   username?: string;
-  email?: string;
+  email?: string | null;
 }
 
 export function passwordPolicyError(password: string, ctx: PasswordPolicyContext = {}): string | null {

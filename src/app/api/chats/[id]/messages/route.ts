@@ -22,6 +22,7 @@ import { prisma } from '@/lib/prisma';
 import { getAttachmentsForUser, imageSendSummary, publicAttachment, unlinkAttachmentFile } from '@/lib/files';
 import { capabilitiesOf, getProviderForUser, resolveDefaultProvider } from '@/lib/providers';
 import { streamChatCompletion } from '@/lib/ai';
+import { supportsDeepSeekWeb } from '@/lib/deepseek-web';
 import { getReasoningOptions } from '@/lib/provider-reasoning';
 import { StickerReply } from '@/lib/sticker-reply';
 import { log } from '@/lib/logger';
@@ -69,6 +70,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
     }
   }
   if (!provider) provider = await resolveDefaultProvider(user.id);
+  if (body.webTool && !supportsDeepSeekWeb(provider)) {
+    throw new ApiError(400, 'MODEL_NO_WEB_TOOLS', '当前模型接口不支持 DeepSeek 联网工具');
+  }
   if (body.reasoningEffort && !(await getReasoningOptions(provider)).levels.includes(body.reasoningEffort)) {
     throw new ApiError(400, 'UNSUPPORTED_REASONING_EFFORT', '当前模型不支持该思考程度，请选择默认');
   }
@@ -130,7 +134,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       modelId: provider.modelId
     });
   }
-  const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown } = await buildConversation({
+  const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown, personalStickerChoices } = await buildConversation({
     chatId,
     userId: user.id,
     currentMessageId: userMessage.id,
@@ -154,9 +158,10 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let content = '';
-      const stickerReply = new StickerReply(stickerInCooldown);
+      const stickerReply = new StickerReply(stickerInCooldown, personalStickerChoices);
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
+      let webCitations: string[] = [];
       // 审计问的是「这一轮发生过什么」，不是「模型有没有自己说 done」：
       // 以 done 事件为闸门时，失败、取消、以及没发 done 就结束的轮次在审计里完全不存在。
       let outcome: 'SUCCESS' | 'FAILURE' = 'SUCCESS';
@@ -193,10 +198,13 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         for await (const event of streamChatCompletion({
           provider,
           reasoningEffort: body.reasoningEffort,
+          webTool: body.webTool,
           messages
         })) {
           if (event.type === 'delta' && event.text) {
             sendText(stickerReply.push(event.text));
+          } else if (event.type === 'citations' && event.citations) {
+            webCitations = [...new Set([...webCitations, ...event.citations])].slice(0, 8);
           } else if (event.type === 'usage') {
             inputTokens = event.inputTokens ?? inputTokens;
             outputTokens = event.outputTokens ?? outputTokens;
@@ -208,6 +216,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
 
         const { text, sticker } = stickerReply.finish();
         sendText(text);
+        if (content.trim() && webCitations.length) {
+          sendText(`\n\n**来源**\n${webCitations.map((url) => `- <${url}>`).join('\n')}`);
+        }
         const saved = await saveAssistantMessage({
           chatId,
           content: content.trim() ? content : sticker ? '' : '（模型没有返回文本）',

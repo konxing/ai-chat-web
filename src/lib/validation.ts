@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { isReasoningLevel, type ReasoningLevel } from './reasoning-levels';
+import { DEEPSEEK_WEB_MODES } from './deepseek-web';
 
 export const usernameSchema = z
   .string()
@@ -78,6 +79,7 @@ export const chatModelSchema = z.object({
 export const sendMessageSchema = z.object({
   content: z.string().max(50_000).default(''),
   reasoningEffort: z.custom<ReasoningLevel>(isReasoningLevel).optional(),
+  webTool: z.enum(DEEPSEEK_WEB_MODES).optional(),
   attachmentIds: z.array(z.string().uuid()).max(15, '一条消息最多 15 个附件').default([]),
   /** 编辑并重发：更新该用户消息并移除其后问答，再重新生成回答。 */
   editMessageId: z.string().uuid().optional()

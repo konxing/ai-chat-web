@@ -51,8 +51,10 @@ export async function listPromptVersions(): Promise<PromptVersion[]> {
  * 不传 ctx 时保持旧行为（按 active id/status）；传 ctx 时只选适用当前模式/Provider 的版本。
  */
 export async function getActivePromptVersion(ctx?: { mode?: string; provider?: string }): Promise<PromptVersion | null> {
-  const activeId = await getRawSystemSetting(ACTIVE_KEY).catch(() => null);
-  const versions = await readVersions();
+  const [activeId, versions] = await Promise.all([
+    getRawSystemSetting(ACTIVE_KEY).catch(() => null),
+    readVersions()
+  ]);
   const applies = (v: PromptVersion) =>
     (!ctx?.mode || v.applicableMode === 'all' || v.applicableMode === ctx.mode) &&
     (!ctx?.provider || v.modelCompatibility === 'all' || v.modelCompatibility === ctx.provider);

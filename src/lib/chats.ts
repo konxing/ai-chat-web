@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { CHAT_STICKERS, isChatSticker, type ChatSticker } from './chat-stickers';
+import { CHAT_STICKERS, isBuiltInSticker, isChatSticker, type ChatSticker, type PersonalStickerDto } from './chat-stickers';
 import { stickerReplyPrompt } from './sticker-reply';
+import { listPersonalStickers } from './personal-stickers';
 import { CHAT_PERSONAS } from './chat-personas';
 import { getConversationStyle } from './cognitive/conversation/style/style-profile';
 import type { AiProvider, Attachment, Chat, Message, Prisma } from '@prisma/client';
@@ -45,6 +46,7 @@ export interface ChatMessageDto {
   status: string;
   inputTokens: number | null;
   outputTokens: number | null;
+  sticker?: ChatSticker;
   attachments: PublicAttachment[];
   createdAt: string;
 }
@@ -395,6 +397,7 @@ export interface ConversationContext {
   citedMemoryIds: string[];
   cognitiveFailed: CognitiveModuleKey[];
   stickerInCooldown: boolean;
+  personalStickerChoices: PersonalStickerDto[];
 }
 
 export async function buildConversation(input: {
@@ -416,11 +419,14 @@ export async function buildConversation(input: {
   // 送给模型的上下文停在会话开头，还要多搬 20 条密文。
   // ERROR 行在库里就排除：那是失败时留下的文案，既不该占窗口名额，也不该被
   // 当成上一轮回答喂回模型。PARTIAL 是真实生成过的内容，保留。
-  const historical = await prisma.message.findMany({
-    where: { chatId: chat.id, status: { not: 'ERROR' } },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: CONTEXT_MESSAGE_LIMIT
-  });
+  const [historical, personalStickerChoices] = await Promise.all([
+    prisma.message.findMany({
+      where: { chatId: chat.id, status: { not: 'ERROR' } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: CONTEXT_MESSAGE_LIMIT
+    }),
+    listPersonalStickers(input.userId, true).catch(() => [])
+  ]);
   const stickerInCooldown = historical.filter((message) => message.role === 'ASSISTANT')
     .slice(0, 12).some((message) => isChatSticker(message.sticker));
   const trimmed = historical.filter((message) => message.id !== input.currentMessageId).reverse();
@@ -432,8 +438,8 @@ export async function buildConversation(input: {
         '回答应准确、结构清晰；代码使用 Markdown 代码块；数学公式使用 LaTeX。' +
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
         '不要声称自己看到了未提供的图片或文件。' +
-        '用户纠正你时，用新信息继续回答。闲聊时从对方确实提到的细节接话，别补写没说过的经过。' +
-        '\n\n' + stickerReplyPrompt(stickerInCooldown)
+        '用户纠正你时，用新信息继续回答。追问直接承接前文，只讲这次的新内容。闲聊时从确实说过的细节接话，别补写没说过的经过；只是分享时，一两句话接住也可以。' +
+        '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices)
     }
   ];
 
@@ -459,9 +465,14 @@ export async function buildConversation(input: {
   // 对话智能层（Phase 1）：全局交流原则 + 用户风格 + 生效提示词版本。
   // 默认关（保住现有聊天契约）；打开后才注入，排在 base system 之后、认知块之前。
   // 读失败回落默认，不阻断对话。默认不增加模型调用。
-  const [layerEnabled, style] = await Promise.all([
+  const [layerEnabled, style, cognitive] = await Promise.all([
     conversationLayerEnabled().catch(() => false),
-    getConversationStyle(input.userId).catch(() => undefined)
+    getConversationStyle(input.userId).catch(() => undefined),
+    runCognitiveReads({
+      userId: input.userId,
+      chatId: chat.id,
+      content: input.currentContent
+    })
   ]);
   try {
     if (layerEnabled) {
@@ -489,24 +500,22 @@ export async function buildConversation(input: {
     });
   }
 
-  const cognitive = await runCognitiveReads({
-    userId: input.userId,
-    chatId: chat.id,
-    content: input.currentContent
-  });
   for (const block of cognitive.blocks) messages.push({ role: 'system', content: block.text });
   // 引用清单（任务书 8.2）：只记真的进了上面那段提示词的记忆 id。
   // 去重保序——同一个 id 只会来自一个块，但模块将来不止一个，这里不该靠这个假设。
   const citedMemoryIds = [...new Set(cognitive.blocks.flatMap((block) => block.memoryIds ?? []))];
 
   let charBudget = 40_000;
+  const personalLabels = new Map(personalStickerChoices.map(({ id, label }) => [id, label]));
   const history: AiMessage[] = [];
   for (const message of historical) {
     if (message.role === 'SYSTEM' || message.id === input.currentMessageId) continue;
     const text = decryptMessage(message);
-    const sticker = message.role === 'ASSISTANT' && message.status === 'COMPLETE' && isChatSticker(message.sticker)
-      ? `（已随这条回复发送表情包：${CHAT_STICKERS[message.sticker].alt}）`
-      : '';
+    const id = message.sticker;
+    const label = message.role === 'ASSISTANT' && message.status === 'COMPLETE' && isChatSticker(id)
+      ? isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情'
+      : null;
+    const sticker = label ? `（已随这条回复发送表情包：${label}）` : '';
     const content = sticker && text ? `${text}\n\n${sticker}` : sticker || text;
     if (content.length > charBudget) {
       if (!history.length) history.push({
@@ -555,7 +564,7 @@ export async function buildConversation(input: {
   }
   // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
   // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
-  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown };
+  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown, personalStickerChoices };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {
