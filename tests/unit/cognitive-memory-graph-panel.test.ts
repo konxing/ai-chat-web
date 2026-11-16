@@ -167,9 +167,9 @@ describe('客户端包边界', () => {
 });
 
 describe('设置页接线', () => {
-  it('tab 三处都到位：联合类型、导航项、渲染分支', () => {
-    expect(WORKSPACE).toContain("| 'memoryGraph'");
-    expect(WORKSPACE).toContain("['memoryGraph', '记忆网络', Network]");
+  it('个人智能层的记忆网络入口打开原有面板', () => {
+    const tabs = read('src/components/settings/settings-tabs.ts');
+    expect(tabs).toContain("['memoryGraph', '记忆网络', Network]");
     expect(WORKSPACE).toContain("{tab === 'memoryGraph' ? <MemoryGraphPanel /> : null}");
     expect(WORKSPACE).toContain("dynamic(() => import('./memory-graph-panel').then((m) => m.MemoryGraphPanel)");
   });

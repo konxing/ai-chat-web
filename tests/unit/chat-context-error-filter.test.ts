@@ -59,7 +59,7 @@ async function seed() {
   }));
 }
 
-async function build() {
+async function build(currentMessageId?: string) {
   const { buildConversation } = await import('@/lib/chats');
   const provider = {
     id: 'p-1',
@@ -79,6 +79,7 @@ async function build() {
   const { messages: out } = await buildConversation({
     chatId: 'chat-1',
     userId: 'user-1',
+    currentMessageId,
     currentContent: '本轮新问题',
     attachments: [],
     provider
@@ -118,5 +119,29 @@ describe('失败记录不进模型上下文', () => {
     await build();
 
     expect(ctx.queries[0].where?.status?.not).toBe('ERROR');
+  });
+
+  it('保留实际发出的表情包，包括只有表情包、没有文字的回复', async () => {
+    await seed();
+    const { encryptMessage } = await import('@/lib/chats');
+    const reply = ctx.rows[1];
+    reply.sticker = 'wave';
+    expect(await build()).toContain('第一个回答\n\n（已随这条回复发送表情包：打招呼）');
+    reply.contentCiphertext = encryptMessage('', String(reply.id));
+    expect(await build()).toContain('（已随这条回复发送表情包：打招呼）');
+  });
+
+  it('长历史优先保留最近的回复，本轮消息按 ID 仅发送一次', async () => {
+    await seed();
+    const { encryptMessage } = await import('@/lib/chats');
+    const old = '早期内容'.repeat(11_000);
+    ctx.rows[0].contentCiphertext = encryptMessage(old, 'm-1');
+    ctx.rows[4].contentCiphertext = encryptMessage('本轮新问题', 'm-5');
+    expect(await build('m-5')).toEqual([
+      expect.stringContaining('AI Chat 的对话助手'),
+      '第一个回答',
+      PARTIAL_TEXT,
+      '本轮新问题'
+    ]);
   });
 });

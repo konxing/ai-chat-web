@@ -206,6 +206,13 @@ describe('登录成功路径的往返次序', () => {
     expect(ctx.events).toContain('loginLock.upsert:start');
   });
 
+  it('来源地址不可用时在接触账号和锁定记录前拒绝请求', async () => {
+    const response = await login('unknown');
+    expect(response.status).toBe(403);
+    expect(ctx.events).toEqual([]);
+    expect(ctx.loginLogs).toEqual([]);
+  });
+
   it('非 OWNER 用户登录不写审计', async () => {
     ctx.role = 'MEMBER';
     const response = await login('203.0.113.16');

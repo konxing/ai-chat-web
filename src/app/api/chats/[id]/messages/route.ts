@@ -133,6 +133,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown } = await buildConversation({
     chatId,
     userId: user.id,
+    currentMessageId: userMessage.id,
     currentContent: body.content,
     attachments,
     provider

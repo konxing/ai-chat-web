@@ -16,19 +16,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { PrismaClient } = require('@prisma/client');
-const ipaddr = require('ipaddr.js');
 const { attachGzip } = require('./server-gzip.cjs');
+const { loadProxyConfig, matchesCidr, parseCidr, resolveClientIp, setClientIpHeaders } = require('./server-ip.cjs');
 
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV !== 'production';
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
 const CACHE_MS = Math.max(200, Number(process.env.IP_CACHE_MS || 1000));
-const TRUST_PROXY = String(process.env.TRUST_PROXY || 'true') === 'true';
 const APP_IS_HTTPS = String(process.env.APP_URL || '').startsWith('https://');
-const TRUSTED_PROXY_CIDRS = String(process.env.TRUSTED_PROXY_CIDRS || '127.0.0.1/32,::1/128')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
 
 const prisma = new PrismaClient({ log: ['error'] });
 
@@ -46,61 +41,6 @@ function logErr(event, fields = {}) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level: 'error', event, ...fields });
   console.error(line);
   writeLaunchLog(line);
-}
-
-function normalizeIp(input) {
-  if (!input) return null;
-  let value = String(input).trim();
-  if (value.startsWith('[') && value.endsWith(']')) value = value.slice(1, -1);
-  const zone = value.indexOf('%');
-  if (zone !== -1) value = value.slice(0, zone);
-  if (!ipaddr.isValid(value)) return null;
-  const parsed = ipaddr.parse(value);
-  if (parsed.kind() === 'ipv6' && parsed.isIPv4MappedAddress()) {
-    const v4 = parsed.toIPv4Address();
-    return { ip: v4.toNormalizedString(), family: 'ipv4' };
-  }
-  return { ip: parsed.toNormalizedString(), family: parsed.kind() === 'ipv4' ? 'ipv4' : 'ipv6' };
-}
-
-function parseCidr(cidr) {
-  try {
-    const [addr, prefix] = ipaddr.parseCIDR(cidr.trim());
-    return { addr, prefix, family: addr.kind() === 'ipv4' ? 'ipv4' : 'ipv6' };
-  } catch {
-    return null;
-  }
-}
-
-const trustedProxies = TRUSTED_PROXY_CIDRS.map(parseCidr).filter(Boolean);
-
-function matchesCidr(parsedIp, rule) {
-  if (!rule || rule.family !== parsedIp.family) return false;
-  try {
-    const addr = ipaddr.parse(parsedIp.ip);
-    return addr.match(rule.addr, rule.prefix);
-  } catch {
-    return false;
-  }
-}
-
-function isTrusted(peer) {
-  return trustedProxies.some((rule) => matchesCidr(peer, rule));
-}
-
-function resolveClientIp(req) {
-  const peer = normalizeIp(req.socket && req.socket.remoteAddress);
-  if (!peer) return { ip: null, peer: null, reason: 'no-peer-address' };
-  if (TRUST_PROXY && isTrusted(peer)) {
-    const header = req.headers['x-real-ip'];
-    const raw = Array.isArray(header) ? header[0] : header;
-    if (raw) {
-      const proxied = normalizeIp(raw.split(',')[0]);
-      if (proxied) return { ip: proxied, peer, reason: 'trusted-proxy' };
-      return { ip: null, peer, reason: 'invalid-proxy-header' };
-    }
-  }
-  return { ip: peer, peer, reason: 'direct' };
 }
 
 let cache = {
@@ -227,8 +167,8 @@ function unavailable(res, reason) {
   logErr('ipguard.denied_unavailable', { reason });
 }
 
-async function guard(req, res) {
-  const { ip, peer, reason } = resolveClientIp(req);
+async function guard(req, res, proxy) {
+  const { ip, peer, reason } = resolveClientIp(req, proxy);
   const pathOnly = (req.url || '/').split('?')[0];
   const ua = req.headers['user-agent'] || '';
 
@@ -270,14 +210,10 @@ async function guard(req, res) {
   }
 
   // Replace any spoofable forwarding headers before the app sees them.
-  delete req.headers['forwarded'];
-  delete req.headers['x-forwarded-for'];
-  delete req.headers['x-real-ip'];
-  req.headers['x-real-ip'] = ip.ip;
-  req.headers['x-client-ip'] = ip.ip;
+  setClientIpHeaders(req.headers, ip.ip, reason);
   req.headers['x-nonce'] = crypto.randomBytes(16).toString('base64');
   req.clientIp = ip.ip;
-  return true;
+  return reason;
 }
 
 function addSecurityHeaders(res) {
@@ -302,6 +238,14 @@ function addSecurityHeaders(res) {
 }
 
 async function main() {
+  const proxy = loadProxyConfig(process.env);
+  if (proxy.enabled && process.env.AI_WEBCHAT_WINDOWS_LOCAL === 'false') {
+    const address = process.env.APP_URL;
+    const url = APP_IS_HTTPS && URL.canParse(address) ? new URL(address) : null;
+    if (!url || url.username || url.password) {
+      throw new Error('Windows proxy mode requires an HTTPS APP_URL without credentials');
+    }
+  }
   const { default: next } = await import('next');
   const app = next({ dev: isDev, hostname: HOST, port: PORT });
   const handle = app.getRequestHandler();
@@ -309,10 +253,10 @@ async function main() {
 
   const requestListener = async (req, res) => {
     try {
-      const allowed = await guard(req, res);
-      if (!allowed) return;
+      const source = await guard(req, res, proxy);
+      if (!source) return;
       if (req.url === '/_internal/ip-check') {
-        res.writeHead(req.method === 'GET' && TRUST_PROXY ? 204 : 404, { 'Cache-Control': 'no-store' });
+        res.writeHead(req.method === 'GET' && source === 'trusted-proxy' ? 204 : 404, { 'Cache-Control': 'no-store' });
         res.end();
         return;
       }
@@ -348,7 +292,7 @@ async function main() {
   server.keepAliveTimeout = 15_000;
 
   server.listen(PORT, HOST, () => {
-    log('server.listening', { host: HOST, port: PORT, dev: isDev, trustProxy: TRUST_PROXY });
+    log('server.listening', { host: HOST, port: PORT, dev: isDev, trustProxy: proxy.enabled });
     refreshRules(true).catch(() => undefined);
     ruleTimer = setInterval(() => void refreshRules(), CACHE_MS);
     ruleTimer.unref();

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isChatSticker, type ChatSticker } from './chat-stickers';
+import { CHAT_STICKERS, isChatSticker, type ChatSticker } from './chat-stickers';
 import { stickerReplyPrompt } from './sticker-reply';
 import { CHAT_PERSONAS } from './chat-personas';
 import { getConversationStyle } from './cognitive/conversation/style/style-profile';
@@ -400,6 +400,7 @@ export interface ConversationContext {
 export async function buildConversation(input: {
   chatId: string;
   userId: string;
+  currentMessageId?: string;
   currentContent: string;
   attachments: Attachment[];
   provider: AiProvider;
@@ -422,7 +423,7 @@ export async function buildConversation(input: {
   });
   const stickerInCooldown = historical.filter((message) => message.role === 'ASSISTANT')
     .slice(0, 12).some((message) => isChatSticker(message.sticker));
-  const trimmed = historical.reverse();
+  const trimmed = historical.filter((message) => message.id !== input.currentMessageId).reverse();
   const messages: AiMessage[] = [
     {
       role: 'system',
@@ -499,16 +500,28 @@ export async function buildConversation(input: {
   const citedMemoryIds = [...new Set(cognitive.blocks.flatMap((block) => block.memoryIds ?? []))];
 
   let charBudget = 40_000;
-  for (const message of trimmed) {
-    if (message.role === 'SYSTEM') continue;
-    const content = decryptMessage(message);
-    if (charBudget - content.length < 0) break;
+  const history: AiMessage[] = [];
+  for (const message of historical) {
+    if (message.role === 'SYSTEM' || message.id === input.currentMessageId) continue;
+    const text = decryptMessage(message);
+    const sticker = message.role === 'ASSISTANT' && message.status === 'COMPLETE' && isChatSticker(message.sticker)
+      ? `（已随这条回复发送表情包：${CHAT_STICKERS[message.sticker].alt}）`
+      : '';
+    const content = sticker && text ? `${text}\n\n${sticker}` : sticker || text;
+    if (content.length > charBudget) {
+      if (!history.length) history.push({
+        role: message.role === 'USER' ? 'user' : 'assistant',
+        content: content.slice(-charBudget)
+      });
+      break;
+    }
     charBudget -= content.length;
-    messages.push({
+    history.push({
       role: message.role === 'USER' ? 'user' : 'assistant',
       content
     });
   }
+  messages.push(...history.reverse());
 
   const capabilities = capabilitiesOf(input.provider);
   const images = input.attachments.filter((a) => a.kind === 'IMAGE');
@@ -535,7 +548,7 @@ export async function buildConversation(input: {
   }
 
   const last = messages[messages.length - 1];
-  if (last && last.role === 'user' && last.content === input.currentContent) {
+  if (!input.currentMessageId && last && last.role === 'user' && last.content === input.currentContent) {
     messages[messages.length - 1] = { role: 'user', content: parts };
   } else {
     messages.push({ role: 'user', content: parts });

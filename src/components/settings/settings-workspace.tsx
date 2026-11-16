@@ -3,30 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   BadgeCheck,
   Bot,
-  Brain,
   Check,
-  Compass,
-  Fingerprint,
-  History,
+  ChevronRight,
   KeyRound,
   Laptop,
-  Lightbulb,
   Lock,
   LogOut,
   Mail,
-  Network,
-  BookOpen,
   Plus,
-  Scale,
   Shield,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
-  UserRound,
   X
 } from 'lucide-react';
 import { apiFetch, codeSentMessage, errorMessage, formatDateTime, timeAgo } from '@/lib/client-api';
@@ -44,7 +36,7 @@ import {
   useToast
 } from '@/components/ui';
 import type { ProviderDto } from '@/lib/chat-types';
-import type { OverviewTarget } from './cognitive-overview-panel';
+import { COGNITIVE_DETAIL_TABS, getSettingsTab, SETTINGS_TABS, settingsHref, type SettingsTab } from './settings-tabs';
 
 const panelLoading = () => <LoadingBlock label="加载设置面板" />;
 const MemoryPanel = dynamic(() => import('./memory-panel').then((m) => m.MemoryPanel), { loading: panelLoading });
@@ -57,7 +49,7 @@ const ProfilePanel = dynamic(() => import('./profile-panel').then((m) => m.Profi
 const WikiPanel = dynamic(() => import('./wiki-panel').then((m) => m.WikiPanel), { loading: panelLoading });
 const ExperiencePanel = dynamic(() => import('./experience-panel').then((m) => m.ExperiencePanel), { loading: panelLoading });
 const ExpressionPanel = dynamic(() => import('./expression-panel').then((m) => m.ExpressionPanel), { loading: panelLoading });
-const CognitiveOverviewPanel = dynamic(() => import('./cognitive-overview-panel').then((m) => m.CognitiveOverviewPanel), { loading: panelLoading });
+const CognitiveSettingsPanel = dynamic(() => import('./cognitive-settings-panel').then((m) => m.CognitiveSettingsPanel), { loading: panelLoading });
 
 interface AccountUser {
   id: string;
@@ -89,40 +81,22 @@ const CAPS: Array<{ key: ProviderDto['capabilities'][number]; label: string }> =
   { key: 'embedding', label: '语义向量' }
 ];
 
-type Tab =
-  | 'profile'
-  | 'security'
-  | 'models'
-  | 'overview'
-  | 'memory'
-  | 'policy'
-  | 'timeline'
-  | 'memoryGraph'
-  | 'decisions'
-  | 'reflections'
-  | 'userModel'
-  | 'wiki'
-  | 'experience'
-  | 'expression'
-  | 'about';
-
-export function SettingsWorkspace({ initialUser, initialTab = 'profile' }: {
-  initialUser: AccountUser;
-  initialTab?: Tab;
-}) {
+export function SettingsWorkspace({ initialUser }: { initialUser: AccountUser }) {
   return (
     <ToastProvider>
       <ConfirmProvider>
-        <SettingsInner key={initialTab} initialUser={initialUser} initialTab={initialTab} />
+        <SettingsInner initialUser={initialUser} />
       </ConfirmProvider>
     </ToastProvider>
   );
 }
 
-function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; initialTab: Tab }) {
+function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
   const { push } = useToast();
   const { confirm } = useConfirm();
-  const [tab, setTab] = useState<Tab>(initialTab);
+  const tab = getSettingsTab(useSearchParams().get('tab'));
+  const cognitiveDetail = COGNITIVE_DETAIL_TABS.find(([key]) => key === tab);
+  const activeTab = cognitiveDetail ? 'overview' : tab;
   const [user, setUser] = useState<AccountUser>(initialUser);
   const [displayName, setDisplayName] = useState(initialUser.displayName ?? '');
   const [savingName, setSavingName] = useState(false);
@@ -330,6 +304,13 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
 
   const defaultProvider = useMemo(() => providers.find((p) => p.isDefault), [providers]);
 
+  function openTab(nextTab: SettingsTab) {
+    if (nextTab === tab) return;
+    window.history.pushState(null, '', settingsHref(nextTab));
+    window.scrollTo(0, 0);
+    document.getElementById('settings-content')?.focus({ preventScroll: true });
+  }
+
   return (
     <div className="relative min-h-[100dvh]">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(60%_50%_at_20%_0%,rgba(99,102,241,0.12),transparent_60%),radial-gradient(45%_40%_at_90%_10%,rgba(45,212,191,0.08),transparent_60%)]" />
@@ -342,7 +323,6 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
             <BrandMark className="h-8 w-8" />
             <div>
               <div className="text-[15px] font-semibold text-white">设置</div>
-              <div className="text-[11px] text-white/35">账户 · 安全 · 模型 · 记忆 · 策略</div>
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
@@ -358,44 +338,49 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="flex gap-1.5 overflow-x-auto lg:flex-col">
-          {(
-            [
-              ['profile', '个人资料', UserRound],
-              ['security', '安全与登录', ShieldCheck],
-              ['models', '我的模型', Bot],
-              ['overview', '认知中心', Compass],
-              ['memory', '记忆', Brain],
-              ['policy', '记忆策略', SlidersHorizontal],
-              ['timeline', '认知时间线', History],
-              ['memoryGraph', '记忆网络', Network],
-              ['decisions', '决策', Scale],
-              ['reflections', '洞察', Lightbulb],
-              ['userModel', '画像', Fingerprint],
-              ['wiki', '主题知识库', BookOpen],
-              ['experience', '实践经验库', Lightbulb],
-              ['expression', '表达偏好', SlidersHorizontal],
-              ['about', '安全说明', Lock]
-            ] as Array<[Tab, string, typeof UserRound]>
-          ).map(([key, label, Icon]) => (
-            <button
+      <main className="mx-auto grid max-w-6xl gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-6">
+        <nav aria-label="设置分类" className="grid grid-cols-2 gap-1.5 self-start sm:grid-cols-3 lg:sticky lg:top-24 lg:flex lg:flex-col">
+          {SETTINGS_TABS.map(([key, label, Icon]) => (
+            <Link
               key={key}
-              type="button"
-              aria-current={tab === key ? 'page' : undefined}
-              onClick={() => setTab(key)}
+              href={settingsHref(key)}
+              prefetch={false}
+              aria-current={tab === key ? 'page' : activeTab === key ? 'location' : undefined}
+              onNavigate={(event) => {
+                event.preventDefault();
+                openTab(key);
+              }}
               className={cn(
-                'flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2.5 text-left text-[13px] transition',
-                tab === key ? 'bg-white/[0.08] text-white' : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
+                'flex min-h-11 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-[13px] leading-5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400',
+                activeTab === key
+                  ? 'border-aurora-400/25 bg-aurora-400/10 text-aurora-300'
+                  : 'border-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white'
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
               {label}
-            </button>
+            </Link>
           ))}
         </nav>
 
-        <div className="min-w-0 space-y-5">
+        <div id="settings-content" tabIndex={-1} className="min-w-0 space-y-5 focus:outline-none">
+          {cognitiveDetail ? (
+            <nav aria-label="当前位置" className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+              <Link
+                href={settingsHref('overview')}
+                prefetch={false}
+                onNavigate={(event) => {
+                  event.preventDefault();
+                  openTab('overview');
+                }}
+                className="rounded-sm text-aurora-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400"
+              >
+                个人智能层
+              </Link>
+              <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-slate-400" />
+              <span aria-current="page">{cognitiveDetail[1]}</span>
+            </nav>
+          ) : null}
           {tab === 'profile' ? (
             <>
               <section className="panel p-5 sm:p-6">
@@ -775,7 +760,7 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
             </section>
           ) : null}
 
-          {tab === 'overview' ? <CognitiveOverviewPanel onOpen={setTab} /> : null}
+          {tab === 'overview' ? <CognitiveSettingsPanel onOpen={openTab} /> : null}
 
           {tab === 'memory' ? <MemoryPanel /> : null}
 
@@ -790,8 +775,6 @@ function SettingsInner({ initialUser, initialTab }: { initialUser: AccountUser; 
           {tab === 'reflections' ? <ReflectionPanel /> : null}
 
           {tab === 'userModel' ? <ProfilePanel /> : null}
-
-
           {tab === 'wiki' ? <WikiPanel /> : null}
 
           {tab === 'experience' ? <ExperiencePanel /> : null}

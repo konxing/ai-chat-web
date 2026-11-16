@@ -40,7 +40,7 @@ openssl rand -hex 24      # POSTGRES_PASSWORD（仅 URL 安全字符）
 - `BACKUP_PASSPHRASE`（≥12 字符，和主密钥分开保管）
 - `EMAIL_TRANSPORT=smtp` 及 SMTP 参数（首次可用 console 看验证码）
 - `ALLOW_PRIVATE_AI_URLS=false`
-- `TRUSTED_PROXY_CIDRS` 在 Compose 中由 compose 覆盖为 `172.28.0.10/32`；裸机为 `127.0.0.1/32,::1/128`
+- Compose 自动启用代理，并将 `TRUSTED_PROXY_CIDRS` 设为 `172.28.0.10/32`。裸机使用同机 Nginx 时，在 `.env` 显式设置 `TRUST_PROXY=true` 与 `TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128`。
 
 **`.env` 不要提交、不要进镜像、不要发聊天。** 生产建议将主密钥/备份口令放入 systemd credential 或 Docker secret，再注入环境变量。
 
@@ -107,8 +107,7 @@ curl -I https://chat.example.com/login
 curl -s https://chat.example.com/api/health
 
 # 未允许 IP（从另一网络/手机热点）应得到 403，且看不到登录页
-# 伪造 XFF 不应绕过
-curl -k https://chat.example.com/api/health -H 'X-Real-IP: 127.0.0.1'
+curl -I https://chat.example.com/login
 
 # 证书与 HSTS
 openssl s_client -connect chat.example.com:443 -servername chat.example.com </dev/null 2>/dev/null | grep -E 'Protocol|Cipher'
@@ -158,6 +157,7 @@ sudo -u familyai npm run bootstrap -- --username owner --email ... --password-st
 ```
 
 - `cp .env.example .env` 后填写；`chmod 600 .env`。
+- 同机 Nginx 需要设置 `TRUST_PROXY=true` 与 `TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128`。后端保持监听回环地址，代理按示例覆盖 `X-Real-IP`。
 - 安装 `deploy/systemd/family-ai-chat.service` 到 `/etc/systemd/system/`，按实际路径/用户修改。
 - `sudo systemctl daemon-reload && sudo systemctl enable --now family-ai-chat`
 - 安装 `deploy/nginx/family-ai-chat.host.conf` 到 `/etc/nginx/conf.d/`，`deploy/nginx/proxy-common.conf` 到 `/etc/nginx/`，替换域名/证书路径。

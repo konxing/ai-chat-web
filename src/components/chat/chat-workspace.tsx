@@ -525,6 +525,7 @@ export function ChatWorkspace({
     const editId = editingId;
     if (composerBusyRef.current || attachmentWarning) return;
     if (!content && pending.length === 0) return;
+    textareaRef.current?.focus({ preventScroll: true });
     setStreamError('');
     setNotice('');
     composerBusyRef.current = true;
@@ -719,6 +720,7 @@ export function ChatWorkspace({
   }, [draft, pending, editingId, attachmentWarning, ensureChat, reasoningEffort, refreshChat, refreshChats]);
 
   const stopStreaming = useCallback(() => {
+    textareaRef.current?.focus({ preventScroll: true });
     abortRef.current?.abort();
   }, []);
 
@@ -1395,7 +1397,7 @@ export function ChatWorkspace({
                 rows={1}
                 placeholder={selectedProvider ? `给 ${selectedProvider.name} 发消息…` : '尚未配置模型，仍可先输入内容'}
                 className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-white/95 outline-none placeholder:text-white/50"
-                disabled={sending}
+                readOnly={sending}
               />
               <div className="flex items-center gap-1 px-2 pb-2 pt-1">
                 <input

@@ -9,17 +9,12 @@ export const metadata: Metadata = {
   title: '设置'
 };
 
-export default async function SettingsPage({ searchParams }: {
-  searchParams: Promise<{ tab?: string | string[] }>;
-}) {
+export default async function SettingsPage() {
   const user = await getPageUser();
   if (!user) redirect('/login');
   if (user.status !== 'ACTIVE') redirect('/login?disabled=1');
-  const { tab } = await searchParams;
-
   return (
     <SettingsWorkspace
-      initialTab={tab === 'models' ? 'models' : 'profile'}
       initialUser={{
         id: user.id,
         username: user.username,

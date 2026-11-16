@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
 import { log } from './logger';
@@ -61,7 +62,7 @@ export async function api<T>(fn: () => Promise<T | Response>): Promise<Response>
 
 export function getRequestIp(req: Request): string {
   const value = req.headers.get('x-client-ip');
-  return value && value.length <= 64 ? value : 'unknown';
+  return value && value.length <= 64 && isIP(value) ? value : 'unknown';
 }
 
 export function getUserAgent(req: Request): string {

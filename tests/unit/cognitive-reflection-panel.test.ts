@@ -256,10 +256,10 @@ describe('主要展示的切分只在服务端定，界面不重排', () => {
 });
 
 describe('设置页接线', () => {
-  it('tab 三处都到位：导航项、渲染分支、Tab 联合类型', () => {
-    expect(WORKSPACE).toContain("['reflections', '洞察', Lightbulb]");
+  it('个人智能层的主动洞察入口打开原有面板', () => {
+    const tabs = read('src/components/settings/settings-tabs.ts');
+    expect(tabs).toContain("['reflections', 'AI 主动洞察', Lightbulb]");
     expect(WORKSPACE).toContain("{tab === 'reflections' ? <ReflectionPanel /> : null}");
-    expect(WORKSPACE).toContain("'reflections'");
   });
 });
 

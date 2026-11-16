@@ -11,3 +11,11 @@
 后台由 Windows 任务计划程序以当前账号管理。点击「开启登录自启」后，Windows 会在该账号登录时启动后端。注销或重启会结束本次运行。这种方式适合本机使用，依赖已有的 Node.js、项目依赖和 PostgreSQL 服务。
 
 维护者更新代码后，在项目根目录运行 `pwsh -File scripts/windows/build.ps1`，重新构建网站、应用数据库迁移并生成管理程序。保留项目原有的 `.env`。如果有旧版通过命令行启动的后端，先从原终端停止它，再由管理程序启动。本机地址为 `http://127.0.0.1:3000`，日志保存在 `dist/windows/backend.log`。
+
+## 本机使用与反向代理
+
+EXE 默认只供本机浏览器使用。旧版 `.env` 里的 `TRUST_PROXY` 或公网 `ALLOWED_ORIGINS` 无需为本机使用而修改。本机模式只接受 127.0.0.1 或 localhost 的浏览器入口。不要用端口映射或透明 TCP 隧道把本机入口对外开放，这类转发无法提供可信客户端身份。
+
+确实需要经 HTTPS 反向代理访问时，在 `.env` 设置 `WINDOWS_USE_PROXY=true`、`APP_URL=https://你的公开域名`，并将 `TRUSTED_PROXY_CIDRS` 设为代理连接后端的确切地址。同机代理连接 IPv4 的配置为 `TRUSTED_PROXY_CIDRS=127.0.0.1/32`。让代理按 [Nginx 配置示例](../../deploy/nginx/proxy-common.conf) 覆盖 `X-Real-IP`。重启后，在浏览器打开配置的 HTTPS 地址。
+
+如果旧配置已有 `127.0.0.1` 登录锁，使用已登录的管理员会话，进入「管理后台 → 访问控制 → IP 白名单 → 登录失败锁定」，找到对应 IP 并点击「解除」。没有可用的管理员会话时，等待锁定期满 5 分钟再登录。

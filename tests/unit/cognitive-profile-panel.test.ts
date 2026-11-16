@@ -180,14 +180,15 @@ describe('客户端包边界', () => {
 });
 
 describe('设置页接线', () => {
-  it('tab 三处都到位：导航项、渲染分支、Tab 联合类型', () => {
-    expect(WORKSPACE).toContain("['userModel', '画像', Fingerprint]");
+  const tabs = read('src/components/settings/settings-tabs.ts');
+
+  it('个人智能层的用户画像入口打开原有面板', () => {
+    expect(tabs).toContain("['userModel', '用户画像', Fingerprint]");
     expect(WORKSPACE).toContain("{tab === 'userModel' ? <ProfilePanel /> : null}");
-    expect(WORKSPACE).toContain("'userModel'");
   });
 
-  it('不复用「个人资料」那个 tab 的键：两个「画像」在同一个导航里会撞车', () => {
-    expect(WORKSPACE).toContain("['profile', '个人资料', UserRound]");
-    expect(WORKSPACE).not.toContain("['profile', '画像'");
+  it('个人资料和用户画像保留各自路径', () => {
+    expect(tabs).toContain("['profile', '个人资料', UserRound]");
+    expect(tabs).not.toContain("['profile', '画像'");
   });
 });

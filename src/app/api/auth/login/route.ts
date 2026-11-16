@@ -14,6 +14,7 @@ export async function POST(req: Request) {
   return api(async () => {
     assertSameOrigin(req);
     const ip = getRequestIp(req);
+    if (ip === 'unknown') return jsonError(403, 'CLIENT_IP_UNAVAILABLE', '无法确认请求来源');
     const userAgent = getUserAgent(req);
     const ipLimit = rateLimit(`login:ip:${ip}`, 20, 15 * 60 * 1000);
     if (!ipLimit.ok) {

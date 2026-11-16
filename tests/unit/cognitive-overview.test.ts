@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { COGNITIVE_DETAIL_TABS, SETTINGS_TABS, getSettingsTab, settingsHref } from '@/components/settings/settings-tabs';
 
 /**
  * 任务书 8.2 的「个人认知中心」：一屏把七个模块聚在一起，每条一个**库里数出来的**真数。
@@ -302,9 +303,10 @@ describe('界面与接线：数字只能从接口来', () => {
 
   it('七个入口的中文标签都在，点一下切到对应那一屏', () => {
     const code = panelSource();
-    for (const label of ['记忆网络', '认知时间线', 'AI 主动洞察', '决策记录', '画像', '记忆管理', '记忆策略']) {
-      expect(code).toContain(label);
-    }
+    expect(COGNITIVE_DETAIL_TABS.map((entry) => entry[1])).toEqual([
+      '记忆管理', '记忆策略', '认知时间线', '记忆网络', '决策记录', 'AI 主动洞察', '用户画像', '主题知识库', '实践经验库'
+    ]);
+    expect(code).toContain('settingsHref(tab)');
     expect(code).toContain('onOpen');
   });
 
@@ -319,18 +321,24 @@ describe('界面与接线：数字只能从接口来', () => {
     expect(code).not.toMatch(/\/api\/account\/cognitive\/(memories|graph|timeline|reflections|profile)/);
   });
 
-  it('这一屏不许出现任何开关：它只负责领路，改设置回到各屏去', () => {
+  it('记录列表只读取各模块的统计和链接', () => {
     const code = panelSource();
     expect(code).not.toContain('type="checkbox"');
     expect(code).not.toContain('emotionEnabled');
     expect(code).not.toContain('PATCH');
   });
 
-  it('门厅自己得在设置页里有个入口，否则它是一张进不去的屏', () => {
+  it('设置页聚合到一个个人智能层入口，模块仍可直接打开', () => {
     const code = workspaceSource();
-    expect(code).toContain('cognitive-overview-panel');
-    expect(code).toContain("['overview', '认知中心'");
-    // 左侧有那一行、tab 也认得，但主体没有渲染分支——点进去是一张空白屏。
-    expect(code).toContain('<CognitiveOverviewPanel onOpen={setTab} />');
+    const primaryTabs = SETTINGS_TABS.map((entry) => entry[0]);
+    expect(primaryTabs).toContain('overview');
+    for (const [tab] of COGNITIVE_DETAIL_TABS) {
+      expect(primaryTabs).not.toContain(tab);
+      expect(getSettingsTab(tab)).toBe(tab);
+      expect(settingsHref(tab)).toBe(`/settings?tab=${tab}`);
+    }
+    expect(getSettingsTab('models')).toBe('models');
+    expect(getSettingsTab('unrecognized')).toBe('profile');
+    expect(code).toContain('<CognitiveSettingsPanel onOpen={openTab} />');
   });
 });

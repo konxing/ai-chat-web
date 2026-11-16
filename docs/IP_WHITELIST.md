@@ -23,7 +23,7 @@
 
 ## 真实客户端 IP 与可信代理
 
-`server.js` 只信任 TCP peer 的地址；只有当 peer 属于 `TRUSTED_PROXY_CIDRS` 时才读取 `X-Real-IP`：
+默认使用直连模式。使用反向代理时，显式启用代理模式并列出代理实际连接后端的地址：
 
 ```env
 TRUST_PROXY=true
@@ -31,11 +31,11 @@ TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128   # 裸机 Nginx
 # Compose: 172.28.0.10/32（Nginx 容器静态地址）
 ```
 
-随后删除 `Forwarded`、`X-Forwarded-For`、`X-Real-IP`，写入可信的 `x-real-ip` / `x-client-ip`。因此：
+直连模式使用 TCP 来源，并拒绝带转发头的请求。代理模式只有在 TCP 对端属于可信代理名单、且代理写入了单个有效 `X-Real-IP` 时，才按该地址检查白名单及计算登录限流。缺失或无效的代理地址会拒绝请求。代理报告的回环地址仅可用于只读健康检查和 Nginx 内部探测；这些检查仍需要回环白名单。
 
-- 外部伪造 `X-Real-IP: 127.0.0.1` 无效（来源不在可信代理列表）；
-- 经过 Nginx 的真实客户端 IP 被正确识别；
-- 不要在 Nginx 之前再加一层代理却不更新 `TRUSTED_PROXY_CIDRS`；Cloudflare 等 CDN 需要额外校验其回源地址，当前未内置 CDN 适配。
+- 反向代理必须覆盖来访请求的 `X-Real-IP`，写入它验证过的客户端地址。将应用端口限制在反向代理能够访问的本地或私有网络内。
+- Node 在转交页面和 API 前重新写入 `x-real-ip` / `x-client-ip`。空白或不合法的代理配置会使服务拒绝启动。
+- CDN 等多级代理需要在入口额外校验回源地址并确定真实客户端 IP。只转发 TCP 流量的隧道无法提供这个凭据。
 
 ## 管理后台操作
 
@@ -113,7 +113,7 @@ sudo nft delete table inet family_ai_chat
 
 ## 常见问题
 
-- **所有请求 403**：没有任何启用规则，或 `TRUSTED_PROXY_CIDRS` 不包含 Nginx 地址导致真实 IP 取成容器 IP。
+- **所有请求 403**：检查是否有匹配客户端 IP 的启用规则。使用代理时，检查可信地址名单是否包含 Nginx 的出站地址，以及 Nginx 是否写入单个 `X-Real-IP`。
 - **规则加了不生效**：检查 `expiresAt`、`enabled`、CIDR 是否被规范化成不同网段；等待 `IP_CACHE_MS`。
 - **Nginx 全部 500/403**：`auth_request` 到应用的 `/api/health` 失败；先 `curl 127.0.0.1:3000/api/health`。应用故障时 fail closed 是预期行为。
 - **IPv6 用户被拒**：只加了 IPv4 规则；补充 IPv6 或 `::/0`（不推荐）。

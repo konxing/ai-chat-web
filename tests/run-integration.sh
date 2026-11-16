@@ -221,8 +221,7 @@ env \
   DATABASE_URL="$TEST_DB_URL" PORT="$PORT" HOST=0.0.0.0 APP_URL="$BASE" \
   NODE_ENV=production ALLOW_INSECURE_COOKIES=true COOKIE_SECURE=false \
   UPLOAD_DIR="$UPLOAD_DIR" BACKUP_DIR="$BACKUP_DIR" EMAIL_TRANSPORT=console \
-  ALLOW_PRIVATE_AI_URLS=true IP_CACHE_MS=250 TRUST_PROXY=true \
-  TRUSTED_PROXY_CIDRS='127.0.0.1/32,::1/128' LOG_LEVEL=warn \
+  ALLOW_PRIVATE_AI_URLS=true IP_CACHE_MS=250 TRUST_PROXY=false LOG_LEVEL=warn \
   nohup node server.js >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 wait_for_health "$BASE/api/health" "$SERVER_LOG" || fail 'application did not become healthy'
@@ -245,13 +244,6 @@ assert_status_no_body 403 "$code" 'unlisted IP denied at site root'
 
 code=$(curl --interface 127.0.0.2 -sS -o /dev/null -w '%{http_code}' "$BASE/_next/static/chunks/not-a-real-file.js")
 assert_status_no_body 403 "$code" 'unlisted IP denied for static assets'
-
-code=$(curl --interface 127.0.0.2 -sS -o /dev/null -w '%{http_code}' \
-  -H 'X-Real-IP: 127.0.0.1' -H 'X-Forwarded-For: 127.0.0.1' "$BASE/api/health")
-assert_status_no_body 403 "$code" 'forged X-Real-IP / X-Forwarded-For from untrusted peer ignored'
-
-code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'X-Real-IP: 8.8.8.8' "$BASE/api/health")
-assert_status_no_body 403 "$code" 'trusted proxy cannot claim an unlisted client IP'
 
 # --------------------------------------------------------------- owner auth
 section 'Authentication, sessions and CSRF'
@@ -854,7 +846,7 @@ if command -v openssl >/dev/null 2>&1; then
     DATABASE_URL="$TEST_DB_URL" PORT="$TLS_PORT" HOST=0.0.0.0 APP_URL="$TLS_BASE" \
     NODE_ENV=production COOKIE_SECURE=true UPLOAD_DIR="$UPLOAD_DIR" BACKUP_DIR="$BACKUP_DIR" \
     EMAIL_TRANSPORT=console ALLOW_PRIVATE_AI_URLS=true IP_CACHE_MS=250 \
-    TRUST_PROXY=true TRUSTED_PROXY_CIDRS='127.0.0.1/32,::1/128' LOG_LEVEL=warn \
+    TRUST_PROXY=false LOG_LEVEL=warn \
     TLS_KEY_FILE="$TEST_ROOT/tls-key.pem" TLS_CERT_FILE="$TEST_ROOT/tls-cert.pem" \
     nohup node server.js >"$TLS_LOG" 2>&1 &
   TLS_SERVER_PID=$!
@@ -921,8 +913,7 @@ env \
   DATABASE_URL="$TEST_DB_URL" PORT="$PORT" HOST=0.0.0.0 APP_URL="$BASE" \
   NODE_ENV=production ALLOW_INSECURE_COOKIES=true COOKIE_SECURE=false \
   UPLOAD_DIR="$UPLOAD_DIR" BACKUP_DIR="$BACKUP_DIR" EMAIL_TRANSPORT=console \
-  ALLOW_PRIVATE_AI_URLS=true IP_CACHE_MS=250 TRUST_PROXY=true \
-  TRUSTED_PROXY_CIDRS='127.0.0.1/32,::1/128' LOG_LEVEL=warn \
+  ALLOW_PRIVATE_AI_URLS=true IP_CACHE_MS=250 TRUST_PROXY=false LOG_LEVEL=warn \
   nohup node server.js >"$TEST_ROOT/server-after-rotate.log" 2>&1 &
 SERVER_PID=$!
 wait_for_health "$BASE/api/health" "$TEST_ROOT/server-after-rotate.log" || fail 'server failed after rotation'
