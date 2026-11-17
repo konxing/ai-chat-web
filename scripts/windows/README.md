@@ -53,3 +53,40 @@ EXE 默认只供本机浏览器使用。旧版 `.env` 里的 `TRUST_PROXY` 或�
 6. 用 EXE 停止并重新启动服务。窗口显示「正在运行」后，从已获准的网络打开 `https://stepmark.xin`。再从一个未获准的网络访问同一地址，确认在登录页出现前收到 403。
 
 若域名返回 403，先核对浏览器出口 IP 是否在白名单中，再检查 Tunnel 是否把有效的 `CF-Connecting-IP` 传到后端。Cloudflare 的访客 IP 移除规则应关闭，**Pseudo IPv4** 可用 **Off** 或 **Add Header**，以保留真实 IPv6。启动器显示「正在运行」表示本机健康检查通过，Tunnel 可用性以上述域名访问结果为准。[Cloudflare 请求头](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip) · [Pseudo IPv4 设置](https://developers.cloudflare.com/network/pseudo-ipv4/)
+
+## Cloudflare Tunnel 经 Caddy 同机转发
+
+在运行 EXE 的同一台 Windows 主机安装 Caddy。访问路径为 Cloudflare Tunnel → Caddy（`127.0.0.1:8080`）→ AI WebChat（`127.0.0.1:3000`）。浏览器继续访问原 HTTPS 域名。访问白名单、`.env` 中的四项 Cloudflare 设置和缓存规则沿用上一节。
+
+1. 在 PowerShell 进入项目目录并拉取更新。示例项目位于 `E:\ai_chat_web`。
+
+   ```powershell
+   cd 'E:\ai_chat_web'
+   git pull --ff-only
+   winget install --exact --id CaddyServer.Caddy --source winget
+   ```
+
+   如果当前 EXE 还不支持 `WINDOWS_PROXY_PROVIDER=cloudflare`，先按[更新已安装的项目](#更新已安装的项目)重新构建。已有该模式的安装拉取 Caddy 配置即可。
+
+2. 重新打开 PowerShell，运行下面的命令。将 `stepmark.xin` 换成自己的域名，须与 `.env` 中的 `APP_URL` 及 Tunnel 路由一致。配置检查通过后，Caddy 会在后台启动。
+
+   ```powershell
+   cd 'E:\ai_chat_web'
+   $env:WEBCHAT_CADDY_HOST = 'stepmark.xin'
+   $caddyPath = (Get-Command caddy.exe -CommandType Application -ErrorAction Stop).Source
+   $caddyConfig = (Resolve-Path -LiteralPath '.\deploy\caddy\Caddyfile').Path
+   & $caddyPath validate --config $caddyConfig --adapter caddyfile
+   if ($LASTEXITCODE -eq 0) {
+       Start-Process -FilePath $caddyPath `
+           -ArgumentList "run --config `"$caddyConfig`" --adapter caddyfile" `
+           -WindowStyle Hidden
+   }
+   ```
+
+   Caddy 每次开机启动一次。要手动停止，运行 `caddy.exe stop --address 127.0.0.1:2021`。浏览器关闭后，Caddy 继续在后台运行。[Caddy 命令](https://caddyserver.com/docs/command-line)
+
+3. 在 Cloudflare 的 Tunnel 中编辑现有 **Published application**。服务类型选 **HTTP**，地址改为 `127.0.0.1:8080`。**HTTP Host Header** 留空，或填 `stepmark.xin`。保持浏览器走 HTTPS，域名继续使用 **Bypass cache**，并保持 Cloudflare 访客 IP 请求头和真实 IPv6。[Cloudflare 回源设置](https://developers.cloudflare.com/tunnel/reference/origin-parameters/) · [HTTPS 跳转](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/always-use-https/)
+
+4. 如果只允许指定人员访问，在 Cloudflare Access 为整个域名创建 **Self-hosted** 应用，配置只允许指定身份的策略。随后在同一条 Tunnel 路由的 **Additional application settings → Access** 打开 **Protect with Access**，选对应团队和应用。这样 `cloudflared` 会在转发给 Caddy 前验证 Access 登录凭据。网站仍检查访客 IP 白名单和站内账号。[Cloudflare Access 配置](https://developers.cloudflare.com/reference-architecture/design-guides/identity-gated-edge/)
+
+5. 双击 EXE 并启动服务。用已获准的网络访问 HTTPS 域名，确认能登录和流式聊天。再用未获准的身份或网络确认被拒绝。防火墙和路由器保持关闭 `2021`、`3000`、`8080` 的外部入站访问。Caddy 与后端的回环端口信任同机进程，部署主机应由你控制。[来源 IP 的信任条件](../../docs/IP_WHITELIST.md#cloudflare-tunnel-经-caddy-同机转发)

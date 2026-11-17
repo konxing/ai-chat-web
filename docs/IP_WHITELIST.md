@@ -54,6 +54,12 @@ TRUSTED_PROXY_CIDRS=127.0.0.1/32
 - 访客白名单填浏览器访问 Cloudflare 时实际使用的公网 IPv4 或 IPv6。保留 `127.0.0.1/32` 供本机启动器健康检查。保留 Cloudflare 的 `CF-Connecting-IP`，使 **Pseudo IPv4** 处于 **Off** 或 **Add Header**，并让请求直接走 Tunnel 路由，避免受会改写访客 IP 的中间层或 Worker 影响。[Pseudo IPv4](https://developers.cloudflare.com/network/pseudo-ipv4/) · [Worker 子请求的访客 IP](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
 - 给此域名的全部路径设 **Bypass cache**，并按域名清除以前存下的 Cloudflare 缓存。这样页面、API 和静态文件的请求都会到应用检查白名单。应用会返回 `Cloudflare-CDN-Cache-Control: no-store`，Cloudflare 的缓存规则仍可覆盖源站的缓存策略。[缓存规则设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/#cache-eligibility) · [缓存头优先级](https://developers.cloudflare.com/cache/concepts/cdn-cache-control/) · [按域名清除缓存](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-hostname/)
 
+### Cloudflare Tunnel 经 Caddy 同机转发
+
+`cloudflared`、Caddy 和 EXE 同机运行时，Tunnel 可回源到 `127.0.0.1:8080`，Caddy 转发至 `127.0.0.1:3000`，EXE 沿用上面的 `cloudflare` 模式。仓库的 [Caddyfile](../deploy/caddy/Caddyfile) 只监听本机回环，检查公网 Host、HTTPS 转发标记和访客 IP 头是否存在。它原样传递 `CF-Connecting-IP`，由后端验证单个 IP、拒绝异常值并执行白名单。
+
+Caddy 的回环监听以可信主机为前提，同机进程可访问回环端口。若公网入口只允许指定人员访问，可让 `cloudflared` 在回源前验证 Cloudflare Access 登录凭据。[Windows 配置步骤](../scripts/windows/README.md#cloudflare-tunnel-经-caddy-同机转发) · [Cloudflare Access](https://developers.cloudflare.com/reference-architecture/design-guides/identity-gated-edge/)
+
 ## 管理后台操作
 
 - 添加：CIDR + 标签 + 可选到期时间；需要再次输入管理员密码。
