@@ -58,6 +58,20 @@ describe('model-selected stickers', () => {
     expect(reply.finish()).toEqual({ text: '[', sticker: undefined });
   });
 
+  it('hides echoed annotations and only recovers available sticker choices within normal limits', () => {
+    for (const [chunks, cooldown, sticker] of [
+      [['好。\n（已随这条', '回复发送表情包：抱抱）'], false, 'hug'],
+      [['好。\n（已随这条回复发送表情包：比心）'], true, undefined],
+      [['好。\n（已随这条回复发送表情包：不存在）'], false, undefined],
+      [['好。\n（历史配图：抱抱）'], false, undefined],
+      [['好。\n[[STICKER:requested:抱抱]]'], true, 'hug']
+    ] as const) {
+      const reply = new StickerReply(cooldown);
+      expect(chunks.map((chunk) => reply.push(chunk)).join('')).toBe('好。\n');
+      expect(reply.finish().sticker).toBe(sticker);
+    }
+  });
+
   it('uses per-turn aliases for personal stickers and rejects guessed or stale identifiers', () => {
     const id = `u${'1'.repeat(32)}` as PersonalStickerId;
     const choices = [{ id, label: '猫猫鼓掌' }];

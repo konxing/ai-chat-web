@@ -515,7 +515,7 @@ export async function buildConversation(input: {
     const label = message.role === 'ASSISTANT' && message.status === 'COMPLETE' && isChatSticker(id)
       ? isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情'
       : null;
-    const sticker = label ? `（已随这条回复发送表情包：${label}）` : '';
+    const sticker = label ? `（历史配图：${label}）` : '';
     const content = sticker && text ? `${text}\n\n${sticker}` : sticker || text;
     if (content.length > charBudget) {
       if (!history.length) history.push({

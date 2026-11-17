@@ -504,6 +504,14 @@ it('persists an explicitly requested sticker and returns it with the completed a
   expect(assistantRows()[0]).toMatchObject({ sticker: 'wave', status: 'COMPLETE' });
 });
 
+it('turns a known model sticker caption into an image selection without streaming the caption', async () => {
+  ctx.replyChunks = ['抱抱给你。\n\n（已随这条回复', '发送表情包：抱抱）'];
+  const { text } = await post(undefined, '可以给我一张抱抱吗？');
+  expect(text).toContain('"sticker":"hug"');
+  expect(text).not.toContain('已随这条回复');
+  expect(assistantRows()[0]).toMatchObject({ sticker: 'hug', status: 'COMPLETE' });
+});
+
 it('attaches the model’s chosen sticker even when the user never asks for one', async () => {
   ctx.replyChunks = ['这下真可以开香槟了。\n[[STICKER:auto:celebrate6]]'];
   const content = '熬了好几个周末，原来大家都以为做不成的项目今天终于上线了。';

@@ -1,5 +1,11 @@
 export const DEEPSEEK_WEB_MODES = ['search', 'read'] as const;
 export type DeepSeekWebMode = (typeof DEEPSEEK_WEB_MODES)[number];
+export type DeepSeekWebPreference = DeepSeekWebMode | 'off';
+export const DEFAULT_DEEPSEEK_WEB_PREFERENCE: DeepSeekWebPreference = 'search';
+
+export function isDeepSeekWebPreference(value: unknown): value is DeepSeekWebPreference {
+  return value === 'off' || value === 'search' || value === 'read';
+}
 
 export function supportsDeepSeekWeb(provider: { baseUrl: string; modelId: string }): boolean {
   try {

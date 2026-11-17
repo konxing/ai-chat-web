@@ -43,7 +43,12 @@ import {
 } from 'lucide-react';
 import { apiFetch, attachmentUrl, csrfHeader, errorMessage, formatBytes, imageUrl, timeAgo } from '@/lib/client-api';
 import { isReasoningLevel, reasoningLabels, type ReasoningLevel, type ReasoningOptions } from '@/lib/reasoning-levels';
-import { supportsDeepSeekWeb, type DeepSeekWebMode } from '@/lib/deepseek-web';
+import {
+  DEFAULT_DEEPSEEK_WEB_PREFERENCE,
+  isDeepSeekWebPreference,
+  supportsDeepSeekWeb,
+  type DeepSeekWebPreference
+} from '@/lib/deepseek-web';
 import {
   CITATION_LOAD_FAILED_NOTE,
   CITATION_NOTE,
@@ -150,7 +155,7 @@ export function ChatWorkspace({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [webTool, setWebTool] = useState<DeepSeekWebMode | ''>('');
+  const [webTool, setWebTool] = useState<DeepSeekWebPreference>(DEFAULT_DEEPSEEK_WEB_PREFERENCE);
   const [streamText, setStreamText] = useState('');
   const [streamError, setStreamError] = useState('');
   const [localProviderId, setLocalProviderId] = useState<string>(
@@ -181,6 +186,8 @@ export function ChatWorkspace({
   const abortRef = useRef<AbortController | null>(null);
   const composerBusyRef = useRef(false);
   const navigationRef = useRef(0);
+  const webToolFallback = useRef(new Map<string, DeepSeekWebPreference>());
+  const draftWebTool = useRef<DeepSeekWebPreference>(DEFAULT_DEEPSEEK_WEB_PREFERENCE);
   const activeIdRef = useRef<string | null>(initialChat?.id ?? null);
   const chatIdRef = useRef<string | null>(initialChat?.id ?? null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -217,6 +224,43 @@ export function ChatWorkspace({
   const reasoningChoice = reasoningByChat[reasoningKey];
   const reasoningEffort = reasoningChoice && reasoningOptions?.levels.includes(reasoningChoice)
     ? reasoningChoice : undefined;
+
+  const webToolStorageKey = useCallback((chatId: string) => `ai-chat.web-tool:${user.id}:${chatId}`, [user.id]);
+
+  const loadWebTool = useCallback((chatId: string) => {
+    const key = webToolStorageKey(chatId);
+    const fallback = webToolFallback.current.get(key);
+    if (fallback) return fallback;
+    try {
+      const saved = localStorage.getItem(key);
+      if (isDeepSeekWebPreference(saved)) return saved;
+    } catch {
+      /* Storage may be unavailable. */
+    }
+    return DEFAULT_DEEPSEEK_WEB_PREFERENCE;
+  }, [webToolStorageKey]);
+
+  const saveWebTool = useCallback((chatId: string, mode: DeepSeekWebPreference) => {
+    const key = webToolStorageKey(chatId);
+    try {
+      localStorage.setItem(key, mode);
+      webToolFallback.current.delete(key);
+    } catch {
+      webToolFallback.current.set(key, mode);
+    }
+  }, [webToolStorageKey]);
+
+  useEffect(() => {
+    if (initialChat?.id) setWebTool(loadWebTool(initialChat.id));
+  }, [initialChat?.id, loadWebTool]);
+
+  const changeWebTool = (mode: string) => {
+    if (!isDeepSeekWebPreference(mode) || activeIdRef.current !== chatIdRef.current) return;
+    setWebTool(mode);
+    if (chatIdRef.current) saveWebTool(chatIdRef.current, mode);
+    else draftWebTool.current = mode;
+  };
+
   useEffect(() => {
     if (!selectedProviderId || reasoningOptions) return;
     const controller = new AbortController();
@@ -356,11 +400,11 @@ export function ChatWorkspace({
       setStreamError('');
       setOptimisticUser(null);
       setPending([]);
-      setWebTool('');
       try {
         const data = await apiFetch<{ chat: ChatDetailDto }>(`/api/chats/${id}`);
         if (navigationRef.current !== navigation) return;
         chatIdRef.current = id;
+        setWebTool(loadWebTool(id));
         setChat(data.chat);
         if (data.chat.providerId) setLocalProviderId(data.chat.providerId);
         window.history.replaceState(null, '', `/chat/${id}`);
@@ -370,7 +414,7 @@ export function ChatWorkspace({
         setNotice(errorMessage(err));
       }
     },
-    [sending]
+    [sending, loadWebTool]
   );
 
   const startNewChat = useCallback(() => {
@@ -379,7 +423,8 @@ export function ChatWorkspace({
     activeIdRef.current = null;
     chatIdRef.current = null;
     setChat(null);
-    setWebTool('');
+    draftWebTool.current = DEFAULT_DEEPSEEK_WEB_PREFERENCE;
+    setWebTool(DEFAULT_DEEPSEEK_WEB_PREFERENCE);
     setReasoningByChat((previous) => Object.fromEntries(
       Object.entries(previous).filter(([key]) => !key.startsWith('draft:'))
     ));
@@ -423,6 +468,7 @@ export function ChatWorkspace({
       if (navigationRef.current !== navigation) return null;
       activeIdRef.current = created.id;
       chatIdRef.current = created.id;
+      if (draftWebTool.current !== DEFAULT_DEEPSEEK_WEB_PREFERENCE) saveWebTool(created.id, draftWebTool.current);
       if (reasoningEffort && created.providerId === selectedProviderId) {
         setReasoningByChat((previous) => ({
           ...previous, [`${created.id}:${selectedProviderId}`]: reasoningEffort
@@ -445,7 +491,7 @@ export function ChatWorkspace({
       if (navigationRef.current === navigation) setNotice(errorMessage(err));
       return null;
     }
-  }, [selectedProviderId, reasoningEffort]);
+  }, [selectedProviderId, reasoningEffort, saveWebTool]);
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
@@ -589,7 +635,7 @@ export function ChatWorkspace({
         },
         body: JSON.stringify({
           content, attachmentIds: attachments.map((a) => a.id), editMessageId: editId ?? undefined, reasoningEffort,
-          webTool: canUseWebTool && webTool ? webTool : undefined
+          webTool: canUseWebTool && webTool !== 'off' ? webTool : undefined
         }),
         credentials: 'same-origin',
         signal: controller.signal
@@ -611,7 +657,6 @@ export function ChatWorkspace({
         await refreshChat(chatId);
         return;
       }
-      if (navigationRef.current === navigation) setWebTool('');
       if (!response.body) {
         if (navigationRef.current === navigation) setStreamError('当前浏览器不支持流式响应');
         return;
@@ -770,7 +815,6 @@ export function ChatWorkspace({
 
   const changeModel = useCallback(
     async (providerId: string) => {
-      setWebTool('');
       setLocalProviderId(providerId);
       if (!chat) return;
       try {
@@ -827,6 +871,9 @@ export function ChatWorkspace({
     setModalBusy(true);
     try {
       await apiFetch(`/api/chats/${deleteTarget.id}`, { method: 'DELETE' });
+      const key = webToolStorageKey(deleteTarget.id);
+      webToolFallback.current.delete(key);
+      try { localStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
       const wasActive = chat?.id === deleteTarget.id;
       setChats((prev) => prev.filter((item) => item.id !== deleteTarget.id));
       setDeleteTarget(null);
@@ -1448,13 +1495,13 @@ export function ChatWorkspace({
                 <div className="flex-1" />
                 {canUseWebTool ? (
                   <ThemedSelect
-                    aria-label="本轮 DeepSeek 联网工具"
-                    title="仅用于本条消息。DeepSeek 可能联网查询，请使用公开链接。"
+                    aria-label="本会话 DeepSeek 联网设置"
+                    title="设置会保留在当前会话。联网时请使用公开链接。"
                     value={webTool}
                     disabled={sending}
-                    onValueChange={(value) => setWebTool(value === 'search' || value === 'read' ? value : '')}
+                    onValueChange={changeWebTool}
                     options={[
-                      { value: '', label: '联网：关闭' },
+                      { value: 'off', label: '联网：关闭' },
                       { value: 'search', label: '联网搜索' },
                       { value: 'read', label: '读取公开链接' }
                     ]}

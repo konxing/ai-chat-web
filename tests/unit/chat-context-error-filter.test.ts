@@ -126,9 +126,9 @@ describe('失败记录不进模型上下文', () => {
     const { encryptMessage } = await import('@/lib/chats');
     const reply = ctx.rows[1];
     reply.sticker = 'wave';
-    expect(await build()).toContain('第一个回答\n\n（已随这条回复发送表情包：打招呼）');
+    expect(await build()).toContain('第一个回答\n\n（历史配图：打招呼）');
     reply.contentCiphertext = encryptMessage('', String(reply.id));
-    expect(await build()).toContain('（已随这条回复发送表情包：打招呼）');
+    expect(await build()).toContain('（历史配图：打招呼）');
   });
 
   it('长历史优先保留最近的回复，本轮消息按 ID 仅发送一次', async () => {
