@@ -16,6 +16,16 @@ const { loadProxyConfig, resolveClientIp, setClientIpHeaders } = createRequire(i
 const direct = loadProxyConfig({});
 const windows = loadProxyConfig({ AI_WEBCHAT_WINDOWS_LOCAL: 'true', PORT: '3000' });
 const proxy = loadProxyConfig({ TRUST_PROXY: 'true', TRUSTED_PROXY_CIDRS: '127.0.0.1/32,::1/128,192.0.2.30/32' });
+const tunnelEnv = {
+  TRUST_PROXY: 'true',
+  TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
+  AI_WEBCHAT_WINDOWS_LOCAL: 'false',
+  WINDOWS_PROXY_PROVIDER: 'cloudflare',
+  APP_URL: 'https://chat.example.test',
+  HOST: '127.0.0.1',
+  PORT: '3000'
+};
+const tunnel = loadProxyConfig(tunnelEnv);
 
 function request(remoteAddress: string, headers: Headers = {}, url = '/login', method = 'GET') {
   return { socket: { remoteAddress }, headers, method, url };
@@ -86,5 +96,53 @@ describe('client IP at the server boundary', () => {
     };
     setClientIpHeaders(headers, '203.0.113.11', 'trusted-proxy');
     expect(headers).toEqual({ 'x-client-ip': '203.0.113.11', 'x-real-ip': '203.0.113.11', 'x-forwarded-proto': 'https' });
+  });
+});
+
+describe('Windows Cloudflare Tunnel mode', () => {
+  it('requires an exact loopback listener and connector, and a public HTTPS origin', () => {
+    expect(() => loadProxyConfig({ ...tunnelEnv, HOST: '0.0.0.0' })).toThrow('same-host');
+    expect(() => loadProxyConfig({ ...tunnelEnv, TRUSTED_PROXY_CIDRS: '127.0.0.0/8' })).toThrow('same-host');
+    for (const APP_URL of ['http://chat.example.test', 'https://chat.example.test/login', 'https://127.0.0.1']) {
+      expect(() => loadProxyConfig({ ...tunnelEnv, APP_URL })).toThrow('HTTPS site origin');
+    }
+  });
+
+  it.each(['203.0.113.9', '2001:db8:0:0:0:0:0:9'])('uses the Cloudflare visitor address %s', (ip) => {
+    expect(resolveClientIp(request('127.0.0.1', {
+      host: 'chat.example.test', 'cf-connecting-ip': ip, 'x-forwarded-proto': 'https', 'x-real-ip': '198.51.100.10'
+    }), tunnel)).toMatchObject({ ip: { ip }, reason: 'trusted-proxy' });
+  });
+
+  it('requires a trusted connector, matching host, and a valid single visitor address', () => {
+    const headers = { host: 'chat.example.test', 'cf-connecting-ip': '203.0.113.9' };
+    expect(resolveClientIp(request('192.0.2.30', headers), tunnel).reason).toBe('untrusted-proxy-peer');
+    expect(resolveClientIp(request('127.0.0.1', { ...headers, host: 'other.example.test' }), tunnel).reason)
+      .toBe('cloudflare-host-mismatch');
+    expect(resolveClientIp(request('127.0.0.1', {
+      host: headers.host, 'x-real-ip': '203.0.113.9'
+    }), tunnel).reason).toBe('invalid-cloudflare-client-ip');
+    for (const value of ['unknown', '203.0.113.9, 203.0.113.10', ['203.0.113.9', '203.0.113.10']]) {
+      expect(resolveClientIp(request('127.0.0.1', { ...headers, 'cf-connecting-ip': value }), tunnel).ip).toBeNull();
+    }
+  });
+
+  it('rejects Worker, pseudo-IPv4 and forwarded loopback identities', () => {
+    const headers = { host: 'chat.example.test', 'cf-connecting-ip': '203.0.113.9' };
+    expect(resolveClientIp(request('127.0.0.1', { ...headers, 'cf-worker': 'example.test' }), tunnel).reason)
+      .toBe('cloudflare-worker-unsupported');
+    for (const value of ['2a06:98c0:3600::103', '240.1.2.3', '::ffff:127.0.0.1']) {
+      expect(resolveClientIp(request('127.0.0.1', { ...headers, 'cf-connecting-ip': value }), tunnel).ip).toBeNull();
+    }
+  });
+
+  it('keeps the direct status probe and strips Cloudflare identity headers before routing', () => {
+    expect(resolveClientIp(request('127.0.0.1', { host: '127.0.0.1:3000' }, '/api/health'), tunnel).reason)
+      .toBe('local-health-probe');
+    expect(resolveClientIp(request('127.0.0.1', { host: 'chat.example.test' }, '/api/health'), tunnel).ip)
+      .toBeNull();
+    const headers = { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-proto': 'https' };
+    setClientIpHeaders(headers, '203.0.113.9', 'trusted-proxy');
+    expect(headers).toEqual({ 'x-client-ip': '203.0.113.9', 'x-real-ip': '203.0.113.9', 'x-forwarded-proto': 'https' });
   });
 });

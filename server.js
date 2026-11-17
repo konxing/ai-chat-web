@@ -262,10 +262,13 @@ async function main() {
 
   const requestListener = async (req, res) => {
     try {
+      // The IP allowlist must run even when Cloudflare handles static assets.
+      if (proxy.cloudflareHost) res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
       const source = await guard(req, res, proxy);
       if (!source) return;
       if (req.url === '/_internal/ip-check') {
-        res.writeHead(req.method === 'GET' && source === 'trusted-proxy' ? 204 : 404, { 'Cache-Control': 'no-store' });
+        res.writeHead(req.method === 'GET' && source === 'trusted-proxy' && !proxy.cloudflareHost ? 204 : 404,
+          { 'Cache-Control': 'no-store' });
         res.end();
         return;
       }
@@ -301,7 +304,10 @@ async function main() {
   server.keepAliveTimeout = 15_000;
 
   server.listen(PORT, HOST, () => {
-    log('server.listening', { host: HOST, port: PORT, dev: isDev, trustProxy: proxy.enabled });
+    log('server.listening', {
+      host: HOST, port: PORT, dev: isDev, trustProxy: proxy.enabled,
+      proxyProvider: proxy.cloudflareHost ? 'cloudflare' : proxy.enabled ? 'generic' : 'direct'
+    });
     refreshRules(true).catch(() => undefined);
     ruleTimer = setInterval(() => void refreshRules(), CACHE_MS);
     ruleTimer.unref();

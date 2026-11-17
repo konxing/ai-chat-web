@@ -2,7 +2,7 @@
 
 目标：任何未被明确授权的 IP，在到达登录页、动画、API、静态资源或聊天之前就被拒绝。**默认拒绝，失败关闭**。
 
-## 四层防护
+## Nginx 部署的四层防护
 
 | 层 | 位置 | 作用 | 动态性 |
 | --- | --- | --- | --- |
@@ -23,7 +23,7 @@
 
 ## 真实客户端 IP 与可信代理
 
-默认使用直连模式。使用反向代理时，显式启用代理模式并列出代理实际连接后端的地址：
+默认使用直连模式。使用普通反向代理时，显式启用代理模式并列出代理实际连接后端的地址：
 
 ```env
 TRUST_PROXY=true
@@ -31,11 +31,28 @@ TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128   # 裸机 Nginx
 # Compose: 172.28.0.10/32（Nginx 容器静态地址）
 ```
 
-直连模式使用 TCP 来源，并拒绝带转发头的请求。代理模式只有在 TCP 对端属于可信代理名单、且代理写入了单个有效 `X-Real-IP` 时，才按该地址检查白名单及计算登录限流。缺失或无效的代理地址会拒绝请求。代理报告的回环地址仅可用于只读健康检查和 Nginx 内部探测；这些检查仍需要回环白名单。
+直连模式使用 TCP 来源，并拒绝带转发头的请求。普通代理模式只有在 TCP 对端属于可信代理名单、且代理写入了单个有效 `X-Real-IP` 时，才按该地址检查白名单及计算登录限流。缺失或无效的代理地址会拒绝请求。代理报告的回环地址仅可用于只读健康检查和 Nginx 内部探测；这些检查仍需要回环白名单。
 
 - 反向代理必须覆盖来访请求的 `X-Real-IP`，写入它验证过的客户端地址。将应用端口限制在反向代理能够访问的本地或私有网络内。
 - Node 在转交页面和 API 前重新写入 `x-real-ip` / `x-client-ip`。空白或不合法的代理配置会使服务拒绝启动。
 - CDN 等多级代理需要在入口额外校验回源地址并确定真实客户端 IP。只转发 TCP 流量的隧道无法提供这个凭据。
+
+### Cloudflare Tunnel 同机直连
+
+当 `cloudflared` 和 AI WebChat EXE 部署在同一台 Windows 主机上，可显式启用 Cloudflare Tunnel 模式：
+
+```env
+WINDOWS_USE_PROXY=true
+WINDOWS_PROXY_PROVIDER=cloudflare
+APP_URL=https://stepmark.xin
+TRUSTED_PROXY_CIDRS=127.0.0.1/32
+```
+
+- 公网流量从 `https://stepmark.xin` 进入，`cloudflared` 的 Published application 路由直接指向 `http://127.0.0.1:3000`。保留域名的 `Host`，或者把 Tunnel 的 **HTTP Host Header** 设成 `stepmark.xin`。保持 3000 端口仅对本机回环开放，确保 `cloudflared` 与后端之间直接通信。[Windows 配置步骤](../scripts/windows/README.md#cloudflare-tunnel-与-exe-同机运行)
+- 应用验证 TCP 对端属于配置的本机地址，并且回源请求携带单个有效的 `CF-Connecting-IP`。该地址用于白名单、访问记录及登录限流。应用拒绝缺失、多值或异常的访客 IP、Pseudo IPv4 地址和带 `CF-Worker` 的请求。此模式只从 `CF-Connecting-IP` 取访客地址。[Cloudflare 请求头说明](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
+- `127.0.0.1/32` 校验的是连接地址，不能识别具体进程。请在由你控制、仅运行可信程序的 Windows 主机上启用此模式。保持回环端口的访问范围位于该主机内，Cloudflare 域名直接路由到该 Tunnel。
+- 访客白名单填浏览器访问 Cloudflare 时实际使用的公网 IPv4 或 IPv6。保留 `127.0.0.1/32` 供本机启动器健康检查。保留 Cloudflare 的 `CF-Connecting-IP`，使 **Pseudo IPv4** 处于 **Off** 或 **Add Header**，并让请求直接走 Tunnel 路由，避免受会改写访客 IP 的中间层或 Worker 影响。[Pseudo IPv4](https://developers.cloudflare.com/network/pseudo-ipv4/) · [Worker 子请求的访客 IP](https://developers.cloudflare.com/fundamentals/reference/http-headers/#cf-connecting-ip)
+- 给此域名的全部路径设 **Bypass cache**，并按域名清除以前存下的 Cloudflare 缓存。这样页面、API 和静态文件的请求都会到应用检查白名单。应用会返回 `Cloudflare-CDN-Cache-Control: no-store`，Cloudflare 的缓存规则仍可覆盖源站的缓存策略。[缓存规则设置](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/#cache-eligibility) · [缓存头优先级](https://developers.cloudflare.com/cache/concepts/cdn-cache-control/) · [按域名清除缓存](https://developers.cloudflare.com/cache/how-to/purge-cache/purge-by-hostname/)
 
 ## 管理后台操作
 
@@ -113,7 +130,7 @@ sudo nft delete table inet family_ai_chat
 
 ## 常见问题
 
-- **所有请求 403**：检查是否有匹配客户端 IP 的启用规则。使用代理时，检查可信地址名单是否包含 Nginx 的出站地址，以及 Nginx 是否写入单个 `X-Real-IP`。
+- **所有请求 403**：检查是否有匹配客户端公网 IP 的启用规则。在普通代理模式下，检查 TCP 对端是否可信，代理是否写入了单个 `X-Real-IP`。在同机 Tunnel 模式下，检查 `WINDOWS_PROXY_PROVIDER`、回源地址和 `CF-Connecting-IP`。
 - **规则加了不生效**：检查 `expiresAt`、`enabled`、CIDR 是否被规范化成不同网段；等待 `IP_CACHE_MS`。
 - **Nginx 全部 500/403**：`auth_request` 到应用的 `/api/health` 失败；先 `curl 127.0.0.1:3000/api/health`。应用故障时 fail closed 是预期行为。
 - **IPv6 用户被拒**：只加了 IPv4 规则；补充 IPv6 或 `::/0`（不推荐）。

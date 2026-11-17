@@ -1,6 +1,10 @@
 const { isIP } = require('node:net');
 const ipaddr = require('ipaddr.js');
 
+const cloudflareHeaders = new Set(['cf-connecting-ip', 'cf-connecting-ipv6', 'cf-pseudo-ipv4', 'cf-worker']);
+const pseudoIpv4Range = parseCidr('240.0.0.0/4');
+const crossZoneWorkerIp = normalizeIp('2a06:98c0:3600::103').ip;
+
 function normalizeIp(input) {
   if (!input) return null;
   const value = input.split('%')[0];
@@ -24,14 +28,17 @@ function matchesCidr(parsedIp, rule) {
 }
 
 function isForwardingHeader(name) {
-  return name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-');
+  return name === 'forwarded' || name === 'x-real-ip' || name.startsWith('x-forwarded-') ||
+    cloudflareHeaders.has(name);
 }
 
 function isLoopback(address) {
   return address.family === 'ipv4' ? address.ip.startsWith('127.') : address.ip === '0:0:0:0:0:0:0:1';
 }
 
-function loadProxyConfig({ TRUST_PROXY, TRUSTED_PROXY_CIDRS, AI_WEBCHAT_WINDOWS_LOCAL, PORT }) {
+function loadProxyConfig({
+  TRUST_PROXY, TRUSTED_PROXY_CIDRS, AI_WEBCHAT_WINDOWS_LOCAL, WINDOWS_PROXY_PROVIDER, APP_URL, HOST, PORT
+}) {
   if (TRUST_PROXY === undefined || TRUST_PROXY === 'false' || TRUST_PROXY === '0') {
     const localHosts = AI_WEBCHAT_WINDOWS_LOCAL === 'true'
       ? new Set(['127.0.0.1', 'localhost'].map((host) => `${host}:${PORT || 3000}`))
@@ -50,7 +57,29 @@ function loadProxyConfig({ TRUST_PROXY, TRUSTED_PROXY_CIDRS, AI_WEBCHAT_WINDOWS_
     return rule;
   });
   if (!peers.length) throw new Error('TRUST_PROXY requires explicit TRUSTED_PROXY_CIDRS');
-  return { enabled: true, peers, localHosts: null };
+
+  const provider = AI_WEBCHAT_WINDOWS_LOCAL === 'false'
+    ? WINDOWS_PROXY_PROVIDER?.trim() || 'generic'
+    : 'generic';
+  if (provider === 'generic') return { enabled: true, peers, localHosts: null };
+  if (provider !== 'cloudflare') throw new Error('WINDOWS_PROXY_PROVIDER must be generic or cloudflare.');
+  if (HOST !== '127.0.0.1' || entries.some((entry) => entry !== '127.0.0.1/32')) {
+    throw new Error('Windows Cloudflare Tunnel mode requires a same-host IPv4 connector and TRUSTED_PROXY_CIDRS=127.0.0.1/32.');
+  }
+  let site;
+  try {
+    site = new URL(APP_URL);
+  } catch {
+    throw new Error('Cloudflare Tunnel mode requires APP_URL set to the public HTTPS site origin.');
+  }
+  if (site.protocol !== 'https:' || site.pathname !== '/' || site.search || site.hash ||
+      site.username || site.password || isIP(site.hostname) || !site.hostname.includes('.')) {
+    throw new Error('Cloudflare Tunnel mode requires APP_URL set to the public HTTPS site origin.');
+  }
+  return {
+    enabled: true, peers, localHosts: null, cloudflareHost: site.host,
+    cloudflareHealthHost: `127.0.0.1:${PORT || 3000}`
+  };
 }
 
 function resolveClientIp(req, config) {
@@ -71,20 +100,37 @@ function resolveClientIp(req, config) {
   // The launcher and Docker check only status over loopback. All application
   // traffic in proxy mode must come through an explicitly trusted proxy.
   const healthProbe = req.method === 'GET' && req.url === '/api/health';
-  if (!forwarded && isLoopback(peer) && healthProbe) {
+  const localHealthHost = !config.cloudflareHost || req.headers.host === config.cloudflareHealthHost;
+  if (!forwarded && isLoopback(peer) && healthProbe && localHealthHost) {
     return { ip: peer, peer, reason: 'local-health-probe' };
   }
   if (!config.peers.some((rule) => matchesCidr(peer, rule))) {
     return { ip: null, peer, reason: 'untrusted-proxy-peer' };
   }
-  const header = req.headers['x-real-ip'];
+  const cloudflareHost = config.cloudflareHost;
+  if (cloudflareHost) {
+    if (typeof req.headers.host !== 'string' || req.headers.host.toLowerCase() !== cloudflareHost) {
+      return { ip: null, peer, reason: 'cloudflare-host-mismatch' };
+    }
+    // Cloudflare marks Worker fetch subrequests. Same-zone Workers may rewrite the client identity.
+    if (req.headers['cf-worker'] !== undefined) {
+      return { ip: null, peer, reason: 'cloudflare-worker-unsupported' };
+    }
+  }
+  const header = req.headers[cloudflareHost ? 'cf-connecting-ip' : 'x-real-ip'];
   const raw = typeof header === 'string' ? header.trim() : '';
   if (!raw || raw.includes('%') || !isIP(raw)) {
-    return { ip: null, peer, reason: 'invalid-proxy-header' };
+    return { ip: null, peer, reason: cloudflareHost ? 'invalid-cloudflare-client-ip' : 'invalid-proxy-header' };
   }
   const ip = normalizeIp(raw);
+  if (cloudflareHost && ip.ip === crossZoneWorkerIp) {
+    return { ip: null, peer, reason: 'cloudflare-worker-unsupported' };
+  }
+  if (cloudflareHost && matchesCidr(ip, pseudoIpv4Range)) {
+    return { ip: null, peer, reason: 'cloudflare-pseudo-ipv4' };
+  }
   const gateProbe = req.method === 'GET' && req.url === '/_internal/ip-check';
-  if (isLoopback(ip) && !healthProbe && !gateProbe) {
+  if (isLoopback(ip) && (cloudflareHost || (!healthProbe && !gateProbe))) {
     return { ip: null, peer, reason: 'proxied-loopback-client' };
   }
   return { ip, peer, reason: 'trusted-proxy' };
