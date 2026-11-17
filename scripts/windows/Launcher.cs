@@ -16,72 +16,149 @@ internal static class Launcher
     private static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
     private static readonly string Log = Path.Combine(Root, "dist", "windows", "backend.log");
 
-    private static readonly Color Navy = Color.FromArgb(20, 33, 49);
-    private static readonly Color Muted = Color.FromArgb(66, 85, 102);
+    private static readonly Color Surface = Color.FromArgb(14, 21, 31);
+    private static readonly Color Card = Color.FromArgb(23, 33, 46);
+    private static readonly Color Ink = Color.FromArgb(238, 244, 249);
+    private static readonly Color Muted = Color.FromArgb(167, 186, 202);
+    private static readonly Color Mint = Color.FromArgb(112, 230, 196);
+    private static readonly Color Warning = Color.FromArgb(247, 186, 143);
 
     private static void StyleWindow(Form window)
     {
         window.AutoScaleMode = AutoScaleMode.Dpi;
         window.Font = new Font("Microsoft YaHei UI", 10);
-        window.BackColor = Color.FromArgb(238, 243, 248);
-        window.ForeColor = Navy;
-        window.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        window.BackColor = Surface;
+        window.ForeColor = Ink;
+        window.Icon = Icon.ExtractAssociatedIcon(typeof(Launcher).Assembly.Location);
     }
 
     private static Label Heading(string text)
     {
         return new Label { Text = text, Dock = DockStyle.Top, Height = 46,
-            Font = new Font("Microsoft YaHei UI", 19, FontStyle.Bold), ForeColor = Navy };
+            Font = new Font("Microsoft YaHei UI", 19, FontStyle.Bold), ForeColor = Ink };
     }
 
     private static Button ActionButton(string text, bool primary = false)
     {
         var button = new Button { Text = text, AutoSize = true, Height = 36, MinimumSize = new Size(106, 36),
             Padding = new Padding(8, 0, 8, 0), FlatStyle = FlatStyle.Flat,
-            BackColor = primary ? Color.FromArgb(0, 106, 92) : Color.White,
-            ForeColor = primary ? Color.White : Navy };
-        button.FlatAppearance.BorderColor = Color.FromArgb(186, 201, 212);
+            BackColor = primary ? Mint : Color.FromArgb(34, 47, 63),
+            ForeColor = primary ? Color.FromArgb(10, 39, 37) : Ink };
+        button.FlatAppearance.BorderColor = primary ? Mint : Color.FromArgb(64, 83, 101);
+        button.FlatAppearance.MouseOverBackColor = primary ? Color.FromArgb(151, 244, 217) : Color.FromArgb(43, 61, 79);
+        button.FlatAppearance.MouseDownBackColor = primary ? Color.FromArgb(86, 199, 166) : Color.FromArgb(30, 46, 60);
         return button;
     }
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--backend")
+        {
+            Environment.ExitCode = BackendHost.Run(args.Length == 2 ? args[1] : null);
+            return;
+        }
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new Dashboard());
     }
 
+    private enum ServiceState { Checking, Starting, Stopping, Stopped, Running, NotResponding, DatabaseUnavailable, PortConflict }
+
     private sealed class Dashboard : Form
     {
-        private readonly Label status = new Label { AutoSize = true, Text = "正在检查后端…" };
-        private readonly FlowLayoutPanel actions = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Dock = DockStyle.Top };
+        private readonly Label status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        private readonly Label notice = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted };
+        private readonly Panel indicator = new Panel { Dock = DockStyle.Fill };
+        private readonly FlowLayoutPanel serviceActions = ActionRow();
+        private readonly FlowLayoutPanel startupActions = ActionRow();
         private readonly Timer timer = new Timer { Interval = 3000 };
+        private ServiceState state;
+        private string browserAddress = Address;
         private bool busy;
         private bool probing;
 
         public Dashboard()
         {
-            Text = "AI WebChat 管理";
-            ClientSize = new Size(620, 230);
-            MinimumSize = new Size(520, 265);
+            Text = "AI WebChat · 服务管理";
+            ClientSize = new Size(640, 418);
+            MinimumSize = new Size(598, 452);
             StyleWindow(this);
             StartPosition = FormStartPosition.CenterScreen;
-            Padding = new Padding(18);
-            var header = Heading("AI WebChat");
-            var caption = new Label { Text = "管理本机聊天服务 · 网页会在默认浏览器打开", Dock = DockStyle.Top, Height = 34, ForeColor = Muted };
-            var state = new Panel { Dock = DockStyle.Top, Height = 34 };
-            state.Controls.Add(status);
-            Controls.Add(actions);
-            Controls.Add(state);
-            Controls.Add(caption);
-            Controls.Add(header);
-            AddAction("启动", async () => await Run("Start"));
-            AddAction("停止", async () => await Run("Stop"));
-            actions.SetFlowBreak(AddAction("打开聊天", () => Open(Address)), true);
-            AddAction("开启登录自启", async () => await Run("Enable"));
-            AddAction("关闭登录自启", async () => await Run("Disable"));
-            AddAction("查看日志", () => Open(Log));
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(24, 20, 24, 14) };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            foreach (int height in new[] { 74, 131, 107 }) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            Controls.Add(layout);
+
+            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var brand = new PictureBox { Image = Icon.ToBitmap(), Size = new Size(48, 48), SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(0, 5, 8, 0) };
+            var brandCopy = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            brandCopy.Controls.Add(Caption("本机服务管理"));
+            brandCopy.Controls.Add(Heading("AI WebChat"));
+            header.Controls.Add(brand, 0, 0);
+            header.Controls.Add(brandCopy, 1, 0);
+            layout.Controls.Add(header, 0, 0);
+
+            var serviceCard = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Card, ColumnCount = 1, RowCount = 2,
+                Padding = new Padding(16, 10, 12, 8), Margin = new Padding(0, 0, 0, 12) };
+            serviceCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+            serviceCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var stateRow = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            indicator.Dock = DockStyle.Left;
+            indicator.Width = 24;
+            status.Font = new Font(Font, FontStyle.Bold);
+            indicator.Paint += (sender, args) =>
+            {
+                args.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var color = state == ServiceState.Running ? Mint
+                    : state == ServiceState.NotResponding || state == ServiceState.DatabaseUnavailable ||
+                        state == ServiceState.PortConflict ? Warning : Muted;
+                using (var brush = new SolidBrush(color))
+                    args.Graphics.FillEllipse(brush, 2, (indicator.Height - 9) / 2, 9, 9);
+            };
+            stateRow.Controls.Add(status);
+            stateRow.Controls.Add(indicator);
+            serviceCard.Controls.Add(stateRow, 0, 0);
+            serviceCard.Controls.Add(serviceActions, 0, 1);
+            layout.Controls.Add(serviceCard, 0, 1);
+
+            var startupCard = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Card, ColumnCount = 2, RowCount = 1,
+                Padding = new Padding(16, 12, 12, 10), Margin = new Padding(0, 0, 0, 12) };
+            startupCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            startupCard.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 177));
+            var startupCopy = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
+            startupCopy.Controls.Add(Caption("登录 Windows 后在后台启动"));
+            startupCopy.Controls.Add(new Label { Text = "随 Windows 登录启动", Dock = DockStyle.Top, Height = 25, Font = new Font(Font, FontStyle.Bold) });
+            startupCard.Controls.Add(startupCopy, 0, 0);
+            startupCard.Controls.Add(startupActions, 1, 0);
+            layout.Controls.Add(startupCard, 0, 2);
+
+            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124));
+            var logs = ActionButton("运行日志");
+            logs.AutoSize = false;
+            logs.Size = new Size(118, 36);
+            logs.Anchor = AnchorStyles.Right | AnchorStyles.Top;
+            logs.Click += (sender, args) => Open(Log);
+            footer.Controls.Add(notice, 0, 0);
+            footer.Controls.Add(logs, 1, 0);
+            layout.Controls.Add(footer, 0, 3);
+
+            AddAction(serviceActions, "启动服务", async () => await Run("Start"), primary: true);
+            AddAction(serviceActions, "停止", async () => await Run("Stop"));
+            AddAction(serviceActions, "打开聊天", () =>
+            {
+                if (state == ServiceState.Running) Open(browserAddress);
+                else notice.Text = "服务就绪后可以打开聊天。";
+            });
+            AddAction(startupActions, "开启", async () => await Run("Enable"), width: 72);
+            AddAction(startupActions, "关闭", async () => await Run("Disable"), width: 72);
+            notice.Text = "关闭此窗口后，服务会继续在后台运行。";
+            SetState(ServiceState.Checking);
             timer.Tick += async (sender, args) => await RefreshStatus();
             Shown += async (sender, args) =>
             {
@@ -90,64 +167,109 @@ internal static class Launcher
                 {
                     using (var setup = new SetupDialog())
                     {
-                        if (setup.ShowDialog(this) == DialogResult.OK)
-                        {
-                            if (!await Run("Start")) return;
-                            for (int attempt = 0; attempt < 30 && !IsDisposed; attempt++)
-                            {
-                                if ((await Task.Run((Func<string>)ReadStatus)).StartsWith("正在运行"))
-                                {
-                                    Open(Address + "/login?setup=complete");
-                                    return;
-                                }
-                                await Task.Delay(500);
-                            }
-                            if (!IsDisposed) MessageBox.Show(this, "初始化已保存，但服务尚未就绪。请查看管理窗口和运行日志。", "AI WebChat");
-                        }
+                        if (setup.ShowDialog(this) == DialogResult.OK && await Run("Start"))
+                            Open(browserAddress + "/login?setup=complete");
                     }
                 }
                 await RefreshStatus();
             };
-            FormClosed += (sender, args) => timer.Dispose();
+            FormClosed += (sender, args) => { timer.Dispose(); brand.Image.Dispose(); };
         }
 
-        private Button AddAction(string title, Action click)
+        private static FlowLayoutPanel ActionRow()
         {
-            var button = ActionButton(title, title == "启动");
+            return new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, WrapContents = false };
+        }
+
+        private static Label Caption(string text)
+        {
+            return new Label { Text = text, Dock = DockStyle.Fill, ForeColor = Muted };
+        }
+
+        private static void AddAction(FlowLayoutPanel row, string title, Action click, bool primary = false, int width = 106)
+        {
+            var button = ActionButton(title, primary);
+            button.AutoSize = false;
+            button.MinimumSize = new Size(width, 36);
+            button.Size = new Size(width, 36);
             button.Click += (sender, args) => click();
-            actions.Controls.Add(button);
-            return button;
+            row.Controls.Add(button);
+        }
+
+        private void SetState(ServiceState next)
+        {
+            state = next;
+            switch (state)
+            {
+                case ServiceState.Checking: status.Text = "正在检查服务…"; break;
+                case ServiceState.Starting: status.Text = "正在启动服务…"; break;
+                case ServiceState.Stopping: status.Text = "正在停止服务…"; break;
+                case ServiceState.Running: status.Text = "正在运行    ·    127.0.0.1:3000"; break;
+                case ServiceState.NotResponding: status.Text = "服务暂未响应"; break;
+                case ServiceState.DatabaseUnavailable: status.Text = "数据库暂不可用"; break;
+                case ServiceState.PortConflict: status.Text = "端口 3000 被其他程序占用"; break;
+                default: status.Text = "服务未运行"; break;
+            }
+            indicator.Invalidate();
         }
 
         private async Task<bool> Run(string action)
         {
             if (busy) return false;
             busy = true;
-            actions.Enabled = false;
-            status.Text = "正在执行，请稍候…";
-            string result = null;
+            serviceActions.Enabled = false;
+            startupActions.Enabled = false;
+            notice.Text = "正在执行，请稍候…";
+            if (action == "Start") SetState(ServiceState.Starting);
+            if (action == "Stop") SetState(ServiceState.Stopping);
             bool succeeded = false;
-            try
-            {
-                await Task.Run(() => InvokeTask(action));
-                result = action == "Enable" ? "登录自启已开启" : action == "Disable" ? "登录自启已关闭" : null;
-                succeeded = true;
-            }
+            try { succeeded = await ExecuteTask(action); }
             catch (Exception error)
             {
-                if (!IsDisposed) MessageBox.Show(this, error.Message, "AI WebChat", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (!IsDisposed)
+                {
+                    notice.Text = "操作未完成，请查看运行日志。";
+                    MessageBox.Show(this, error.Message, "AI WebChat", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
             finally
             {
                 busy = false;
                 if (!IsDisposed)
                 {
-                    actions.Enabled = true;
+                    serviceActions.Enabled = true;
+                    startupActions.Enabled = true;
                 }
             }
             await RefreshStatus();
-            if (result != null && !IsDisposed) status.Text += " · " + result;
             return succeeded;
+        }
+
+        private async Task<bool> ExecuteTask(string action)
+        {
+            await Task.Run(() => InvokeTask(action));
+            if (action == "Enable" || action == "Disable")
+            {
+                if (!IsDisposed) notice.Text = action == "Enable" ? "登录自启已开启。" : "登录自启已关闭。";
+                return true;
+            }
+            for (int attempt = 0; attempt < 30 && !IsDisposed; attempt++)
+            {
+                var probe = await Task.Run((Func<ServiceProbe>)ReadStatus);
+                if (IsDisposed) return false;
+                if ((action == "Start" && probe.State == ServiceState.Running) ||
+                    (action == "Stop" && (probe.State == ServiceState.Stopped || probe.State == ServiceState.PortConflict)))
+                {
+                    browserAddress = probe.BrowserAddress;
+                    SetState(probe.State);
+                    notice.Text = action == "Start" ? "服务已就绪，可以打开聊天。" : "服务已停止。";
+                    return true;
+                }
+                if (probe.State == ServiceState.PortConflict) break;
+                await Task.Delay(500);
+            }
+            if (!IsDisposed) notice.Text = "服务未达到预期状态，请查看运行日志。";
+            return false;
         }
 
         private async Task RefreshStatus()
@@ -156,8 +278,12 @@ internal static class Launcher
             probing = true;
             try
             {
-                string current = await Task.Run((Func<string>)ReadStatus);
-                if (!IsDisposed && !busy) status.Text = current;
+                var probe = await Task.Run((Func<ServiceProbe>)ReadStatus);
+                if (!IsDisposed && !busy)
+                {
+                    browserAddress = probe.BrowserAddress;
+                    SetState(probe.State);
+                }
             }
             finally { probing = false; }
         }
@@ -192,11 +318,11 @@ internal static class Launcher
         private readonly Label header;
         private readonly Label description = new Label { Dock = DockStyle.Top, Height = 68, ForeColor = Muted };
         private readonly Label detail = new Label { Dock = DockStyle.Fill, ForeColor = Muted };
-        private readonly Label errorLabel = new Label { Dock = DockStyle.Top, Height = 48, ForeColor = Color.FromArgb(170, 38, 53) };
+        private readonly Label errorLabel = new Label { Dock = DockStyle.Top, Height = 48, ForeColor = Warning };
         private readonly ProgressBar progress = new ProgressBar { Dock = DockStyle.Top, Height = 12, Maximum = 5 };
         private readonly Button next = ActionButton("下一步", true);
         private readonly Button back = ActionButton("上一步");
-        private readonly Panel body = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(24) };
+        private readonly Panel body = new Panel { Dock = DockStyle.Fill, BackColor = Card, Padding = new Padding(24) };
         private readonly TableLayoutPanel basicFields = FormFields();
         private readonly TableLayoutPanel advancedFields = FormFields();
         private readonly Panel databaseFields = new Panel { Dock = DockStyle.Fill };
@@ -217,7 +343,7 @@ internal static class Launcher
             header = new Label
             {
                 Dock = DockStyle.Top, Height = 64,
-                BackColor = Navy, ForeColor = Color.White, TextAlign = ContentAlignment.MiddleLeft,
+                BackColor = Surface, ForeColor = Mint, TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(24, 0, 0, 0), Font = new Font(Font, FontStyle.Bold)
             };
             var footer = new FlowLayoutPanel
@@ -272,6 +398,7 @@ internal static class Launcher
             storageFields.Controls.Add(new Label { Text = "附件与备份目录", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
             storageFields.Controls.Add(storageRow, 1, 0);
             storage.Dock = DockStyle.Top;
+            StyleTextBox(storage);
             storage.AccessibleName = "附件与备份目录";
             AddSpacer(storageFields);
             storage.AccessibleDescription = "可选，填写如 D:\\AIWebChat；留空使用项目目录。";
@@ -447,8 +574,16 @@ internal static class Launcher
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35));
         panel.Controls.Add(new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
         box.Dock = DockStyle.Top;
+        StyleTextBox(box);
         box.AccessibleName = name;
         panel.Controls.Add(box, 1, row);
+    }
+
+    private static void StyleTextBox(TextBox box)
+    {
+        box.BackColor = Surface;
+        box.ForeColor = Ink;
+        box.BorderStyle = BorderStyle.FixedSingle;
     }
 
     private static void AddSpacer(TableLayoutPanel panel)
@@ -506,7 +641,19 @@ internal static class Launcher
         }
     }
 
-    private static string ReadStatus()
+    private sealed class ServiceProbe
+    {
+        public readonly ServiceState State;
+        public readonly string BrowserAddress;
+
+        public ServiceProbe(ServiceState state, string browserAddress = Address)
+        {
+            State = state;
+            BrowserAddress = browserAddress;
+        }
+    }
+
+    private static ServiceProbe ReadStatus()
     {
         try
         {
@@ -515,13 +662,24 @@ internal static class Launcher
             request.Timeout = 1200;
             request.AllowAutoRedirect = false;
             using (var response = (HttpWebResponse)request.GetResponse())
-                return response.Headers["X-AI-WebChat"] == "1" ? "正在运行 · 127.0.0.1:3000" : "端口被其他程序使用";
+            {
+                if (response.Headers["X-AI-WebChat"] != "1") return new ServiceProbe(ServiceState.PortConflict);
+                Uri origin;
+                string value = response.Headers["X-AI-WebChat-Browser-Origin"];
+                string browser = Uri.TryCreate(value, UriKind.Absolute, out origin) &&
+                    origin.Scheme == Uri.UriSchemeHttps && origin.UserInfo.Length == 0
+                    ? origin.GetLeftPart(UriPartial.Authority)
+                    : Address;
+                return new ServiceProbe(ServiceState.Running, browser);
+            }
         }
         catch (WebException error)
         {
-            if (error.Response == null) return "后端未响应";
+            if (error.Response == null)
+                return new ServiceProbe(error.Status == WebExceptionStatus.ConnectFailure
+                    ? ServiceState.Stopped : ServiceState.NotResponding);
             using (var response = (HttpWebResponse)error.Response)
-                return response.Headers["X-AI-WebChat"] == "1" ? "数据库暂不可用" : "端口 3000 未返回 AI WebChat 状态";
+                return new ServiceProbe(response.Headers["X-AI-WebChat"] == "1" ? ServiceState.DatabaseUnavailable : ServiceState.PortConflict);
         }
     }
 }

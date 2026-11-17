@@ -6,11 +6,24 @@
 
 如果初始化失败，可根据窗口提示修正后重试。构建或迁移失败时，可在项目的 `dist/windows/setup-error.log` 查看详情。请保留初始化产生的 `.env.windows-setup.local`，重试时会沿用其中的密钥。
 
-在项目根目录双击 `AI WebChat.exe`，点击「启动」。窗口显示「正在运行」后，点击「打开聊天」，使用原有网页界面。关闭浏览器或管理窗口后，后端会继续运行。可以在管理窗口停止后端或打开启动日志。
+在项目根目录双击 `AI WebChat.exe`，点击「启动服务」。窗口显示「正在运行」后，点击「打开聊天」。同一个 EXE 也负责在后台启动网站，运行时不会弹出命令窗口。关闭浏览器或管理窗口后，服务会继续运行。管理窗口可以停止服务或查看「运行日志」。
 
-后台由 Windows 任务计划程序以当前账号管理。点击「开启登录自启」后，Windows 会在该账号登录时启动后端。注销或重启会结束本次运行。这种方式适合本机使用，依赖已有的 Node.js、项目依赖和 PostgreSQL 服务。
+后台由 Windows 任务计划程序以当前账号管理。「随 Windows 登录启动」可以开启或关闭。注销或重启会结束本次运行。程序依赖本机的 Node.js、项目依赖和 PostgreSQL 服务。
 
-维护者更新代码后，在项目根目录运行 `pwsh -File scripts/windows/build.ps1`，重新构建网站、应用数据库迁移并生成管理程序。保留项目原有的 `.env`。如果有旧版通过命令行启动的后端，先从原终端停止它，再由管理程序启动。本机地址为 `http://127.0.0.1:3000`，日志保存在 `dist/windows/backend.log`。
+## 更新已安装的项目
+
+1. 用旧版管理窗口点「停止」，等服务停止后关闭管理窗口。如果原来在终端启动过另一个实例，先在那个终端按 `Ctrl+C` 停止。
+2. 在含有 `package.json` 的项目根目录打开 PowerShell，拉取最新代码（已经拉取可以跳过），并依次执行下面的命令。
+
+   ```powershell
+   git pull
+   npm.cmd ci --include=dev
+   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\build.ps1
+   ```
+
+3. 构建脚本会构建网站、执行数据库迁移并重新生成 `AI WebChat.exe`。保留原有的 `.env`、附件和数据库。更新后双击 EXE，点「启动服务 → 打开聊天」。
+
+本机默认地址为 `http://127.0.0.1:3000`。登录自启沿用旧任务的配置。启动失败可以查看 `dist/windows/backend.log`。
 
 ## 本机使用与反向代理
 

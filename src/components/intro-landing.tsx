@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, ShieldCheck, Wifi } from 'lucide-react';
-import { BrandMark } from '@/components/brand';
-import { cn } from '@/lib/cn';
+import { ArrowRight, LockKeyhole } from 'lucide-react';
+import { BrandMark, BrandWordmark } from '@/components/brand';
 
 export function IntroLanding({
   siteName,
@@ -14,100 +14,69 @@ export function IntroLanding({
   registrationOpen: boolean;
 }) {
   const router = useRouter();
-  const [leaving, setLeaving] = useState(false);
-  const [ready, setReady] = useState(false);
-
-  const enter = useCallback(() => {
-    setLeaving(true);
-    setTimeout(() => router.replace('/login'), 380);
-  }, [router]);
+  const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let seen = false;
     try {
       seen = sessionStorage.getItem('fac_intro_seen') === '1';
       sessionStorage.setItem('fac_intro_seen', '1');
     } catch {
-      seen = false;
+      // The entrance works without session storage.
     }
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const delay = reduced ? 700 : seen ? 900 : 3900;
-    const timer = setTimeout(enter, delay);
-    setReady(true);
-    return () => clearTimeout(timer);
-  }, [enter]);
+
+    const skipForReducedMotion = () => {
+      if (!reducedMotion.matches) return;
+      window.clearTimeout(timer.current);
+      router.replace('/login');
+    };
+    if (reducedMotion.matches) skipForReducedMotion();
+    else timer.current = window.setTimeout(() => router.replace('/login'), seen ? 350 : 1850);
+    reducedMotion.addEventListener('change', skipForReducedMotion);
+    return () => {
+      window.clearTimeout(timer.current);
+      reducedMotion.removeEventListener('change', skipForReducedMotion);
+    };
+  }, [router]);
 
   return (
-    <main
-      className={cn(
-        'relative flex min-h-dvh flex-col overflow-hidden px-6',
-        leaving ? 'intro-exit' : ready ? 'opacity-100' : 'opacity-0'
-      )}
-      style={{ transition: 'opacity .4s ease' }}
-    >
-      <header className="flex items-center justify-between py-6">
-        <div className="flex items-center gap-2.5">
-          <BrandMark size={26} />
-          <span className="text-[13px] font-medium tracking-wide text-white/70">{siteName}</span>
-        </div>
-        <button
-          type="button"
-          onClick={enter}
-          className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-4 py-1.5 text-[12px] text-white/55 transition hover:border-white/20 hover:text-white"
-        >
-          跳过动画
-          <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
-        </button>
+    <main className="entry-surface flex min-h-dvh flex-col px-6 sm:px-10">
+      <header className="mx-auto w-full max-w-5xl pt-7 sm:pt-9">
+        <BrandWordmark name={siteName} compact />
       </header>
 
-      <div className="relative flex flex-1 flex-col items-center justify-center pb-20 text-center">
-        <div className="relative mb-10 flex h-52 w-52 items-center justify-center sm:h-64 sm:w-64">
-          <div className="intro-ring absolute inset-0 rounded-full border border-aurora-400/20" />
-          <div
-            className="intro-ring absolute inset-5 rounded-full border border-dashed border-white/10"
-            style={{ animationDirection: 'reverse', animationDuration: '14s' }}
-          />
-          <div className="intro-ring absolute inset-12 rounded-full border border-violet-400/15" style={{ animationDuration: '20s' }} />
-          <div className="intro-orb relative flex h-24 w-24 items-center justify-center rounded-full bg-[radial-gradient(circle_at_34%_28%,#eafff8,#4fe0b4_40%,#0b7d5c_100%)] shadow-[0_0_80px_rgba(79,224,180,0.45)] sm:h-28 sm:w-28">
-            <div className="absolute inset-0 rounded-full border border-white/25" />
-            <div className="h-[38%] w-[38%] rounded-full bg-white/25 blur-md" />
-          </div>
-          <span className="absolute right-2 top-9 h-1.5 w-1.5 rounded-full bg-aurora-300 shadow-[0_0_10px_#8ff0d0]" />
-          <span className="absolute bottom-8 left-4 h-1 w-1 rounded-full bg-violet-300/80" />
+      <div className="mx-auto grid w-full max-w-5xl flex-1 content-center items-center gap-8 pb-12 pt-6 text-center md:grid-cols-[1fr_1fr] md:content-stretch md:gap-10 md:text-left">
+        <div className="entry-copy order-2 md:order-1">
+          <h1 className="text-[clamp(2.1rem,8vw,3rem)] font-semibold leading-[1.15] tracking-tight text-white md:text-[clamp(2.55rem,5.15vw,4rem)]">
+            从一句话开始。
+          </h1>
+          <p className="mx-auto mt-4 max-w-sm text-sm leading-7 text-slate-300 sm:text-base md:mx-0">
+            聊聊你在想什么，或接着上一次的对话。
+          </p>
+          <Link
+            href="/login"
+            replace
+            onNavigate={() => window.clearTimeout(timer.current)}
+            className="btn-primary group mt-7 gap-2.5 rounded-xl px-5 py-3"
+          >
+            进入 {siteName}
+            <ArrowRight aria-hidden="true" className="h-4 w-4 motion-safe:transition-transform motion-safe:group-hover:translate-x-0.5" />
+          </Link>
+          <p className="mt-7 flex items-center justify-center gap-2 text-xs leading-5 text-slate-400 md:justify-start">
+            <LockKeyhole aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-aurora-300/80" />
+            {registrationOpen ? '对话记录加密保存' : '仅限授权账号访问 · 对话记录加密保存'}
+          </p>
         </div>
 
-        <h1 className="intro-title text-[30px] font-light tracking-[0.18em] text-white sm:text-[42px]">{siteName}</h1>
-        <p className="intro-sub mt-4 max-w-md text-[13px] leading-relaxed tracking-wide text-white/40 sm:text-sm">
-          私有部署的 AI 空间。对话加密保存，
-          <br className="hidden sm:block" />
-          仅授权网络与账号，方可进入。
-        </p>
-        <div className="intro-cta mt-9 flex flex-wrap items-center justify-center gap-2 text-[11px] text-white/35">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            <ShieldCheck className="h-3.5 w-3.5 text-aurora-400" /> 零信任接入
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            <Wifi className="h-3.5 w-3.5 text-aurora-400" /> 加密存储
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            {registrationOpen ? '注册开放中' : '仅限授权加入'}
-          </span>
+        <div className="order-1 flex items-center justify-center md:order-2">
+          <div className="entry-orbit" aria-hidden="true">
+            <span className="entry-orbit-inner" />
+            <span className="entry-orbit-trace" />
+            <BrandMark size={132} />
+          </div>
         </div>
       </div>
-
-      <footer className="pb-8 text-center text-[10px] uppercase tracking-[0.32em] text-white/20">
-        Authorized networks only · Zero public entry
-      </footer>
-
-      {!leaving ? (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/[0.06]">
-          <div
-            className="h-px bg-gradient-to-r from-transparent via-aurora-400/70 to-transparent"
-            style={{ animation: 'introProgress 3.9s linear forwards' }}
-          />
-        </div>
-      ) : null}
-      <style>{`@keyframes introProgress{from{width:0}to{width:100%}}`}</style>
     </main>
   );
 }

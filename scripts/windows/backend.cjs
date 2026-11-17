@@ -18,7 +18,7 @@ Object.assign(process.env, {
   ALLOW_INSECURE_COOKIES: useProxy ? 'false' : 'true',
   TLS_KEY_FILE: '',
   TLS_CERT_FILE: '',
-  AI_WEBCHAT_LAUNCH_LOG: path.join(logs, 'backend.log')
+  AI_WEBCHAT_LAUNCH_LOG: process.env.AI_WEBCHAT_CAPTURED_STDIO === '1' ? '' : path.join(logs, 'backend.log')
 });
 if (!useProxy) {
   process.env.APP_URL = address;

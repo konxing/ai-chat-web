@@ -189,7 +189,7 @@ export function ChatWorkspace({
   const preferBrowserSpeechRef = useRef(false);
   const transcribingRef = useRef(false);
   const [transcribing, setTranscribing] = useState(false);
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const stickRef = useRef(true);
 
   /**
@@ -240,7 +240,8 @@ export function ChatWorkspace({
   const scrollToBottom = useCallback((smooth = false) => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    const animate = smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollTo({ top: el.scrollHeight, behavior: animate ? 'smooth' : 'auto' });
   }, []);
 
   /** 用户手动上滑后停止自动跟随，避免流式输出把视图拽走。 */
@@ -266,17 +267,20 @@ export function ChatWorkspace({
   }, [chat?.id]);
 
   useEffect(() => {
-    if (!stickRef.current) return;
-    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = setTimeout(() => scrollToBottom(false), 30);
-    return () => {
-      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-    };
-  }, [chat?.messages.length, streamText, optimisticUser?.id, scrollToBottom]);
+    if (!stickRef.current || scrollFrameRef.current !== null) return;
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (stickRef.current) scrollToBottom();
+    });
+  }, [chat?.id, chat?.messages.length, streamText, optimisticUser?.id, scrollToBottom]);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
       recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
       recognitionRef.current?.stop();
@@ -996,7 +1000,7 @@ export function ChatWorkspace({
         <button
           type="button"
           aria-label="关闭侧栏"
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-30 bg-black/65 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       ) : null}
@@ -1004,7 +1008,7 @@ export function ChatWorkspace({
       <aside
         id="chat-sidebar"
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.08] bg-[#0a0f17] transition-[transform,width,visibility] duration-300 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
+          'chat-sidebar-surface fixed inset-y-0 left-0 z-40 flex w-[86%] max-w-[330px] flex-col overflow-hidden border-r border-white/[0.08] transition-[transform,visibility] duration-200 lg:static lg:z-auto lg:min-w-0 lg:translate-x-0',
           sidebarCollapsed ? 'lg:invisible lg:w-0 lg:max-w-0' : 'lg:visible lg:w-[300px] xl:w-[320px]',
           sidebarOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'
         )}
@@ -1020,7 +1024,7 @@ export function ChatWorkspace({
         </div>
 
         <div className="px-3 pt-2">
-          <button type="button" onClick={startNewChat} className="btn-ghost w-full justify-start gap-2 border-aurora-400/20 bg-aurora-400/[0.07] py-2.5 text-[13px] hover:bg-aurora-400/10">
+          <button type="button" onClick={startNewChat} className="btn-ghost w-full justify-start gap-2.5 rounded-xl border-aurora-400/25 bg-aurora-400/[0.08] py-2.5 text-[13px] hover:border-aurora-400/40 hover:bg-aurora-400/10">
             <MessageSquarePlus className="h-4 w-4 text-aurora-300" />
             开启新对话
             <span className="ml-auto hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/25 sm:inline">
@@ -1149,7 +1153,7 @@ export function ChatWorkspace({
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-[58px] shrink-0 items-center gap-2 border-b border-white/[0.08] bg-[#0d121b]/90 px-3 backdrop-blur-xl sm:h-16 sm:px-5">
+        <header className="chat-topbar flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-white/[0.08] px-3 py-1.5 sm:h-16 sm:flex-nowrap sm:px-5 sm:py-0">
           <button type="button" className="btn-icon lg:hidden" onClick={() => setSidebarOpen(true)} aria-label="打开侧栏" aria-expanded={sidebarOpen} aria-controls="chat-sidebar">
             <Menu className="h-4 w-4" />
           </button>
@@ -1169,7 +1173,7 @@ export function ChatWorkspace({
               {selectedProvider ? `${selectedProvider.name} · ${selectedProvider.modelId}` : '尚未选择模型'}
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex min-w-0 basis-full items-center gap-1.5 pb-0.5 pl-1 sm:shrink-0 sm:basis-auto sm:pb-0 sm:pl-0">
             {reasoningOptions?.levels.length ? (
               <select
                 aria-label="思考程度"
@@ -1182,19 +1186,19 @@ export function ChatWorkspace({
                     ...previous, [reasoningKey]: isReasoningLevel(level) ? level : undefined
                   }));
                 }}
-                className="max-w-[29vw] rounded-full border border-white/10 bg-[#171e29] px-2 py-2 text-xs text-white/85 [color-scheme:dark] focus-visible:outline-aurora-400 sm:max-w-none"
+                className="max-w-[42vw] rounded-full border border-white/10 bg-[#171e29] px-2 py-1.5 text-xs text-white/85 [color-scheme:dark] focus-visible:outline-aurora-400 sm:max-w-none sm:py-2"
               >
                 <option value="">思考 · 默认{reasoningOptions.defaultLevel ? `（${reasoningLabels[reasoningOptions.defaultLevel]}）` : ''}</option>
                 {reasoningOptions.levels.map((level) => <option key={level} value={level}>{reasoningLabels[level]}</option>)}
               </select>
             ) : null}
-            <div className="relative flex items-center">
+            <div className="relative flex min-w-0 items-center">
               <select
                 aria-label="选择模型"
                 value={selectedProviderId}
                 onChange={(e) => void changeModel(e.target.value)}
                 disabled={providers.length === 0 || sending}
-                className="max-w-[42vw] appearance-none rounded-full border border-white/10 bg-white/[0.05] py-2 pl-3 pr-8 text-xs text-white/80 outline-none transition hover:border-white/25 focus-visible:ring-2 focus-visible:ring-aurora-400/60 disabled:opacity-45 sm:max-w-[240px]"
+                className="max-w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none transition hover:border-white/25 focus-visible:ring-2 focus-visible:ring-aurora-400/60 disabled:opacity-45 sm:max-w-[240px] sm:py-2"
               >
                 {providers.length === 0 ? <option value="">未配置模型</option> : null}
                 {providers.map((provider) => (
@@ -1222,18 +1226,17 @@ export function ChatWorkspace({
           </div>
         ) : null}
 
-        <div ref={scrollRef} className="relative flex-1 overflow-y-auto scroll-smooth" onScroll={onMessagesScroll}>
+        <div ref={scrollRef} className="relative flex-1 overflow-y-auto" onScroll={onMessagesScroll}>
           <div className={cn('mx-auto w-full max-w-3xl px-4 sm:px-6', hasMessages ? 'pb-8 pt-6' : 'flex min-h-full flex-col py-2')}>
             {!hasMessages ? (
-              <div className="flex flex-1 flex-col items-center justify-center py-3 text-center">
-                <div className="relative mb-4 flex h-14 w-14 items-center justify-center sm:h-16 sm:w-16">
-                  <div className="absolute inset-0 rounded-full bg-aurora-400/15 blur-2xl" />
-                  <BrandMark size={52} />
+              <div className="chat-welcome flex flex-1 flex-col items-center justify-center py-3 text-center sm:py-4">
+                <div className="chat-welcome-orbit mb-3 h-[64px] w-[64px] shrink-0 sm:mb-5 sm:h-[84px] sm:w-[84px]">
+                  <BrandMark size={60} />
                 </div>
-                <h2 className="max-w-full break-words text-[clamp(1.5rem,5vw,2.25rem)] font-semibold tracking-tight text-white">
+                <h2 className="max-w-full break-words text-[clamp(1.5rem,5vw,2.4rem)] font-semibold leading-tight tracking-tight text-white">
                   {greeting()}，{user.displayName || user.username}
                 </h2>
-                <p className="mt-2 max-w-md text-sm leading-relaxed text-white/60">
+                <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-300">
                   今天想聊点什么？
                 </p>
                 {providers.length === 0 ? (
@@ -1245,7 +1248,7 @@ export function ChatWorkspace({
                     添加，或联系管理员。
                   </div>
                 ) : null}
-                <div className="mt-5 grid w-full max-w-xl grid-cols-2 gap-2 sm:gap-3">
+                <div className="mt-4 grid w-full max-w-xl grid-cols-2 gap-2 sm:mt-7 sm:gap-3">
                   {SUGGESTIONS.map(({ label, detail, prompt, icon: Icon }) => (
                     <button
                       key={label}
@@ -1254,14 +1257,16 @@ export function ChatWorkspace({
                         setDraft(prompt);
                         textareaRef.current?.focus();
                       }}
-                      className="group min-w-0 rounded-xl border border-white/10 bg-[#151c27] p-3 text-left transition hover:border-aurora-400/40 hover:bg-[#1a2932] focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400 sm:px-4"
+                      className="chat-suggestion group flex min-w-0 flex-col gap-2 rounded-2xl border border-white/10 p-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400 sm:flex-row sm:items-center sm:gap-3 sm:p-3.5"
                     >
-                      <span className="mb-1.5 flex items-center justify-between text-aurora-300">
+                      <span className="chat-suggestion-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
                         <Icon className="h-4 w-4" aria-hidden="true" />
-                        <ArrowUpRight className="hidden h-3.5 w-3.5 text-white/35 group-hover:text-aurora-300 sm:block" aria-hidden="true" />
                       </span>
-                      <span className="block text-sm font-medium text-white/90">{label}</span>
-                      <span className="mt-0.5 block text-xs leading-relaxed text-white/60">{detail}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-medium text-white">{label}</span>
+                        <span className="mt-0.5 block text-xs leading-relaxed text-slate-400">{detail}</span>
+                      </span>
+                      <ArrowUpRight aria-hidden="true" className="hidden h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-aurora-300 sm:block" />
                     </button>
                   ))}
                 </div>
@@ -1290,25 +1295,24 @@ export function ChatWorkspace({
                   <MessageBubble message={optimisticUser} optimistic getCitationSource={getCitationSource} />
                 ) : null}
                 {sending || streamText ? (
-                  <div className="flex gap-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-aurora-400/10">
+                  <div className="chat-turn-enter flex gap-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-aurora-400/15 bg-aurora-400/10">
                       <Bot className="h-3.5 w-3.5 text-aurora-300" />
                     </span>
                     <div className="min-w-0 flex-1 pt-0.5">
-                      <div className="mb-1.5 flex items-center gap-2 text-[10.5px] text-white/25">
+                      <div className="mb-1.5 flex items-center gap-2 text-xs text-slate-300">
                         <span>{selectedProvider?.name ?? 'AI'}</span>
-                        {selectedProvider ? <span className="text-white/15">{selectedProvider.modelId}</span> : null}
-                        <span className="ml-1 flex gap-0.5">
-                          <span className="h-1 w-1 animate-blink rounded-full bg-aurora-300" />
-                          <span className="h-1 w-1 animate-blink rounded-full bg-aurora-300 [animation-delay:120ms]" />
-                          <span className="h-1 w-1 animate-blink rounded-full bg-aurora-300 [animation-delay:240ms]" />
-                        </span>
                       </div>
                       {streamText ? (
                         <Markdown>{streamText}</Markdown>
                       ) : (
-                        <div className="flex items-center gap-2 text-[12px] text-white/30">
-                          <Spinner className="h-3 w-3" /> 正在思考…
+                        <div role="status" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2.5 py-1.5 text-xs text-slate-300">
+                          <span aria-hidden="true" className="flex items-center gap-1">
+                            <span className="chat-thinking-dot h-1 w-1 rounded-full bg-aurora-300" />
+                            <span className="chat-thinking-dot h-1 w-1 rounded-full bg-aurora-300" />
+                            <span className="chat-thinking-dot h-1 w-1 rounded-full bg-aurora-300" />
+                          </span>
+                          正在思考…
                         </div>
                       )}
                     </div>
@@ -1338,7 +1342,7 @@ export function ChatWorkspace({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-white/[0.05] bg-gradient-to-t from-[#07090f] via-[#07090f]/95 to-transparent px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-5">
+        <div className="shrink-0 bg-gradient-to-t from-[#0b1118] via-[#0b1118] to-transparent px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pb-5">
           <div className="mx-auto w-full max-w-3xl">
             {pending.length > 0 ? (
               <div className="mb-2 flex flex-wrap gap-2">
@@ -1396,7 +1400,7 @@ export function ChatWorkspace({
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
-              className="chat-composer rounded-[22px] border border-white/[0.12] transition focus-within:border-aurora-400/45 focus-within:ring-2 focus-within:ring-aurora-400/10"
+              className="chat-composer rounded-[22px] border border-white/[0.12] transition-[border-color,box-shadow] focus-within:border-aurora-400/45 focus-within:ring-2 focus-within:ring-aurora-400/10 sm:rounded-3xl"
             >
               <textarea
                 ref={textareaRef}
@@ -1407,7 +1411,7 @@ export function ChatWorkspace({
                 onKeyDown={onComposerKeyDown}
                 rows={1}
                 placeholder={selectedProvider ? `给 ${selectedProvider.name} 发消息…` : '尚未配置模型，仍可先输入内容'}
-                className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-white/95 outline-none placeholder:text-white/50"
+                className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-white/95 caret-aurora-300 outline-none placeholder:text-slate-400"
                 readOnly={sending}
               />
               <div className="flex items-center gap-1 px-2 pb-2 pt-1">
@@ -1476,7 +1480,7 @@ export function ChatWorkspace({
                     type="button"
                     onClick={() => void send()}
                     disabled={(!draft.trim() && pending.length === 0) || uploading || Boolean(attachmentWarning)}
-                    className="btn-primary h-9 w-9 shrink-0 rounded-xl p-0"
+                    className="btn-primary h-9 w-9 shrink-0 rounded-xl p-0 motion-safe:active:scale-95"
                     aria-label="发送"
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -1484,7 +1488,7 @@ export function ChatWorkspace({
                 )}
               </div>
             </div>
-            <p className="mt-2 select-none text-center text-[10px] leading-relaxed text-white/20">
+            <p className="mt-2 select-none text-center text-[11px] leading-relaxed text-slate-400">
               对话会发送给所选模型服务。AI 可能出错，请自行判断重要信息。
             </p>
           </div>
@@ -1573,7 +1577,7 @@ const MessageBubble = memo(function MessageBubble({
   };
   if (isUser) {
     return (
-      <div className={cn('group flex justify-end gap-3', optimistic && 'opacity-60')}>
+      <div className={cn('group flex justify-end gap-3', optimistic && 'chat-turn-enter')}>
         <div className="max-w-[85%] sm:max-w-[75%]">
           {message.attachments.length > 0 ? (
             <div className="mb-2 flex flex-wrap justify-end gap-2">
@@ -1638,7 +1642,7 @@ const MessageBubble = memo(function MessageBubble({
   }
   return (
     <div className="group flex gap-3">
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-aurora-400/10">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-aurora-400/15 bg-aurora-400/10">
         <Bot className="h-3.5 w-3.5 text-aurora-300" />
       </span>
       <div className="min-w-0 flex-1">
@@ -1675,16 +1679,19 @@ function MessageSticker({ id }: { id: ChatSticker }) {
   return imageFailed ? (
     <p className="mt-2 text-xs text-white/60">这张表情包暂时无法显示</p>
   ) : (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      className="mt-2 h-24 w-24 object-contain"
-      src={image.src}
-      alt={image.alt}
-      width={96}
-      height={96}
-      loading="lazy"
-      onError={() => setImageFailed(true)}
-    />
+    <picture className="block">
+      {image.posterSrc ? <source media="(prefers-reduced-motion: reduce)" srcSet={image.posterSrc} /> : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className="mt-2 h-24 w-24 object-contain"
+        src={image.src}
+        alt={image.alt}
+        width={96}
+        height={96}
+        loading="lazy"
+        onError={() => setImageFailed(true)}
+      />
+    </picture>
   );
 }
 

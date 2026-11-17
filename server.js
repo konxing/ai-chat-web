@@ -25,7 +25,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const CACHE_MS = Math.max(200, Number(process.env.IP_CACHE_MS || 1000));
 const APP_IS_HTTPS = String(process.env.APP_URL || '').startsWith('https://');
 
-const prisma = new PrismaClient({ log: ['error'] });
+const prisma = new PrismaClient();
 
 function writeLaunchLog(line) {
   const filename = process.env.AI_WEBCHAT_LAUNCH_LOG;
@@ -65,13 +65,16 @@ async function loadRules() {
   for (const row of rows) {
     const parsed = parseCidr(row.cidr);
     if (!parsed) {
-      logErr('ipguard.invalid_rule_skipped', { ruleId: row.id });
+      if (shouldLog(`ipguard.invalid_rule:${row.id}`, 60_000)) {
+        logErr('ipguard.invalid_rule_skipped', { ruleId: row.id });
+      }
       continue;
     }
     rules.push({ ...row, parsed });
   }
+  const reportLoad = cache.lastGoodAt === 0 || cache.error || cache.rules.length !== rules.length;
   cache = { rules, loadedAt: Date.now(), error: null, lastGoodAt: Date.now() };
-  log('ipguard.rules_loaded', { count: rules.length });
+  if (reportLoad) log('ipguard.rules_loaded', { count: rules.length });
 }
 
 async function refreshRules(force = false) {
@@ -81,9 +84,13 @@ async function refreshRules(force = false) {
     try {
       await loadRules();
     } catch (err) {
+      const wasUnavailable = Boolean(cache.error);
       cache.error = err instanceof Error ? err.message : String(err);
       cache.loadedAt = Date.now();
-      logErr('ipguard.refresh_failed', { error: cache.error, lastGoodAt: cache.lastGoodAt });
+      const reportRefresh = shouldLog('ipguard.refresh_failed', 60_000);
+      if (!wasUnavailable || reportRefresh) {
+        logErr('ipguard.refresh_failed', { error: cache.error, lastGoodAt: cache.lastGoodAt });
+      }
     } finally {
       refreshPromise = null;
     }
@@ -164,7 +171,9 @@ function unavailable(res, reason) {
     'Retry-After': '5'
   });
   res.end(body);
-  logErr('ipguard.denied_unavailable', { reason });
+  if (shouldLog(`ipguard.denied_unavailable:${reason}`, 60_000)) {
+    logErr('ipguard.denied_unavailable', { reason });
+  }
 }
 
 async function guard(req, res, proxy) {

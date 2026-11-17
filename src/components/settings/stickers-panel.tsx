@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImagePlus, Smile } from 'lucide-react';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 import {
+  NOTO_STICKERS,
   PERSONAL_STICKER_LABEL_LIMIT,
   PERSONAL_STICKER_MAX_BYTES,
   PERSONAL_STICKER_MAX_ITEMS,
@@ -160,6 +161,27 @@ export function StickersPanel() {
 
   return (
     <>
+      <section className="panel space-y-3 p-4 sm:p-6" aria-labelledby="builtin-stickers-title">
+        <h2 id="builtin-stickers-title" className="text-base font-semibold text-white">内置动图</h2>
+        <p className="text-[13px] leading-relaxed text-slate-300">
+          AI 已可从这 {Object.keys(NOTO_STICKERS).length} 张动图里选用，聊天时按需加载。
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {[NOTO_STICKERS.notoTearsOfJoy, NOTO_STICKERS.notoClap, NOTO_STICKERS.notoLoveFace,
+            NOTO_STICKERS.notoParty, NOTO_STICKERS.notoWave, NOTO_STICKERS.notoSleep].map((sticker) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img key={sticker.posterSrc} src={sticker.posterSrc} alt={sticker.alt} loading="lazy" width={44} height={44}
+              className="h-11 w-11 rounded-lg border border-white/10 bg-white/[0.04] p-1.5" />
+          ))}
+        </div>
+        <p className="text-xs leading-relaxed text-slate-400">
+          动图素材来自 Google 的
+          <a className="ml-1 text-aurora-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400"
+            href="https://googlefonts.github.io/noto-emoji-animation/" target="_blank" rel="noreferrer">Animated Noto Emoji</a>
+          <span>（<a className="text-aurora-300 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400"
+            href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>）。</span>
+        </p>
+      </section>
       <section className="panel space-y-4 p-4 sm:p-6" aria-labelledby="personal-stickers-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

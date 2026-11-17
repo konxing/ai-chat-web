@@ -8,15 +8,17 @@ Push-Location $root
 try {
     if (!$LauncherOnly) {
         if (!(Test-Path -LiteralPath '.env')) { throw 'Project .env is required. Use -LauncherOnly for first-time setup.' }
-        npm run build
+        npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Website build failed.' }
-        npm run db:migrate
+        npm.cmd run db:migrate
         if ($LASTEXITCODE -ne 0) { throw 'Database migration failed.' }
     }
     $source = Join-Path $PSScriptRoot 'Launcher.cs'
+    $backend = Join-Path $PSScriptRoot 'BackendHost.cs'
     $icon = Join-Path $PSScriptRoot 'app.ico'
-    & $compiler /nologo /codepage:65001 /target:winexe '/out:AI WebChat.exe' "/win32icon:$icon" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll $source
-    if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed.' }
+    & $compiler /nologo /codepage:65001 /target:winexe '/out:AI WebChat.exe' "/win32icon:$icon" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll $source $backend
+    if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed. If AI WebChat is running, stop its backend and close its window before rebuilding.' }
+    & (Join-Path $PSScriptRoot 'backend-task.ps1') Upgrade
 } finally {
     Pop-Location
 }

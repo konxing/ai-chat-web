@@ -34,7 +34,7 @@
 1. `server.js` 在 Next 之前检查客户端 IP。直连从 TCP 连接取地址。启用 `TRUST_PROXY` 时，必须由 `TRUSTED_PROXY_CIDRS` 中的 TCP 对端设置单个合法 `X-Real-IP`。代理报告的回环地址仅用于只读探测。服务端校验白名单后，重写 `x-real-ip`、`x-client-ip` 和随机 CSP nonce。
 2. 白名单规则从数据库加载，由后台定时器按 `IP_CACHE_MS`（默认 1000ms）刷新，请求路径不等待 SQL（仅冷启动首次加载会等）；数据库故障超过 5 秒时返回 503（fail closed，而不是放行）。
 3. 未命中规则：403 品牌页，并写 `IpAccessLog`（同一 IP 5 秒节流），不含密码/密钥。
-4. 命中：进入 Next。根页面展示 3.9 秒入场动画（可跳过；`prefers-reduced-motion` 时 0.7 秒；同会话 0.9 秒），随后去 `/login`。
+4. 命中后进入 Next。根页面短暂展示入场画面，可直接点击进入登录。启用减少动态效果时直接进入 `/login`。
 5. 登录成功后写入 `fac_session`（HttpOnly、SameSite=Lax、生产 Secure）与 `fac_csrf`（非 HttpOnly，供前端读取）。数据库只保存两者的 SHA-256。
 
 ### 聊天 / SSE

@@ -144,14 +144,46 @@ body::after {
 
   .chat-surface {
     background:
-      radial-gradient(ellipse 620px 360px at 50% 8%, rgb(63 224 180 / 0.07), transparent 80%),
-      radial-gradient(ellipse 500px 300px at 90% 100%, rgb(139 92 246 / 0.05), transparent 80%),
-      #0c111a;
+      radial-gradient(ellipse 700px 390px at 52% 7%, rgb(59 171 151 / 0.09), transparent 78%),
+      radial-gradient(ellipse 560px 360px at 100% 100%, rgb(55 91 128 / 0.08), transparent 80%),
+      #0d121a;
+  }
+
+  .chat-sidebar-surface {
+    background: linear-gradient(165deg, #101923, #0d141d 44%, #0b1119);
+  }
+
+  .chat-topbar {
+    background: rgb(15 21 30 / 0.96);
   }
 
   .chat-composer {
-    background: linear-gradient(180deg, #1a2330, #161e29);
-    box-shadow: 0 18px 45px -25px #000c, inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    background: linear-gradient(165deg, #1b2734, #141f2b 66%);
+    box-shadow: 0 18px 38px -24px #000c, inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+
+  .chat-welcome-orbit {
+    display: grid;
+    place-items: center;
+    border: 1px solid rgb(143 240 208 / 0.14);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgb(75 214 180 / 0.13), transparent 69%);
+    box-shadow: 0 0 44px rgb(75 214 180 / 0.07);
+  }
+
+  .chat-suggestion {
+    background: linear-gradient(125deg, #182331, #141e2a);
+    transition: transform 180ms ease-out, border-color 180ms ease-out, background-color 180ms ease-out;
+  }
+
+  .chat-suggestion:hover,
+  .chat-suggestion:focus-visible {
+    border-color: rgb(79 224 180 / 0.4);
+  }
+
+  .chat-suggestion-icon {
+    background: rgb(79 224 180 / 0.095);
+    color: #8ff0d0;
   }
 
   .label {
@@ -198,79 +230,78 @@ body::after {
   }
 }
 
-/* ---------- Intro animation ---------- */
-@keyframes introOrb {
-  0% {
-    transform: scale(0.75);
-    opacity: 0;
-    filter: blur(18px);
-  }
-  35% {
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1);
-    opacity: 1;
-    filter: blur(0);
-  }
+/* ---------- Page entrances ---------- */
+.entry-surface {
+  background:
+    radial-gradient(ellipse at 75% 44%, rgb(48 130 111 / 0.22), transparent 42%),
+    radial-gradient(ellipse at 100% 100%, rgb(49 67 118 / 0.14), transparent 42%),
+    #0a1119;
 }
-@keyframes introRing {
-  from {
-    transform: rotate(0deg) scale(0.9);
-    opacity: 0;
-  }
-  30% {
-    opacity: 0.8;
-  }
-  to {
-    transform: rotate(360deg) scale(1);
-    opacity: 0.35;
-  }
+
+.entry-orbit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: clamp(190px, 35vw, 410px);
+  aspect-ratio: 1;
+  border: 1px solid rgb(143 240 208 / 0.13);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, rgb(122 255 211 / 0.12), transparent 54%),
+    radial-gradient(circle at center, rgb(143 240 208 / 0.25) 0.5px, transparent 1.1px) 50% 50% / 15px 15px;
 }
-@keyframes introText {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-    letter-spacing: 0.4em;
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    letter-spacing: 0.18em;
-  }
+
+.entry-orbit-inner,
+.entry-orbit-trace {
+  position: absolute;
+  inset: 14%;
+  border: 1px solid rgb(143 240 208 / 0.17);
+  border-radius: 50%;
 }
-@keyframes introFade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+
+.entry-orbit-trace {
+  inset: 5%;
+  transform: rotate(35deg);
+  border-color: rgb(143 240 208 / 0.08);
+  border-top-color: rgb(143 240 208 / 0.7);
 }
-@keyframes introExit {
-  to {
-    opacity: 0;
-    transform: scale(1.04);
-    filter: blur(10px);
-  }
+
+.entry-orbit-trace::after {
+  position: absolute;
+  top: 10%;
+  right: 17%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8ff0d0;
+  box-shadow: 0 0 14px #8ff0d0;
+  content: '';
 }
-.intro-orb {
-  animation: introOrb 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+@keyframes entry-appear {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-.intro-ring {
-  animation: introRing 8s linear infinite;
+
+@keyframes entry-trace {
+  from { opacity: 0; transform: rotate(-25deg); }
+  to { opacity: 1; transform: rotate(35deg); }
 }
-.intro-title {
-  animation: introText 1.2s 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+@keyframes chat-dot {
+  0%, 75%, 100% { opacity: 0.45; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-2px); }
 }
-.intro-sub {
-  animation: introFade 1.2s 1s both;
-}
-.intro-cta {
-  animation: introFade 0.9s 1.5s both;
-}
-.intro-exit {
-  animation: introExit 0.55s ease forwards;
+
+@media (prefers-reduced-motion: no-preference) {
+  .entry-copy { animation: entry-appear 430ms ease-out both; }
+  .entry-orbit-trace { animation: entry-trace 800ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .chat-welcome { animation: entry-appear 330ms ease-out both; }
+  .chat-turn-enter { animation: entry-appear 190ms ease-out both; }
+  .chat-suggestion:hover { transform: translateY(-2px); }
+  .chat-thinking-dot { animation: chat-dot 1.15s ease-in-out infinite; }
+  .chat-thinking-dot:nth-child(2) { animation-delay: 120ms; }
+  .chat-thinking-dot:nth-child(3) { animation-delay: 240ms; }
 }
 
 /* ---------- Markdown ---------- */

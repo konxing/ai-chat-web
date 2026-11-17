@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { CHAT_STICKERS, chatStickerImage, type PersonalStickerId } from '@/lib/chat-stickers';
 import { StickerReply, stickerReplyPrompt } from '@/lib/sticker-reply';
 
@@ -11,6 +11,20 @@ describe('model-selected stickers', () => {
       expect(reply.finish().sticker).toBe(id);
       expect(existsSync(`public${sticker.src}`)).toBe(true);
     }
+  });
+
+  it('ships a non-animated fallback for every built-in animation', () => {
+    for (const id of Object.keys(CHAT_STICKERS) as Array<keyof typeof CHAT_STICKERS>) {
+      const { src, posterSrc } = chatStickerImage(id);
+      if (!posterSrc) continue;
+      const animation = readFileSync(`public${src}`);
+      const still = readFileSync(`public${posterSrc}`);
+      expect(animation.toString('ascii', 8, 12)).toBe('WEBP');
+      expect(animation.includes('ANIM')).toBe(true);
+      expect(still.toString('ascii', 8, 12)).toBe('WEBP');
+      expect(still.includes('ANIM')).toBe(false);
+    }
+    expect(stickerReplyPrompt(false)).toContain('notoTearsOfJoy=笑出眼泪');
   });
 
   it('hides split markers and rejects unknown, repeated, unfinished and non-final selections', () => {

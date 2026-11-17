@@ -1,3 +1,10 @@
+import notoStickerSources from './noto-stickers.json';
+
+type NotoSticker = keyof typeof notoStickerSources;
+export const NOTO_STICKERS = Object.fromEntries(Object.entries(notoStickerSources).map(([id, { alt }]) => [
+  id, { src: `/stickers/noto/${id}.webp`, posterSrc: `/stickers/noto/${id}-still.webp`, alt }
+])) as Record<NotoSticker, { src: string; posterSrc: string; alt: string }>;
+
 export const CHAT_STICKERS = {
   celebrate: { src: '/stickers/celebrate.png', alt: '庆祝一下' },
   laugh: { src: '/stickers/laugh.png', alt: '笑出眼泪' },
@@ -58,7 +65,8 @@ export const CHAT_STICKERS = {
   wave9: { src: '/stickers/wave9.png', alt: '给你递茶' },
   wave10: { src: '/stickers/wave10.png', alt: '给你递咖啡' },
   wave11: { src: '/stickers/wave11.png', alt: '来块饼干' },
-  wave12: { src: '/stickers/wave12.png', alt: '猫猫探头' }
+  wave12: { src: '/stickers/wave12.png', alt: '猫猫探头' },
+  ...NOTO_STICKERS
 } as const;
 
 export type BuiltInSticker = keyof typeof CHAT_STICKERS;
@@ -93,7 +101,7 @@ export function personalStickerUrl(id: PersonalStickerId) {
   return `/api/account/stickers/${id}`;
 }
 
-export function chatStickerImage(id: ChatSticker): { src: string; alt: string } {
+export function chatStickerImage(id: ChatSticker): { src: string; alt: string; posterSrc?: string } {
   return isBuiltInSticker(id) ? CHAT_STICKERS[id] : { src: personalStickerUrl(id), alt: '自定义表情包' };
 }
 

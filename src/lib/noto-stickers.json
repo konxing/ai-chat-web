@@ -1,0 +1,122 @@
+{
+  "notoTearsOfJoy": {
+    "codepoint": "1f602",
+    "alt": "笑出眼泪",
+    "sha256": "281d5ceb7881fe9393c200ea16c73a4d53af58b4ff04d76a46c432e7e4dd0901"
+  },
+  "notoRollingLaugh": {
+    "codepoint": "1f923",
+    "alt": "笑到打滚",
+    "sha256": "6dc164b225a4688da15a6642c366e9eb536a0bfb5fe5a475a75c94d2fe14eba5"
+  },
+  "notoCry": {
+    "codepoint": "1f62d",
+    "alt": "大哭",
+    "sha256": "13a7a4b7e6d920b83f899ca64312bed80280507e93c04bd6e2361764db975a50"
+  },
+  "notoThink": {
+    "codepoint": "1f914",
+    "alt": "想一想",
+    "sha256": "4f8cbd8d563d8bf16d4d7043c3e91afcfe514389bd7e81cc5624f6097aa2053c"
+  },
+  "notoEyeRoll": {
+    "codepoint": "1f644",
+    "alt": "翻白眼",
+    "sha256": "324bde5da39264d5cbd61308aae42174fb03081349333e0467e144402e94f1a1"
+  },
+  "notoEyes": {
+    "codepoint": "1f440",
+    "alt": "探头围观",
+    "sha256": "44da2fbd6e9ec1dee07808fef5216fb8393d78155c7f104be99525215961e07e"
+  },
+  "notoMelt": {
+    "codepoint": "1fae0",
+    "alt": "当场融化",
+    "sha256": "b641677314fcb258d2114fb84d32c6b5a92a2db984d40c5ab439927cb16126b6"
+  },
+  "notoSurprised": {
+    "codepoint": "1f62e",
+    "alt": "惊呆",
+    "sha256": "ef22fc1e1f4508a0bb2f5a889fe03d1da5fc528d3d63136e31bf29149c4426b5"
+  },
+  "notoLoveFace": {
+    "codepoint": "1f970",
+    "alt": "喜欢",
+    "sha256": "7734ab5ea4f0f8169df1f9d0faa00983d1d535b9d73b8d4243250531ea9ed898"
+  },
+  "notoParty": {
+    "codepoint": "1f389",
+    "alt": "撒花庆祝",
+    "sha256": "aeff875df341bb7136fa4c84538000a3d4aea8a6dd16245ee8fa1c8bbfeb6ddc"
+  },
+  "notoHooray": {
+    "codepoint": "1f64c",
+    "alt": "好耶",
+    "sha256": "51accc877dc32ac4ecfbb5745b89afdf1f610c7e23c4fb292f4bea3dd603fa44"
+  },
+  "notoClap": {
+    "codepoint": "1f44f",
+    "alt": "鼓掌",
+    "sha256": "424f978963357da085a444e1b659028a5f7ccd927d72158ef5c97c82d3ddfd20"
+  },
+  "notoThumb": {
+    "codepoint": "1f44d",
+    "alt": "给你点赞",
+    "sha256": "f456f329ec2457828e0511f31b855e1b3b21c91f53d7d465dc3a1aa7d3b73383"
+  },
+  "notoThanks": {
+    "codepoint": "1f64f",
+    "alt": "拜托了",
+    "sha256": "648eb5ee603e776d4452ea78f2a89b7b08c3f4110d4afa7ed3954622a1499a68"
+  },
+  "notoWave": {
+    "codepoint": "1f44b",
+    "alt": "挥手打招呼",
+    "sha256": "2209749c084f37f914e7878346b1285896f4ce9d1a3f5294db93779c00186fa9"
+  },
+  "notoHandshake": {
+    "codepoint": "1f91d",
+    "alt": "握手",
+    "sha256": "400eb5356ebec89f85ddf6e955bfa6ad56103cdda2282c9e02f0160285545c0b"
+  },
+  "notoHug": {
+    "codepoint": "1f917",
+    "alt": "抱抱",
+    "sha256": "a8807ffe440c7f9b13095256079cad2ff12e92caad4a203d49b3199987e54628"
+  },
+  "notoHeart": {
+    "codepoint": "2764",
+    "alt": "比心",
+    "sha256": "8f02722ca349a1b1a0c7a02d7ec3c716e09eccdbf696adf89c67afe2bb175b56"
+  },
+  "notoSleep": {
+    "codepoint": "1f634",
+    "alt": "睡着了",
+    "sha256": "ca41f50126de30ef67ae2df42f17ae3fd2ffd7deb7b1bba6d2e4141b1ff2ce3f"
+  },
+  "notoCool": {
+    "codepoint": "1f60e",
+    "alt": "戴上墨镜",
+    "sha256": "16e9f241e5471c77bd94b3ff1fbdfd4a37e2056d6485256db41729165b57e66f"
+  },
+  "notoDoubt": {
+    "codepoint": "1f928",
+    "alt": "扬眉问号",
+    "sha256": "bde15a8e6f4b9d71996c8cc5b6fcc67c5bc3ef971231a74bf613d9b291dba9b5"
+  },
+  "notoBlush": {
+    "codepoint": "1f633",
+    "alt": "不好意思",
+    "sha256": "2a7cda4b552157ddf99152c64583afb844c3883994fde0d8e0d3ba09c4b0e4ea"
+  },
+  "notoWink": {
+    "codepoint": "1f609",
+    "alt": "眨眼",
+    "sha256": "ab2dfbceeae29a7a1b6ff0bb2cfb9d2abb779b0b3dbb428907ecdf7532b383fb"
+  },
+  "notoOk": {
+    "codepoint": "1f44c",
+    "alt": "没问题",
+    "sha256": "6a47bdee96c2a11af32d6a4eed5c6528292aa64e6333fb204b7112939ec6c8fd"
+  }
+}
