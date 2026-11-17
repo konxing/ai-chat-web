@@ -13,6 +13,7 @@
 - **AI 对话**：全局/个人 OpenAI 兼容模型，按聊天切换模型，SSE 流式输出，Markdown/代码复制/KaTeX 数学公式，图片、PDF、DOCX、TXT/MD/CSV 与语音输入，长文档分块检索，历史保存/重命名/删除。
 - **DeepSeek 联网**：官方 `deepseek-flash` 可在输入框旁为当前消息启用「联网搜索」或「读取公开链接」。由 DeepSeek 执行工具和计费，普通聊天默认关闭。
 - **个人表情包**：在「设置 → 表情包」导入已保存的图片或动图。AI 根据标签选择合适的表情，原图保存在当前账户的私有图库。
+- **分条回复与表情连发**：在「管理后台 → 对话智能」单独启用。AI 会判断长回复是否适合分成最多三条，在接梗或庆祝时也能偶尔连发两三张表情。内置图库有 200 张可选；开关默认关闭。
 - **内置动图**：项目随附 24 张 Google Noto 表情动图，AI 可以直接选择使用。[素材来源和授权](public/stickers/noto/ATTRIBUTION.md)
 - **加密**：ChaCha20-Poly1305（v2，带 AAD；旧 v1 AES-GCM 仅保留解密）、SHA-256 完整性、随机 nonce、主密钥 keyring 与在线轮换、加密备份（scrypt + ChaCha20-Poly1305）、上传文件 `FAC2` 加密容器。
 - **安全边界**：SameSite/HttpOnly/Secure Cookie、CSRF 双提交、CSP nonce、SSRF 防护（DNS 固定、私网阻断、禁跳转）、上传魔数检测、路径/文件名清洗、限速、审计脱敏。

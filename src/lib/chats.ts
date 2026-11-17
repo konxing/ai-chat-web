@@ -23,9 +23,10 @@ import type { AiMessage, ChatContentPart } from './ai';
 import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager';
 import { ensureCognitiveModules } from './cognitive/memory-module';
 import { buildConversationIntelligence } from './cognitive/conversation/core/conversation-engine';
-import { conversationLayerEnabled, conversationEngineVersionFor } from './cognitive/cognitive-flags';
+import { conversationLayerEnabled, conversationEngineVersionFor, splitDialogueRepliesEnabled } from './cognitive/cognitive-flags';
 import { getCognitivePreferences } from './cognitive/preferences';
 import { isTimeRelevant, timeContextLine } from './time-context';
+import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS } from './reply-presentation';
 
 export interface ChatSummary {
   id: string;
@@ -47,6 +48,8 @@ export interface ChatMessageDto {
   inputTokens: number | null;
   outputTokens: number | null;
   sticker?: ChatSticker;
+  stickers?: ChatSticker[];
+  segments?: string[];
   attachments: PublicAttachment[];
   createdAt: string;
 }
@@ -86,17 +89,37 @@ export function decryptMessage(message: Pick<Message, 'id' | 'contentCiphertext'
 export function publicMessage(
   message: Message & { attachments?: AttachmentSummary[] }
 ): ChatMessageDto {
+  const content = decryptMessage(message);
+  const presentation = message.role === 'ASSISTANT' ? readReplyPresentation(message.replyPresentation) : {};
+  const offsets = (presentation.segmentOffsets ?? []).filter((offset) => offset < content.length);
+  const segments = offsets.length
+    ? [0, ...offsets].map((offset, index) => content.slice(offset, offsets[index]).trim()).filter(Boolean)
+    : [];
   return {
     id: message.id,
     role: message.role,
-    content: decryptMessage(message),
+    content,
     modelId: message.modelId,
     status: message.status,
     inputTokens: message.inputTokens,
     outputTokens: message.outputTokens,
     ...(message.role === 'ASSISTANT' && isChatSticker(message.sticker) ? { sticker: message.sticker } : {}),
+    ...(presentation.stickers?.length ? { stickers: presentation.stickers } : {}),
+    ...(segments.length > 1 ? { segments } : {}),
     attachments: (message.attachments || []).map(publicAttachment),
     createdAt: message.createdAt.toISOString()
+  };
+}
+
+function readReplyPresentation(value: unknown): { segmentOffsets?: number[]; stickers?: ChatSticker[] } {
+  if (!value || typeof value !== 'object') return {};
+  const { segmentOffsets, stickers } = value as { segmentOffsets?: unknown; stickers?: unknown };
+  const validStickers = Array.isArray(stickers) ? [...new Set(stickers.filter(isChatSticker))].slice(0, MAX_REPLY_STICKERS) : [];
+  return {
+    segmentOffsets: Array.isArray(segmentOffsets) ? [...new Set(segmentOffsets
+      .filter((offset): offset is number => typeof offset === 'number' && Number.isSafeInteger(offset) && offset > 0)
+      .slice(0, MAX_REPLY_SEGMENTS - 1))].sort((first, second) => first - second) : undefined,
+    stickers: validStickers.length ? validStickers : undefined
   };
 }
 
@@ -366,6 +389,8 @@ export async function saveAssistantMessage(input: {
   outputTokens?: number;
   errorCode?: string;
   sticker?: ChatSticker;
+  stickers?: ChatSticker[];
+  segmentOffsets?: number[];
 }): Promise<Message> {
   const id = randomUUID();
   return prisma.message.create({
@@ -380,6 +405,12 @@ export async function saveAssistantMessage(input: {
       errorCode: input.errorCode?.slice(0, 64) ?? null,
       inputTokens: input.inputTokens ?? null,
       outputTokens: input.outputTokens ?? null,
+      ...(input.stickers?.length || input.segmentOffsets?.length ? {
+        replyPresentation: {
+          ...(input.stickers?.length ? { stickers: input.stickers } : {}),
+          ...(input.segmentOffsets?.length ? { segmentOffsets: input.segmentOffsets } : {})
+        }
+      } : {}),
       ...(input.status === 'COMPLETE' && input.sticker ? { sticker: input.sticker } : {})
     }
   });
@@ -398,6 +429,7 @@ export interface ConversationContext {
   cognitiveFailed: CognitiveModuleKey[];
   stickerInCooldown: boolean;
   personalStickerChoices: PersonalStickerDto[];
+  expressive: boolean;
 }
 
 export async function buildConversation(input: {
@@ -419,13 +451,28 @@ export async function buildConversation(input: {
   // 送给模型的上下文停在会话开头，还要多搬 20 条密文。
   // ERROR 行在库里就排除：那是失败时留下的文案，既不该占窗口名额，也不该被
   // 当成上一轮回答喂回模型。PARTIAL 是真实生成过的内容，保留。
-  const [historical, personalStickerChoices] = await Promise.all([
+  ensureCognitiveModules();
+  const capabilities = capabilitiesOf(input.provider);
+  const images = input.attachments.filter((a) => a.kind === 'IMAGE');
+  const files = input.attachments.filter((a) => a.kind === 'FILE');
+  if (images.length && !capabilities.includes('vision')) {
+    throw new ApiError(400, 'MODEL_NO_VISION', '当前模型不支持图片输入，请切换支持视觉的模型');
+  }
+  if (files.length && !capabilities.includes('files')) {
+    throw new ApiError(400, 'MODEL_NO_FILES', '当前模型未启用文件理解能力，请切换模型或移除文件');
+  }
+  const [historical, personalStickerChoices, layerEnabled, style, cognitive, expressive, urls] = await Promise.all([
     prisma.message.findMany({
       where: { chatId: chat.id, status: { not: 'ERROR' } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: CONTEXT_MESSAGE_LIMIT
     }),
-    listPersonalStickers(input.userId, true).catch(() => [])
+    listPersonalStickers(input.userId, true).catch(() => []),
+    conversationLayerEnabled().catch(() => false),
+    getConversationStyle(input.userId).catch(() => undefined),
+    runCognitiveReads({ userId: input.userId, chatId: chat.id, content: input.currentContent }),
+    splitDialogueRepliesEnabled().catch(() => false),
+    images.length ? imageDataUrls(images) : []
   ]);
   const stickerInCooldown = historical.filter((message) => message.role === 'ASSISTANT')
     .slice(0, 12).some((message) => isChatSticker(message.sticker));
@@ -439,7 +486,7 @@ export async function buildConversation(input: {
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
         '不要声称自己看到了未提供的图片或文件。' +
         '用户纠正你时，用新信息继续回答。追问直接承接前文，只讲这次的新内容。闲聊时从确实说过的细节接话，别补写没说过的经过；只是分享时，一两句话接住也可以。' +
-        '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices)
+        '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices, input.currentContent, expressive)
     }
   ];
 
@@ -460,20 +507,6 @@ export async function buildConversation(input: {
 
   // 认知块排在历史之前：它是「关于这位用户的资料」，不是某一轮的发言。
   // 模块内部有截止时间和错误隔离，认知读不出来就等于这段没加上，对话照旧。
-  ensureCognitiveModules();
-
-  // 对话智能层（Phase 1）：全局交流原则 + 用户风格 + 生效提示词版本。
-  // 默认关（保住现有聊天契约）；打开后才注入，排在 base system 之后、认知块之前。
-  // 读失败回落默认，不阻断对话。默认不增加模型调用。
-  const [layerEnabled, style, cognitive] = await Promise.all([
-    conversationLayerEnabled().catch(() => false),
-    getConversationStyle(input.userId).catch(() => undefined),
-    runCognitiveReads({
-      userId: input.userId,
-      chatId: chat.id,
-      content: input.currentContent
-    })
-  ]);
   try {
     if (layerEnabled) {
       const intelligence = await buildConversationIntelligence({
@@ -511,10 +544,10 @@ export async function buildConversation(input: {
   for (const message of historical) {
     if (message.role === 'SYSTEM' || message.id === input.currentMessageId) continue;
     const text = decryptMessage(message);
-    const id = message.sticker;
-    const label = message.role === 'ASSISTANT' && message.status === 'COMPLETE' && isChatSticker(id)
-      ? isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情'
-      : null;
+    const ids = message.role === 'ASSISTANT' && message.status === 'COMPLETE'
+      ? readReplyPresentation(message.replyPresentation).stickers ?? [message.sticker].filter(isChatSticker)
+      : [];
+    const label = ids.map((id) => isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情').join('、');
     const sticker = label ? `（历史配图：${label}）` : '';
     const content = sticker && text ? `${text}\n\n${sticker}` : sticker || text;
     if (content.length > charBudget) {
@@ -532,15 +565,6 @@ export async function buildConversation(input: {
   }
   messages.push(...history.reverse());
 
-  const capabilities = capabilitiesOf(input.provider);
-  const images = input.attachments.filter((a) => a.kind === 'IMAGE');
-  const files = input.attachments.filter((a) => a.kind === 'FILE');
-  if (images.length && !capabilities.includes('vision')) {
-    throw new ApiError(400, 'MODEL_NO_VISION', '当前模型不支持图片输入，请切换支持视觉的模型');
-  }
-  if (files.length && !capabilities.includes('files')) {
-    throw new ApiError(400, 'MODEL_NO_FILES', '当前模型未启用文件理解能力，请切换模型或移除文件');
-  }
 
   let attachmentBlock = '';
   if (files.length) {
@@ -551,10 +575,7 @@ export async function buildConversation(input: {
     : input.currentContent;
 
   const parts: ChatContentPart[] = [{ type: 'text', text: currentText || '（用户上传了附件）' }];
-  if (images.length) {
-    const urls = await imageDataUrls(images);
-    for (const url of urls) parts.push({ type: 'image_url', image_url: { url } });
-  }
+  for (const url of urls) parts.push({ type: 'image_url', image_url: { url } });
 
   const last = messages[messages.length - 1];
   if (!input.currentMessageId && last && last.role === 'user' && last.content === input.currentContent) {
@@ -564,7 +585,7 @@ export async function buildConversation(input: {
   }
   // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
   // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
-  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown, personalStickerChoices };
+  return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown, personalStickerChoices, expressive };
 }
 
 export async function listAttachmentLibrary(userId: string): Promise<PublicAttachment[]> {

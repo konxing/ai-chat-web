@@ -45,6 +45,8 @@ const ctx = vi.hoisted(() => ({
   releaseTask: null as null | (() => void),
   modelCalls: 0,
   replyChunks: ['正常回答'],
+  expressive: false,
+  historical: [] as Array<Record<string, any>>,
   abortRequest: null as null | (() => void),
   sawAbortedSignal: null as null | boolean
 }));
@@ -187,7 +189,7 @@ vi.mock('@/lib/prisma', async () => {
         createdAt: new Date('2026-01-01T00:01:00.000Z')
       });
     },
-    findMany: () => Promise.resolve([])
+    findMany: () => Promise.resolve(ctx.historical)
   };
   const chatDelegate = {
     findFirst: () => Promise.resolve(chatRow()),
@@ -202,6 +204,11 @@ vi.mock('@/lib/prisma', async () => {
 
   return {
     prisma: {
+      systemConfig: {
+        findUnique: ({ where }: { where: { key: string } }) => Promise.resolve(
+          where.key === 'splitDialogueReplies' ? { value: ctx.expressive } : null
+        )
+      },
       message: messageDelegate,
       chat: chatDelegate,
       attachment: { findMany: () => Promise.resolve([]), updateMany: () => Promise.resolve({ count: 0 }) },
@@ -342,6 +349,8 @@ beforeEach(() => {
   ctx.releaseTask = null;
   ctx.modelCalls = 0;
   ctx.replyChunks = ['正常回答'];
+  ctx.expressive = false;
+  ctx.historical = [];
   ctx.abortRequest = null;
   ctx.sawAbortedSignal = null;
   resetCognitiveTables();
@@ -520,6 +529,44 @@ it('attaches the model’s chosen sticker even when the user never asks for one'
   expect(assistantRows()[0]?.sticker).toBe('celebrate6');
   expect(ctx.outbound[0]).toContainEqual({ role: 'user', content: [{ type: 'text', text: content }] });
   expect(ctx.outbound[0]?.some((message) => typeof message.content === 'string' && message.content.includes('AI Chat 可以随回复发送本地表情包'))).toBe(true);
+});
+
+it('streams up to three bubbles and persists the images and breaks of one model reply', async () => {
+  ctx.expressive = true;
+  ctx.replyChunks = [
+    '第一条。\n[[MESS', 'AGE_BREAK]]\n', '第二条。\n[[MESSAGE_BREAK]]\n',
+    '第三条。\n[[MESSAGE_BREAK]]\n再补一句。\n[[STICKER:auto:wave,hug,laugh3]]'
+  ];
+  const { text } = await post();
+  const events = text.split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)));
+  expect(events.filter((event) => event.type === 'segment')).toHaveLength(2);
+  expect(events.filter((event) => event.type === 'delta' || event.type === 'segment').map((event) => event.text ?? '|').join(''))
+    .toBe('第一条。|\n第二条。|\n第三条。\n\n再补一句。\n');
+  expect(events.find((event) => event.type === 'done')?.message).toMatchObject({
+    segments: ['第一条。', '第二条。', '第三条。\n\n再补一句。'],
+    sticker: 'wave',
+    stickers: ['wave', 'hug', 'laugh3']
+  });
+  expect(assistantRows()).toHaveLength(1);
+  expect(assistantRows()[0]?.replyPresentation).toMatchObject({ stickers: ['wave', 'hug', 'laugh3'] });
+  expect(ctx.modelCalls).toBe(1);
+
+  // 关闭开关后，历史里的配图依然能让模型看到；设置只影响之后的回复。
+  ctx.historical = [{ ...assistantRows()[0], createdAt: new Date() }];
+  ctx.expressive = false;
+  ctx.replyChunks = ['收到。'];
+  await post();
+  expect(ctx.outbound[1]?.find((message) => message.role === 'assistant')?.content)
+    .toContain('（历史配图：打招呼、抱抱、');
+});
+
+it('keeps reply bubbles and sticker bursts disabled independently of model output', async () => {
+  ctx.replyChunks = ['前一段。\n[[MESSAGE_BREAK]]\n后一段。\n[[STICKER:auto:wave,hug]]'];
+  const { text } = await post();
+  expect(text).not.toMatch(/MESSAGE_BREAK|\"type\":\"segment\"|\"stickers\"|\"segments\"/);
+  expect(assistantRows()[0]?.replyPresentation).toBeUndefined();
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never).trim()).toBe('前一段。\n\n后一段。');
 });
 
 /**

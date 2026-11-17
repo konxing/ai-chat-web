@@ -1,4 +1,4 @@
-import { getRawSystemSetting } from '@/lib/config';
+import { getRawSystemSetting, getSystemSetting } from '@/lib/config';
 
 /**
  * 认知层实验功能的合并开关（后台「系统配置」两个开关，环境变量兜底）。
@@ -51,6 +51,10 @@ export function sourceDiveEnabled(): Promise<boolean> {
 /** 对话智能层总开关：默认关，保住现有聊天契约；后台/ env 打开后才注入交流原则块。 */
 export function conversationLayerEnabled(): Promise<boolean> {
   return bundleOrEnv('conversationLayerEnabled', 'COGNITIVE_CONVERSATION_LAYER', false);
+}
+
+export function splitDialogueRepliesEnabled(): Promise<boolean> {
+  return getSystemSetting('splitDialogueReplies').catch(() => false);
 }
 
 /**

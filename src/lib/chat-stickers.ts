@@ -1,9 +1,17 @@
 import notoStickerSources from './noto-stickers.json';
+import reactionSources from './noto-reactions.json';
 
 type NotoSticker = keyof typeof notoStickerSources;
 export const NOTO_STICKERS = Object.fromEntries(Object.entries(notoStickerSources).map(([id, { alt }]) => [
   id, { src: `/stickers/noto/${id}.webp`, posterSrc: `/stickers/noto/${id}-still.webp`, alt }
 ])) as Record<NotoSticker, { src: string; posterSrc: string; alt: string }>;
+
+type NotoReaction = keyof typeof reactionSources;
+const REACTION_STICKERS = {} as Record<NotoReaction, { src: string; alt: string; tags: readonly string[] }>;
+for (const id of Object.keys(reactionSources) as NotoReaction[]) {
+  const { alt, tags } = reactionSources[id];
+  REACTION_STICKERS[id] = { src: `/stickers/reactions/${id}.webp`, alt, tags };
+}
 
 export const CHAT_STICKERS = {
   celebrate: { src: '/stickers/celebrate.png', alt: '庆祝一下' },
@@ -66,7 +74,8 @@ export const CHAT_STICKERS = {
   wave10: { src: '/stickers/wave10.png', alt: '给你递咖啡' },
   wave11: { src: '/stickers/wave11.png', alt: '来块饼干' },
   wave12: { src: '/stickers/wave12.png', alt: '猫猫探头' },
-  ...NOTO_STICKERS
+  ...NOTO_STICKERS,
+  ...REACTION_STICKERS
 } as const;
 
 export type BuiltInSticker = keyof typeof CHAT_STICKERS;

@@ -60,6 +60,7 @@ import type { MemoryDto } from '@/lib/cognitive/memories';
 import type { ConfidenceBand } from '@/lib/cognitive/confidence';
 import { cn } from '@/lib/cn';
 import { chatStickerImage, type ChatSticker } from '@/lib/chat-stickers';
+import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS } from '@/lib/reply-presentation';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
 import { Modal, Spinner } from '@/components/ui';
@@ -123,6 +124,7 @@ const SUGGESTIONS = [
 ];
 
 const SIDEBAR_COLLAPSED_KEY = 'family-ai.sidebar-collapsed';
+const NO_STREAM_SEGMENTS: readonly string[] = [];
 const MAX_FILES_PER_MESSAGE = 15;
 // 服务端同时只解密一个上传、最多再排两个人，客户端并发 3 刚好填满这条队而不撞 429。
 const UPLOAD_CONCURRENCY = 3;
@@ -156,7 +158,8 @@ export function ChatWorkspace({
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const [webTool, setWebTool] = useState<DeepSeekWebPreference>(DEFAULT_DEEPSEEK_WEB_PREFERENCE);
-  const [streamText, setStreamText] = useState('');
+  const [streamSegments, setStreamSegments] = useState(NO_STREAM_SEGMENTS);
+  const [newStickerReply, setNewStickerReply] = useState<string | null>(null);
   const [streamError, setStreamError] = useState('');
   const [localProviderId, setLocalProviderId] = useState<string>(
     initialChat?.providerId ?? providers.find((p) => p.isDefault)?.id ?? providers[0]?.id ?? ''
@@ -317,7 +320,7 @@ export function ChatWorkspace({
       scrollFrameRef.current = null;
       if (stickRef.current) scrollToBottom();
     });
-  }, [chat?.id, chat?.messages.length, streamText, optimisticUser?.id, scrollToBottom]);
+  }, [chat?.id, chat?.messages.length, streamSegments, optimisticUser?.id, scrollToBottom]);
 
   useEffect(() => {
     return () => {
@@ -396,7 +399,8 @@ export function ChatWorkspace({
       activeIdRef.current = id;
       setSidebarOpen(false);
       setAccountOpen(false);
-      setStreamText('');
+      setStreamSegments(NO_STREAM_SEGMENTS);
+      setNewStickerReply(null);
       setStreamError('');
       setOptimisticUser(null);
       setPending([]);
@@ -429,7 +433,8 @@ export function ChatWorkspace({
       Object.entries(previous).filter(([key]) => !key.startsWith('draft:'))
     ));
     setOptimisticUser(null);
-    setStreamText('');
+    setStreamSegments(NO_STREAM_SEGMENTS);
+    setNewStickerReply(null);
     setStreamError('');
     setPending([]);
     setDraft('');
@@ -455,17 +460,18 @@ export function ChatWorkspace({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [toggleSidebar, startNewChat, accountOpen]);
 
-  const ensureChat = useCallback(async (): Promise<string | null> => {
+  const ensureChat = useCallback(async (signal?: AbortSignal): Promise<string | null> => {
     if (activeIdRef.current !== chatIdRef.current) return null;
     if (chatIdRef.current) return chatIdRef.current;
     const navigation = navigationRef.current;
     try {
       const data = await apiFetch<{ chat: ChatSummaryDto }>('/api/chats', {
-        json: selectedProviderId ? { providerId: selectedProviderId } : {}
+        json: selectedProviderId ? { providerId: selectedProviderId } : {},
+        signal
       });
       const created = data.chat;
       setChats((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
-      if (navigationRef.current !== navigation) return null;
+      if (navigationRef.current !== navigation || signal?.aborted) return null;
       activeIdRef.current = created.id;
       chatIdRef.current = created.id;
       if (draftWebTool.current !== DEFAULT_DEEPSEEK_WEB_PREFERENCE) saveWebTool(created.id, draftWebTool.current);
@@ -488,7 +494,7 @@ export function ChatWorkspace({
       window.history.replaceState(null, '', `/chat/${created.id}`);
       return created.id;
     } catch (err) {
-      if (navigationRef.current === navigation) setNotice(errorMessage(err));
+      if (navigationRef.current === navigation && !signal?.aborted) setNotice(errorMessage(err));
       return null;
     }
   }, [selectedProviderId, reasoningEffort, saveWebTool]);
@@ -586,10 +592,16 @@ export function ChatWorkspace({
     setStreamError('');
     setNotice('');
     composerBusyRef.current = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setSending(true);
+    setStreamSegments(NO_STREAM_SEGMENTS);
     const navigation = navigationRef.current;
-    const chatId = await ensureChat();
-    if (!chatId || navigationRef.current !== navigation) {
+    const chatId = await ensureChat(controller.signal);
+    if (!chatId || navigationRef.current !== navigation || controller.signal.aborted) {
+      abortRef.current = null;
       composerBusyRef.current = false;
+      setSending(false);
       return;
     }
     const attachments = pending;
@@ -619,10 +631,6 @@ export function ChatWorkspace({
     }
     setDraft('');
     setPending([]);
-    setSending(true);
-    setStreamText('');
-    const controller = new AbortController();
-    abortRef.current = controller;
     let applied = false;
     let lastPaint = 0;
     try {
@@ -664,7 +672,9 @@ export function ChatWorkspace({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let accumulated = '';
+      const accumulated = [''];
+      let segmentIndex = 0;
+      const paintReply = () => setStreamSegments(accumulated.filter((segment) => segment.trim()));
       let finished = false;
       while (true) {
         const { value, done } = await reader.read();
@@ -701,13 +711,18 @@ export function ChatWorkspace({
               continue;
             }
             if (event.type === 'delta' && event.text) {
-              accumulated += event.text;
+              accumulated[segmentIndex] += event.text;
               // 每个 token 都 setState 会重渲染整棵消息树；80ms 合并一次，肉眼仍是连续出字。
               const now = Date.now();
               if (now - lastPaint >= 80) {
                 lastPaint = now;
-                setStreamText(accumulated);
+                paintReply();
               }
+            } else if (event.type === 'segment' && accumulated[segmentIndex].trim() && accumulated.length < MAX_REPLY_SEGMENTS) {
+              accumulated.push('');
+              segmentIndex++;
+              lastPaint = 0;
+              paintReply();
             } else if (event.type === 'error') {
               setStreamError(event.error?.message || '模型调用失败，请稍后重试');
             } else if (event.type === 'partial') {
@@ -720,6 +735,7 @@ export function ChatWorkspace({
               if (savedAssistant && savedUser) {
                 // 服务端已经把落库后的两条消息发过来，直接接上，省掉结尾那两次刷新。
                 applied = true;
+                if ((savedAssistant.stickers?.length ?? 0) > 1) setNewStickerReply(savedAssistant.id);
                 const providerId = event.providerId;
                 const providerName = event.providerName;
                 const modelId = event.modelId;
@@ -738,7 +754,7 @@ export function ChatWorkspace({
                 );
                 setOptimisticUser(null);
                 setEditingId(null);
-                setStreamText('');
+                setStreamSegments(NO_STREAM_SEGMENTS);
                 const ids = event.memoryIds ?? [];
                 if (ids.length > 0) {
                   // 只留 id，不留正文：正文得在点开那一刻从当前记忆列表现取，缓存旧快照会把
@@ -758,8 +774,9 @@ export function ChatWorkspace({
         }
       }
       if (navigationRef.current !== navigation) return;
-      if (accumulated && !applied) setStreamText(accumulated);
-      if (!finished && accumulated && !controller.signal.aborted) {
+      const receivedText = accumulated.some((segment) => segment.trim());
+      if (receivedText && !applied) paintReply();
+      if (!finished && receivedText && !controller.signal.aborted) {
         setStreamError('连接意外结束，已保存已生成的内容');
       }
     } catch (err) {
@@ -773,7 +790,7 @@ export function ChatWorkspace({
       }
       if (!applied) await refreshChat(chatId);
       void refreshChats();
-      if (navigationRef.current === navigation) setStreamText('');
+      if (navigationRef.current === navigation) setStreamSegments(NO_STREAM_SEGMENTS);
       composerBusyRef.current = false;
       setSending(false);
     }
@@ -1040,7 +1057,7 @@ export function ChatWorkspace({
   }, [draft]);
 
   const messages = chat?.messages ?? [];
-  const hasMessages = messages.length > 0 || Boolean(optimisticUser) || Boolean(streamText);
+  const hasMessages = messages.length > 0 || Boolean(optimisticUser) || streamSegments.length > 0;
 
   return (
     <div className="chat-surface flex h-dvh overflow-hidden">
@@ -1329,6 +1346,7 @@ export function ChatWorkspace({
                     <MessageBubble
                       key={message.id}
                       message={message}
+                      animateStickers={newStickerReply === message.id}
                       citationIds={citations[message.id]}
                       getCitationSource={getCitationSource}
                       onEdit={message.role === 'USER' ? beginEdit : undefined}
@@ -1338,7 +1356,7 @@ export function ChatWorkspace({
                 {optimisticUser ? (
                   <MessageBubble message={optimisticUser} optimistic getCitationSource={getCitationSource} />
                 ) : null}
-                {sending || streamText ? (
+                {sending || streamSegments.length > 0 ? (
                   <div className="chat-turn-enter flex gap-3">
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-aurora-400/15 bg-aurora-400/10">
                       <Bot className="h-3.5 w-3.5 text-aurora-300" />
@@ -1347,8 +1365,8 @@ export function ChatWorkspace({
                       <div className="mb-1.5 flex items-center gap-2 text-xs text-slate-300">
                         <span>{selectedProvider?.name ?? 'AI'}</span>
                       </div>
-                      {streamText ? (
-                        <Markdown>{streamText}</Markdown>
+                      {streamSegments.length > 0 ? (
+                        <ReplyText segments={streamSegments} />
                       ) : (
                         <div role="status" className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.035] px-2.5 py-1.5 text-xs text-slate-300">
                           <span aria-hidden="true" className="flex items-center gap-1">
@@ -1594,12 +1612,14 @@ export function ChatWorkspace({
 const MessageBubble = memo(function MessageBubble({
   message,
   optimistic,
+  animateStickers,
   citationIds,
   getCitationSource,
   onEdit
 }: {
   message: ChatMessageDto;
   optimistic?: boolean;
+  animateStickers?: boolean;
   citationIds?: string[];
   getCitationSource: () => Promise<CitationSource>;
   onEdit?: (message: ChatMessageDto) => void;
@@ -1700,8 +1720,8 @@ const MessageBubble = memo(function MessageBubble({
             {copied ? <Check className="h-3 w-3 text-aurora-300" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
-        <Markdown>{message.content}</Markdown>
-        {message.sticker ? <MessageSticker key={message.sticker} id={message.sticker} /> : null}
+        <ReplyText segments={message.segments ?? [message.content]} />
+        <ReplyStickers stickers={message.stickers ?? (message.sticker ? [message.sticker] : [])} animate={animateStickers} />
         {citationIds?.length ? <CitationNote ids={citationIds} getSource={getCitationSource} /> : null}
         {(message.inputTokens || message.outputTokens) && (
           <div className="mt-2 text-[10px] text-white/15">
@@ -1712,6 +1732,37 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+function ReplyText({ segments }: { segments: readonly string[] }) {
+  if (segments.length < 2) return segments[0] ? <Markdown>{segments[0]}</Markdown> : null;
+
+  return (
+    <div className="flex min-w-0 flex-col items-start gap-2">
+      {segments.map((segment, index) => (
+        <div
+          key={index}
+          className="max-w-full rounded-2xl rounded-tl-md border border-white/10 bg-[#17212d] px-3.5 py-2.5 sm:px-4"
+        >
+          <Markdown>{segment}</Markdown>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ReplyStickers({ stickers, animate }: { stickers: readonly ChatSticker[]; animate?: boolean }) {
+  if (stickers.length < 2) return stickers[0] ? <MessageSticker id={stickers[0]} /> : null;
+
+  return (
+    <ul aria-label="回复表情包" className="flex flex-wrap items-start gap-2">
+      {stickers.slice(0, MAX_REPLY_STICKERS).map((id, index) => (
+        <li key={`${id}:${index}`} className={animate ? 'chat-turn-enter' : undefined} style={animate ? { animationDelay: `${index * 120}ms` } : undefined}>
+          <MessageSticker id={id} />
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function MessageSticker({ id }: { id: ChatSticker }) {
   const [imageFailed, setImageFailed] = useState(false);

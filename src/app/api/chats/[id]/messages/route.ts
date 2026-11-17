@@ -25,6 +25,7 @@ import { streamChatCompletion } from '@/lib/ai';
 import { supportsDeepSeekWeb } from '@/lib/deepseek-web';
 import { getReasoningOptions } from '@/lib/provider-reasoning';
 import { StickerReply } from '@/lib/sticker-reply';
+import { DialogueReplyText } from '@/lib/dialogue-reply';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
 import { recordMemoryAccess } from '@/lib/cognitive/access';
@@ -134,7 +135,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
       modelId: provider.modelId
     });
   }
-  const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown, personalStickerChoices } = await buildConversation({
+  const { messages, citedMemoryIds, cognitiveFailed, stickerInCooldown, personalStickerChoices, expressive } = await buildConversation({
     chatId,
     userId: user.id,
     currentMessageId: userMessage.id,
@@ -157,8 +158,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      let content = '';
-      const stickerReply = new StickerReply(stickerInCooldown, personalStickerChoices);
+      const stickerReply = new StickerReply(stickerInCooldown, personalStickerChoices, expressive);
       let inputTokens: number | undefined;
       let outputTokens: number | undefined;
       let webCitations: string[] = [];
@@ -188,11 +188,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           /* 已关闭或已取消 */
         }
       };
-      const sendText = (text: string) => {
-        if (!text) return;
-        content += text;
-        send({ type: 'delta', text });
-      };
+      const reply = new DialogueReplyText(expressive, send);
 
       try {
         for await (const event of streamChatCompletion({
@@ -202,7 +198,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           messages
         })) {
           if (event.type === 'delta' && event.text) {
-            sendText(stickerReply.push(event.text));
+            reply.push(stickerReply.push(event.text));
           } else if (event.type === 'citations' && event.citations) {
             webCitations = [...new Set([...webCitations, ...event.citations])].slice(0, 8);
           } else if (event.type === 'usage') {
@@ -214,18 +210,21 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           }
         }
 
-        const { text, sticker } = stickerReply.finish();
-        sendText(text);
-        if (content.trim() && webCitations.length) {
-          sendText(`\n\n**来源**\n${webCitations.map((url) => `- <${url}>`).join('\n')}`);
+        const { text, sticker, stickers } = stickerReply.finish();
+        reply.push(text);
+        reply.finish();
+        if (reply.content.trim() && webCitations.length) {
+          reply.append(`\n\n**来源**\n${webCitations.map((url) => `- <${url}>`).join('\n')}`);
         }
         const saved = await saveAssistantMessage({
           chatId,
-          content: content.trim() ? content : sticker ? '' : '（模型没有返回文本）',
+          content: reply.content.trim() ? reply.content : sticker ? '' : '（模型没有返回文本）',
           providerId: provider.id,
           modelId: provider.modelId,
           status: 'COMPLETE',
           sticker,
+          stickers,
+          segmentOffsets: reply.segmentOffsets,
           inputTokens,
           outputTokens
         });
@@ -267,10 +266,11 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         // 对话智能层 Phase 6：从用户这轮的明确表达反馈学习长期风格（仅 GLOBAL 持久化）。
         // 异步、不阻塞、失败静默；开关关着时一次都不跑。
         if (await conversationLayerEnabled().catch(() => false)) {
-          void learnConversationPreference(user.id, content).catch(() => undefined);
+          void learnConversationPreference(user.id, reply.content).catch(() => undefined);
         }
       } catch (err) {
-        sendText(stickerReply.finish().text);
+        reply.push(stickerReply.finish().text);
+        reply.finish();
         const message = err instanceof ApiError ? err.message : '模型调用失败，请稍后重试';
         const code = err instanceof ApiError ? err.code : 'AI_ERROR';
         log.warn('chat.stream_failed', {
@@ -282,16 +282,17 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         outcome = 'FAILURE';
         failureCode = code;
         try {
-          if (content) {
+          if (reply.content.trim()) {
             const saved = await saveAssistantMessage({
               chatId,
-              content,
+              content: reply.content,
               providerId: provider.id,
               modelId: provider.modelId,
               status: 'PARTIAL',
               inputTokens,
               outputTokens,
-              errorCode: code
+              errorCode: code,
+              segmentOffsets: reply.segmentOffsets
             });
             send({ type: 'partial', message: publicMessage(saved), error: { code, message } });
           } else {
@@ -328,7 +329,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           after: {
             providerId: provider.id,
             modelId: provider.modelId,
-            chars: content.length,
+            chars: reply.content.length,
             outcome,
             cognitiveFailed
           },

@@ -28,6 +28,8 @@ export interface ChatMessageDto {
   inputTokens: number | null;
   outputTokens: number | null;
   sticker?: import('./chat-stickers').ChatSticker;
+  stickers?: import('./chat-stickers').ChatSticker[];
+  segments?: string[];
   attachments: AttachmentDto[];
   createdAt: string;
 }

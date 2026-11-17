@@ -333,6 +333,7 @@ model Message {
   inputTokens       Int?
   outputTokens      Int?
   sticker           String?       @db.VarChar(40)
+  replyPresentation Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 

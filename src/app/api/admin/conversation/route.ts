@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { api, readJson, ApiError } from '@/lib/http';
 import { requireOwner, requireOwnerPassword } from '@/lib/auth';
-import { getSystemSettings, updateSystemSettings } from '@/lib/config';
+import { getSystemSettings, updateSystemSettings, type SystemSettings } from '@/lib/config';
 import {
   listPromptVersions,
   getActivePromptVersion,
@@ -13,6 +13,15 @@ import { DEFAULT_CONVERSATION_STYLE } from '@/lib/cognitive/conversation/core/co
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function conversationSettings(settings: SystemSettings) {
+  return {
+    enabled: settings.conversationLayerEnabled,
+    engineVersion: settings.conversationEngineVersion,
+    autoLearnStyle: settings.autoLearnStyle,
+    splitDialogueReplies: settings.splitDialogueReplies
+  };
+}
+
 /** OWNER 对话智能设置 + Prompt Inspector 数据。 */
 export async function GET(req: Request) {
   return api(async () => {
@@ -20,9 +29,7 @@ export async function GET(req: Request) {
     const settings = await getSystemSettings();
     const [versions, active] = await Promise.all([listPromptVersions(), getActivePromptVersion()]);
     return {
-      enabled: settings.conversationLayerEnabled,
-      engineVersion: settings.conversationEngineVersion,
-      autoLearnStyle: settings.autoLearnStyle,
+      ...conversationSettings(settings),
       defaultStyle: DEFAULT_CONVERSATION_STYLE,
       versions,
       activeVersion: active?.version ?? null
@@ -34,6 +41,7 @@ const patchSchema = z.object({
   enabled: z.boolean().optional(),
   engineVersion: z.enum(['legacy', 'dialogue-v2']).optional(),
   autoLearnStyle: z.boolean().optional(),
+  splitDialogueReplies: z.boolean().optional(),
   confirmPassword: z.string().min(1)
 });
 
@@ -42,12 +50,13 @@ export async function PATCH(req: Request) {
     const { user } = await requireOwner(req);
     const body = patchSchema.parse(await readJson(req));
     await requireOwnerPassword(user.id, body.confirmPassword);
-    const patch: { conversationLayerEnabled?: boolean; conversationEngineVersion?: 'legacy' | 'dialogue-v2'; autoLearnStyle?: boolean } = {};
+    const patch: Partial<SystemSettings> = {};
     if (body.enabled !== undefined) patch.conversationLayerEnabled = body.enabled;
     if (body.engineVersion !== undefined) patch.conversationEngineVersion = body.engineVersion;
     if (body.autoLearnStyle !== undefined) patch.autoLearnStyle = body.autoLearnStyle;
+    if (body.splitDialogueReplies !== undefined) patch.splitDialogueReplies = body.splitDialogueReplies;
     const settings = await updateSystemSettings(patch, user.id);
-    return { enabled: settings.conversationLayerEnabled, engineVersion: settings.conversationEngineVersion, autoLearnStyle: settings.autoLearnStyle };
+    return conversationSettings(settings);
   });
 }
 

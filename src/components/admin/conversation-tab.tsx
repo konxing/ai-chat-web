@@ -33,15 +33,22 @@ export function ConversationTab() {
   const [busy, setBusy] = useState(false);
   const [engineVersion, setEngineVersion] = useState<'legacy' | 'dialogue-v2'>('legacy');
   const [autoLearnStyle, setAutoLearnStyle] = useState(false);
+  const [splitDialogueReplies, setSplitDialogueReplies] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<{ enabled: boolean; engineVersion: 'legacy' | 'dialogue-v2'; autoLearnStyle: boolean; versions: PromptVersion[]; activeVersion: number | null }>(
-        '/api/admin/conversation'
-      );
+      const data = await apiFetch<{
+        enabled: boolean;
+        engineVersion: 'legacy' | 'dialogue-v2';
+        autoLearnStyle: boolean;
+        splitDialogueReplies: boolean;
+        versions: PromptVersion[];
+        activeVersion: number | null;
+      }>('/api/admin/conversation');
       setEnabled(data.enabled);
       setEngineVersion(data.engineVersion ?? 'legacy');
       setAutoLearnStyle(data.autoLearnStyle ?? false);
+      setSplitDialogueReplies(data.splitDialogueReplies ?? false);
       setVersions(data.versions);
       setActiveVersion(data.activeVersion);
     } catch (err) {
@@ -107,6 +114,24 @@ export function ConversationTab() {
     }
   }
 
+  async function toggleSplitDialogueReplies() {
+    const password = await requestPassword('修改分条回复与表情连发需要验证管理员身份。');
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ splitDialogueReplies: boolean }>('/api/admin/conversation', {
+        method: 'PATCH',
+        json: { splitDialogueReplies: !splitDialogueReplies, confirmPassword: password }
+      });
+      setSplitDialogueReplies(data.splitDialogueReplies);
+      push(data.splitDialogueReplies ? '已开启分条回复与表情连发' : '已关闭分条回复与表情连发');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addCandidate() {
     const password = await requestPassword('新增候选提示词需要验证管理员身份。');
     if (!password || !candidate.trim()) return;
@@ -165,6 +190,24 @@ export function ConversationTab() {
             checked={enabled}
             disabled={busy}
             onChange={() => void toggle()}
+          />
+        </label>
+        <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+          <div>
+            <div className="text-[13px] font-medium text-white/85">分条回复与表情连发</div>
+            <div id="admin-split-dialogue-replies-hint" className="mt-0.5 text-xs leading-relaxed text-white/60">
+              适用于所有用户。开启后，AI 会在适合的长回复里分几条发，接梗时可以连发两三张表情包。普通聊天仍以文字为主。
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="分条回复与表情连发"
+            aria-describedby="admin-split-dialogue-replies-hint"
+            className="relative mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition before:absolute before:left-0.5 before:top-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:bg-emerald-400/80 checked:before:translate-x-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aurora-400 disabled:opacity-50"
+            checked={splitDialogueReplies}
+            disabled={busy}
+            onChange={() => void toggleSplitDialogueReplies()}
           />
         </label>
         <div className="mt-4">
