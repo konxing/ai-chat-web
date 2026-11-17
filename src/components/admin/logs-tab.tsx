@@ -5,6 +5,7 @@ import { Filter, RefreshCw, Search } from 'lucide-react';
 import { apiFetch, errorMessage, formatDateTime, timeAgo } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, EmptyState, LoadingBlock, Spinner } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import type { AccessLogItem, AuditLogItem, LoginLogItem, Paged } from '@/lib/admin-types';
 import { Pagination } from '@/components/admin/users-tab';
 
@@ -144,22 +145,36 @@ export function LogsTab({ mode }: { mode: Mode }) {
         </div>
         {mode === 'login' ? (
           <div>
-            <label className="label">结果</label>
-            <select className="field" value={loginSuccess} onChange={(e) => setLoginSuccess(e.target.value)}>
-              <option value="">全部</option>
-              <option value="true">成功</option>
-              <option value="false">失败</option>
-            </select>
+            <label id="admin-login-result-label" htmlFor="admin-login-result" className="label">结果</label>
+            <ThemedSelect
+              id="admin-login-result"
+              aria-labelledby="admin-login-result-label"
+              className="field"
+              value={loginSuccess}
+              onValueChange={setLoginSuccess}
+              options={[
+                { value: '', label: '全部' },
+                { value: 'true', label: '成功' },
+                { value: 'false', label: '失败' }
+              ]}
+            />
           </div>
         ) : null}
         {mode === 'access' ? (
           <div>
-            <label className="label">访问结果</label>
-            <select className="field" value={allowed} onChange={(e) => setAllowed(e.target.value)}>
-              <option value="">全部</option>
-              <option value="true">允许</option>
-              <option value="false">拒绝</option>
-            </select>
+            <label id="admin-access-result-label" htmlFor="admin-access-result" className="label">访问结果</label>
+            <ThemedSelect
+              id="admin-access-result"
+              aria-labelledby="admin-access-result-label"
+              className="field"
+              value={allowed}
+              onValueChange={setAllowed}
+              options={[
+                { value: '', label: '全部' },
+                { value: 'true', label: '允许' },
+                { value: 'false', label: '拒绝' }
+              ]}
+            />
           </div>
         ) : null}
         <div>

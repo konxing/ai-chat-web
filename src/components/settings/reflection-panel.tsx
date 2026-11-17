@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, Lightbulb } from 'lucide-react';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useToast } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import {
   CITATION_KIND_LABELS,
   COOLDOWN_HINTS,
@@ -272,20 +273,16 @@ export function ReflectionPanel() {
             </p>
 
             <div className="mt-3">
-              <label className="label">生成节奏</label>
-              <select
+              <label htmlFor="reflection-cooldown" className="label">生成节奏</label>
+              <ThemedSelect
+                id="reflection-cooldown"
                 className="field"
                 value={cooldown ?? ''}
                 disabled={cooldown === null || cooldownBusy}
-                onChange={(e) => void saveCooldown(e.target.value as ReflectionCooldown)}
-              >
-                {cooldown === null ? <option value="">节奏未知</option> : null}
-                {COOLDOWN_ORDER.map((option) => (
-                  <option key={option} value={option}>
-                    {COOLDOWN_LABELS[option]}
-                  </option>
-                ))}
-              </select>
+                placeholder="节奏未知"
+                options={COOLDOWN_ORDER.map((value) => ({ value, label: COOLDOWN_LABELS[value] }))}
+                onValueChange={(value) => void saveCooldown(value as ReflectionCooldown)}
+              />
               {cooldown === null ? (
                 <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
                   当前节奏没读到。这里不替你猜一档：猜错的那一档看起来像你选的，而它决定后台多久翻一次你的记忆。

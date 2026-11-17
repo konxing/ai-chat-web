@@ -5,6 +5,12 @@ import { apiFetch, errorMessage } from '@/lib/client-api';
 import { useToast } from '@/components/ui';
 import { useReauth } from '@/components/ui';
 import { LoadingBlock } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
+
+const ENGINE_OPTIONS = [
+  { value: 'legacy', label: 'legacy（旧规则累加，默认）' },
+  { value: 'dialogue-v2', label: 'dialogue-v2（话语行为/状态/回应动作）' }
+] as const;
 
 interface PromptVersion {
   id: string;
@@ -162,16 +168,16 @@ export function ConversationTab() {
           />
         </label>
         <div className="mt-4">
-          <label className="label">引擎版本（灰度/回滚）</label>
-          <select
+          <label id="admin-dialogue-engine-label" htmlFor="admin-dialogue-engine" className="label">引擎版本（灰度/回滚）</label>
+          <ThemedSelect
+            id="admin-dialogue-engine"
+            aria-labelledby="admin-dialogue-engine-label"
             className="field"
             value={engineVersion}
             disabled={busy}
-            onChange={(e) => void setEngine(e.target.value as 'legacy' | 'dialogue-v2')}
-          >
-            <option value="legacy">legacy（旧规则累加，默认）</option>
-            <option value="dialogue-v2">dialogue-v2（话语行为/状态/回应动作）</option>
-          </select>
+            onValueChange={(value) => void setEngine(value as 'legacy' | 'dialogue-v2')}
+            options={ENGINE_OPTIONS}
+          />
           <p className="mt-1.5 text-[11.5px] text-white/35">
             默认 legacy；dialogue-v2 需经 A/B 验证非劣后再灰度。按用户覆盖键 conversationEngineVersionUser:&lt;userId&gt; 可小范围开启。回滚=切回 legacy。
           </p>

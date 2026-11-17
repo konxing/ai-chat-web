@@ -108,10 +108,56 @@ body::after {
     background: linear-gradient(180deg, #0b111a, #0c121b);
   }
 
-  select.field option,
-  select.field optgroup {
-    background-color: #111a26;
-    color: #edf3fa;
+  .themed-select-trigger {
+    @apply inline-flex min-w-0 items-center gap-2 text-left outline-none;
+  }
+
+  .themed-select-trigger:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .themed-select-trigger:disabled {
+    cursor: not-allowed;
+  }
+
+  .themed-select-chevron {
+    color: #a9b8c9;
+  }
+
+  .themed-select-menu {
+    @apply z-[80] overflow-hidden rounded-xl border border-[#405063] bg-[#151f2c] text-[#edf3fa] shadow-xl shadow-black/40;
+    min-width: min(max(10rem, var(--radix-select-trigger-width)), 28rem, var(--radix-select-content-available-width));
+    width: max-content;
+    max-width: min(28rem, calc(100vw - 16px), var(--radix-select-content-available-width));
+    max-height: min(19rem, var(--radix-select-content-available-height));
+  }
+
+  .themed-select-option {
+    @apply relative flex min-h-9 cursor-pointer select-none items-center rounded-lg py-2 pl-3 pr-8 text-sm outline-none;
+    overflow-wrap: anywhere;
+  }
+
+  .themed-select-option[data-state='checked'] {
+    @apply bg-[#193b35] text-[#a5f3db];
+  }
+
+  .themed-select-option[data-highlighted] {
+    @apply bg-[#2b4156] text-white;
+    outline: 1px solid currentColor;
+    outline-offset: -1px;
+  }
+
+  .themed-select-option[data-disabled] {
+    @apply cursor-not-allowed text-[#a9b8c9];
+  }
+
+  .themed-select-indicator {
+    @apply absolute right-2.5 top-1/2 -translate-y-1/2;
+  }
+
+  .themed-select-scroll {
+    @apply flex h-6 items-center justify-center text-[#c5d4e2];
   }
 
   .btn {

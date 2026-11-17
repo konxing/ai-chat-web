@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 
 interface Source { id: string; title: string; type: 'MEMORY' | 'INTERVENTION' }
@@ -67,14 +68,17 @@ export function ExperiencePanel() {
       {notice ? <p role="status" className="rounded-lg bg-white/5 p-3 text-sm text-white/80">{notice}</p> : null}
       <div className="space-y-3 rounded-xl border border-white/10 p-4">
         <h3 className="text-sm font-semibold text-white">记录一次有来源的经验</h3>
-        <select className="input" aria-label="选择来源记录" value={sourceKey}
-          onChange={(e) => setSourceKey(e.target.value)}>
-          {sources.map((source) => (
-            <option key={source.type + source.id} value={source.type + ':' + source.id}>
-              {source.type === 'MEMORY' ? '记忆' : '已完成训练'} · {source.title}
-            </option>
-          ))}
-        </select>
+        <ThemedSelect
+          className="input"
+          aria-label="选择来源记录"
+          value={sourceKey}
+          onValueChange={setSourceKey}
+          placeholder="暂无可选来源"
+          options={sources.map((source) => ({
+            value: `${source.type}:${source.id}`,
+            label: `${source.type === 'MEMORY' ? '记忆' : '已完成训练'} · ${source.title}`
+          }))}
+        />
         <input className="input" aria-label="经验主题" maxLength={160}
           placeholder="发现了什么问题？" value={title} onChange={(e) => setTitle(e.target.value)} />
         <textarea className="input min-h-20" aria-label="经验和方法" maxLength={2000}

@@ -5,6 +5,7 @@ import { ChevronDown, RotateCcw } from 'lucide-react';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 import { cn } from '@/lib/cn';
 import { Alert, LoadingBlock, Spinner, useToast } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import {
   CONTEXT_LABELS,
   CONTEXT_ORDER,
@@ -58,6 +59,12 @@ const EMOTION_LABELS: Record<EmotionTransparency, string> = {
   implicit: '用，但不特别说明',
   explicit: '用，并说明有几条和情绪有关'
 };
+const EMOTION_OPTIONS = EMOTION_ORDER.map((value) => ({ value, label: EMOTION_LABELS[value] }));
+const RETENTION_OPTIONS = RETENTION_ORDER.map((value) => ({ value, label: RETENTION_LABELS[value] }));
+const READ_LIMIT_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8].map((value) => ({
+  value: String(value),
+  label: `${value} 条`
+}));
 
 /** 只有这七个字段能被这一屏改动，草稿就只装这七个，免得把没消费者的字段一起回写。 */
 interface Draft {
@@ -457,18 +464,14 @@ export function MemoryPolicyPanel() {
                     </div>
 
                     <div>
-                      <label className="label">保留期</label>
-                      <select
+                      <label htmlFor={`memory-retention-${context}`} className="label">保留期</label>
+                      <ThemedSelect
+                        id={`memory-retention-${context}`}
                         className="field"
                         value={draft.retention}
-                        onChange={(e) => setDraft({ ...draft, retention: e.target.value as MemoryRetention })}
-                      >
-                        {RETENTION_ORDER.map((retention) => (
-                          <option key={retention} value={retention}>
-                            {RETENTION_LABELS[retention]}
-                          </option>
-                        ))}
-                      </select>
+                        options={RETENTION_OPTIONS}
+                        onValueChange={(value) => setDraft({ ...draft, retention: value as MemoryRetention })}
+                      />
                     </div>
 
                     {formError ? <Alert tone="error">{formError}</Alert> : null}
@@ -515,20 +518,15 @@ export function MemoryPolicyPanel() {
           <label htmlFor="memory-read-limit" className="text-[12px] text-white/55">
             每轮最多注入
           </label>
-          <select
+          <ThemedSelect
             id="memory-read-limit"
             className="field mt-1.5"
-            value={readLimit ?? ''}
+            value={readLimit?.toString() ?? ''}
             disabled={readLimit === null || readLimitBusy}
-            onChange={(e) => void saveReadLimit(Number(e.target.value))}
-          >
-            {readLimit === null ? <option value="">当前值未知</option> : null}
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
-              <option key={value} value={value}>
-                {value} 条
-              </option>
-            ))}
-          </select>
+            placeholder="当前值未知"
+            options={READ_LIMIT_OPTIONS}
+            onValueChange={(value) => void saveReadLimit(Number(value))}
+          />
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/35">
             上限 8 条与任务书默认值一致；调高不会超过它。
           </p>
@@ -622,20 +620,16 @@ export function MemoryPolicyPanel() {
         </div>
 
         <div className="mt-4">
-          <label className="label">情绪类记忆的用法</label>
-          <select
+          <label htmlFor="memory-emotion-transparency" className="label">情绪类记忆的用法</label>
+          <ThemedSelect
+            id="memory-emotion-transparency"
             className="field"
             value={emotion ?? ''}
             disabled={emotion === null || emotionBusy}
-            onChange={(e) => void saveEmotion(e.target.value as EmotionTransparency)}
-          >
-            {emotion === null ? <option value="">档位未知</option> : null}
-            {EMOTION_ORDER.map((option) => (
-              <option key={option} value={option}>
-                {EMOTION_LABELS[option]}
-              </option>
-            ))}
-          </select>
+            placeholder="档位未知"
+            options={EMOTION_OPTIONS}
+            onValueChange={(value) => void saveEmotion(value as EmotionTransparency)}
+          />
           {emotion === null ? (
             <p className="mt-1.5 text-[11.5px] text-white/35">
               当前档位没读到。这里不替你猜一个，因为三个选项都会改变模型看到的内容。

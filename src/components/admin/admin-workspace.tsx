@@ -40,6 +40,7 @@ import {
   useReauth,
   useToast
 } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import type { AdminOverview, ServiceStatus } from '@/lib/admin-types';
 import type { ProviderDto } from '@/lib/chat-types';
 const tabLoading = () => <LoadingBlock label="加载管理面板" />;
@@ -62,6 +63,9 @@ type Tab =
   | 'storage'
   | 'service'
   | 'conversation';
+
+const AUTOMATIC_PROVIDER_LABEL = '自动选择（优先级：个人默认 → 全局默认 → 任一启用）';
+const DEFAULT_REVIEW_PROVIDER_LABEL = '跟随默认全局模型';
 
 const NAV: Array<{ key: Tab; label: string; icon: typeof Gauge; group: string }> = [
   { key: 'overview', label: '安全概览', icon: Gauge, group: '总览' },
@@ -395,6 +399,11 @@ function ConfigTab() {
 
   if (loading) return <LoadingBlock label="加载系统配置" />;
 
+  const providerOptions = providers.map((provider) => ({
+    value: provider.id,
+    label: `${provider.name}（${provider.modelId}）`
+  }));
+
   return (
     <form onSubmit={save} className="space-y-5">
       <section className="panel p-5 sm:p-6">
@@ -447,15 +456,19 @@ function ConfigTab() {
             />
           </label>
           <div>
-            <label className="label">默认全局模型</label>
-            <select className="field" value={defaultProviderId} onChange={(e) => setDefaultProviderId(e.target.value)}>
-              <option value="">自动选择（优先级：个人默认 → 全局默认 → 任一启用）</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}（{provider.modelId}）
-                </option>
-              ))}
-            </select>
+            <label id="admin-default-provider-label" htmlFor="admin-default-provider" className="label">默认全局模型</label>
+            <ThemedSelect
+              id="admin-default-provider"
+              aria-labelledby="admin-default-provider-label"
+              className="field"
+              value={defaultProviderId}
+              onValueChange={setDefaultProviderId}
+              placeholder={AUTOMATIC_PROVIDER_LABEL}
+              options={[
+                { value: '', label: AUTOMATIC_PROVIDER_LABEL },
+                ...providerOptions
+              ]}
+            />
           </div>
         </div>
       </section>
@@ -545,19 +558,19 @@ function ConfigTab() {
             />
           </label>
           <div>
-            <label className="label">记忆审核模型</label>
-            <select
+            <label id="admin-review-provider-label" htmlFor="admin-review-provider" className="label">记忆审核模型</label>
+            <ThemedSelect
+              id="admin-review-provider"
+              aria-labelledby="admin-review-provider-label"
               className="field"
               value={cognitiveExtractionProviderId}
-              onChange={(e) => setCognitiveExtractionProviderId(e.target.value)}
-            >
-              <option value="">跟随默认全局模型</option>
-              {providers.map((provider) => (
-                <option key={provider.id} value={provider.id}>
-                  {provider.name}（{provider.modelId}）
-                </option>
-              ))}
-            </select>
+              onValueChange={setCognitiveExtractionProviderId}
+              placeholder={DEFAULT_REVIEW_PROVIDER_LABEL}
+              options={[
+                { value: '', label: DEFAULT_REVIEW_PROVIDER_LABEL },
+                ...providerOptions
+              ]}
+            />
             <p className="mt-1.5 text-[11.5px] text-white/35">
               选一个独立模型专门审核记忆（比如更便宜或更稳的）；不选则用默认全局模型。所选模型不可用时回退默认。
             </p>

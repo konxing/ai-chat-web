@@ -58,6 +58,7 @@ import { chatStickerImage, type ChatSticker } from '@/lib/chat-stickers';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
 import { Modal, Spinner } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import type {
   AttachmentDto,
   ChatDetailDto,
@@ -1175,40 +1176,36 @@ export function ChatWorkspace({
           </div>
           <div className="flex min-w-0 basis-full items-center gap-1.5 pb-0.5 pl-1 sm:shrink-0 sm:basis-auto sm:pb-0 sm:pl-0">
             {reasoningOptions?.levels.length ? (
-              <select
+              <ThemedSelect
                 aria-label="思考程度"
                 title="思考程度"
                 value={reasoningEffort ?? ''}
                 disabled={sending}
-                onChange={(event) => {
-                  const level = event.target.value;
+                onValueChange={(level) => {
                   setReasoningByChat((previous) => ({
                     ...previous, [reasoningKey]: isReasoningLevel(level) ? level : undefined
                   }));
                 }}
-                className="max-w-[42vw] rounded-full border border-white/10 bg-[#171e29] px-2 py-1.5 text-xs text-white/85 [color-scheme:dark] focus-visible:outline-aurora-400 sm:max-w-none sm:py-2"
-              >
-                <option value="">思考 · 默认{reasoningOptions.defaultLevel ? `（${reasoningLabels[reasoningOptions.defaultLevel]}）` : ''}</option>
-                {reasoningOptions.levels.map((level) => <option key={level} value={level}>{reasoningLabels[level]}</option>)}
-              </select>
+                options={[
+                  {
+                    value: '',
+                    label: `思考 · 默认${reasoningOptions.defaultLevel ? `（${reasoningLabels[reasoningOptions.defaultLevel]}）` : ''}`
+                  },
+                  ...reasoningOptions.levels.map((level) => ({ value: level, label: reasoningLabels[level] }))
+                ]}
+                className="max-w-[42vw] rounded-full border border-white/10 bg-[#171e29] px-2 py-1.5 text-xs text-white/85 disabled:opacity-50 sm:max-w-none sm:py-2"
+              />
             ) : null}
-            <div className="relative flex min-w-0 items-center">
-              <select
-                aria-label="选择模型"
-                value={selectedProviderId}
-                onChange={(e) => void changeModel(e.target.value)}
-                disabled={providers.length === 0 || sending}
-                className="max-w-full appearance-none rounded-full border border-white/10 bg-white/[0.05] py-1.5 pl-3 pr-8 text-xs text-white/80 outline-none transition hover:border-white/25 focus-visible:ring-2 focus-visible:ring-aurora-400/60 disabled:opacity-45 sm:max-w-[240px] sm:py-2"
-              >
-                {providers.length === 0 ? <option value="">未配置模型</option> : null}
-                {providers.map((provider) => (
-                  <option key={provider.id} value={provider.id} className="bg-[#0c111b]">
-                    {provider.name} · {provider.modelId}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-white/30" />
-            </div>
+            <ThemedSelect
+              aria-label="选择模型"
+              value={selectedProviderId}
+              placeholder="未配置模型"
+              onValueChange={(id) => void changeModel(id)}
+              disabled={sending}
+              options={providers.map((provider) => ({ value: provider.id, label: `${provider.name} · ${provider.modelId}` }))}
+              className="max-w-full rounded-full border border-white/10 bg-white/[0.05] py-1.5 pl-3 pr-2 text-xs text-white/80 transition hover:border-white/25 disabled:opacity-50 sm:max-w-[240px] sm:py-2"
+              align="end"
+            />
             <Link href="/settings" className="btn-icon hidden sm:inline-flex" aria-label="设置">
               <Settings className="h-4 w-4" />
             </Link>
@@ -1450,26 +1447,22 @@ export function ChatWorkspace({
                 </button>
                 <div className="flex-1" />
                 {canUseWebTool ? (
-                  <label
-                    className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-2 text-xs text-white/80"
+                  <ThemedSelect
+                    aria-label="本轮 DeepSeek 联网工具"
                     title="仅用于本条消息。DeepSeek 可能联网查询，请使用公开链接。"
-                  >
-                    <Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
-                    <select
-                      aria-label="本轮 DeepSeek 联网工具"
-                      value={webTool}
-                      disabled={sending}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setWebTool(value === 'search' || value === 'read' ? value : '');
-                      }}
-                      className="h-8 max-w-[32vw] bg-transparent [color-scheme:dark]"
-                    >
-                      <option value="">联网：关闭</option>
-                      <option value="search">联网搜索</option>
-                      <option value="read">读取公开链接</option>
-                    </select>
-                  </label>
+                    value={webTool}
+                    disabled={sending}
+                    onValueChange={(value) => setWebTool(value === 'search' || value === 'read' ? value : '')}
+                    options={[
+                      { value: '', label: '联网：关闭' },
+                      { value: 'search', label: '联网搜索' },
+                      { value: 'read', label: '读取公开链接' }
+                    ]}
+                    icon={<Globe aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />}
+                    className="h-9 max-w-[46vw] shrink-0 rounded-lg border border-white/15 px-2 text-xs text-[#dae7f4] transition hover:border-white/30 disabled:opacity-50"
+                    align="end"
+                    side="top"
+                  />
                 ) : null}
                 {sending ? (
                   <button type="button" className="btn-ghost h-9 gap-1.5 border-white/10 px-3 text-[12px]" onClick={stopStreaming}>

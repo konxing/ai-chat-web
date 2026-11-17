@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Archive, ArchiveRestore, Brain, History, Pencil, Scale, Trash2, X } from 'lucide-react';
 import { apiFetch, errorMessage, timeAgo } from '@/lib/client-api';
 import { Alert, EmptyState, LoadingBlock, Spinner, useConfirm, useToast } from '@/components/ui';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import { MemoryCandidatesPanel } from './memory-candidates-panel';
 import { FailedTasksPanel } from './failed-tasks-panel';
 import {
@@ -76,6 +77,17 @@ const BAND_BADGE: Record<ConfidenceBand, string> = {
 
 const CONTENT_MAX = 1000;
 const REASON_MAX = 500;
+const VERIFICATION_STATUS_OPTIONS = [
+  { value: 'UNVERIFIED', label: '待核验' },
+  { value: 'VERIFIED', label: '我已核验' },
+  { value: 'DISPUTED', label: '存在争议' },
+  { value: 'REFUTED', label: '已经证伪' }
+] as const;
+const VERIFICATION_FREQUENCY_OPTIONS = [
+  { value: 'LOW', label: '低（长期稳定）' },
+  { value: 'MEDIUM', label: '中（可能变化）' },
+  { value: 'HIGH', label: '高（需要经常重新确认）' }
+] as const;
 
 export function MemoryPanel() {
   const { push } = useToast();
@@ -811,25 +823,26 @@ export function MemoryPanel() {
                 {isVerification ? (
                   <div className="mt-3 space-y-3 border-t border-white/[0.06] pt-3">
                     <p className="text-xs text-white/50">只影响这一条记忆的使用。标记为有争议、已证伪或过期后，不再注入聊天。</p>
-                    <label className="block space-y-1 text-xs text-white/70">
-                      <span>核验状态</span>
-                      <select className="field" value={verifyStatus}
-                        onChange={(e) => setVerifyStatus(e.target.value as typeof verifyStatus)}>
-                        <option value="UNVERIFIED">待核验</option>
-                        <option value="VERIFIED">我已核验</option>
-                        <option value="DISPUTED">存在争议</option>
-                        <option value="REFUTED">已经证伪</option>
-                      </select>
-                    </label>
-                    <label className="block space-y-1 text-xs text-white/70">
-                      <span>变化频率</span>
-                      <select className="field" value={verifyVolatility}
-                        onChange={(e) => setVerifyVolatility(e.target.value as typeof verifyVolatility)}>
-                        <option value="LOW">低（长期稳定）</option>
-                        <option value="MEDIUM">中（可能变化）</option>
-                        <option value="HIGH">高（需要经常重新确认）</option>
-                      </select>
-                    </label>
+                    <div className="space-y-1 text-xs text-white/70">
+                      <label htmlFor={`memory-verify-status-${memory.id}`}>核验状态</label>
+                      <ThemedSelect
+                        id={`memory-verify-status-${memory.id}`}
+                        className="field"
+                        value={verifyStatus}
+                        options={VERIFICATION_STATUS_OPTIONS}
+                        onValueChange={(value) => setVerifyStatus(value as typeof verifyStatus)}
+                      />
+                    </div>
+                    <div className="space-y-1 text-xs text-white/70">
+                      <label htmlFor={`memory-verify-frequency-${memory.id}`}>变化频率</label>
+                      <ThemedSelect
+                        id={`memory-verify-frequency-${memory.id}`}
+                        className="field"
+                        value={verifyVolatility}
+                        options={VERIFICATION_FREQUENCY_OPTIONS}
+                        onValueChange={(value) => setVerifyVolatility(value as typeof verifyVolatility)}
+                      />
+                    </div>
                     <label className="block space-y-1 text-xs text-white/70">
                       <span>有效期截止（可选）</span>
                       <input type="date" className="field" value={verifyExpires}

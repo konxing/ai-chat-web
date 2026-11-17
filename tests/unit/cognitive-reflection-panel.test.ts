@@ -292,7 +292,7 @@ describe('洞察生成节奏控件', () => {
     expect((PANEL_CODE.match(/setCooldown\(data\.preferences\.reflectionCooldown\)/g) ?? [])).toHaveLength(2);
     expect(PANEL_CODE).toContain("value={cooldown ?? ''}");
     expect(PANEL_CODE).toContain('disabled={cooldown === null || cooldownBusy}');
-    expect(PANEL_CODE).toContain('<option value="">节奏未知</option>');
+    expect(PANEL_CODE).toContain('placeholder="节奏未知"');
   });
 
   it('控件排在洞察打开的那一屏里：节奏只管生成，关着就没有可管理的生成', () => {

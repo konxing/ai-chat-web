@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { ThemedSelect } from '@/components/ui/themed-select';
 import { apiFetch, errorMessage } from '@/lib/client-api';
 
 interface Page { id: string; topicKey: string; title: string; status: string; version: number; updatedAt: string }
@@ -45,12 +46,16 @@ export function WikiPanel() {
       })}>从现有记忆构建主题草稿</button>
       {pages.length ? (
         <>
-          <select aria-label="选择知识页面" className="input" value={selected}
-            onChange={(e) => setSelected(e.target.value)}>
-            {pages.map((p) => <option key={p.id} value={p.id}>
-              {p.title} · {p.status === 'CONFIRMED' ? '已确认' : '待确认'}
-            </option>)}
-          </select>
+          <ThemedSelect
+            aria-label="选择知识页面"
+            className="input"
+            value={selected}
+            onValueChange={setSelected}
+            options={pages.map((page) => ({
+              value: page.id,
+              label: `${page.title} · ${page.status === 'CONFIRMED' ? '已确认' : '待确认'}`
+            }))}
+          />
           {detail ? (
             <div className="space-y-3 rounded-xl border border-white/10 p-4">
               <h3 className="font-medium text-white">{detail.title}</h3>
