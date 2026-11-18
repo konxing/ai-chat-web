@@ -16,12 +16,11 @@
 2. 在含有 `package.json` 的项目根目录打开 PowerShell，拉取最新代码（已经拉取可以跳过），并依次执行下面的命令。
 
    ```powershell
-   git pull
-   npm.cmd ci --include=dev
+   git pull --ff-only
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\build.ps1
    ```
 
-3. 构建脚本会构建网站、执行数据库迁移并重新生成 `AI WebChat.exe`。保留原有的 `.env`、附件和数据库。更新后双击 EXE，点「启动服务 → 打开聊天」。
+3. 构建脚本会先按 `package-lock.json` 安装完整项目依赖，再构建网站、执行数据库迁移并重新生成 `AI WebChat.exe`。新增的界面依赖也会自动安装，无需另行运行安装命令。安装依赖失败时会停止并显示具体错误，修正后可重新运行同一条构建命令。保留原有的 `.env`、附件和数据库。更新后双击 EXE，点「启动服务 → 打开聊天」。
 
 本机默认地址为 `http://127.0.0.1:3000`。登录自启沿用旧任务的配置。启动失败可以查看 `dist/windows/backend.log`。
 
