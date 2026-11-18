@@ -8,9 +8,15 @@ Push-Location $root
 try {
     if (!$LauncherOnly) {
         if (!(Test-Path -LiteralPath '.env')) { throw 'Project .env is required. Use -LauncherOnly for first-time setup.' }
-        Write-Host 'Installing project dependencies...'
-        npm.cmd ci --include=dev --no-audit
-        if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check the npm error above, then rerun this build command.' }
+        Write-Host 'Checking project dependencies...'
+        & node.exe (Join-Path $PSScriptRoot 'check-dependencies.cjs')
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host 'Installing missing or changed project dependencies...'
+            npm.cmd ci --include=dev --no-audit
+            if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Check the npm error above, then rerun this build command.' }
+        } else {
+            Write-Host 'Project dependencies are up to date; skipping installation.'
+        }
         npm.cmd run build
         if ($LASTEXITCODE -ne 0) { throw 'Website build failed.' }
         npm.cmd run db:migrate

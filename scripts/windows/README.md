@@ -20,7 +20,7 @@
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\build.ps1
    ```
 
-3. 构建脚本会先按 `package-lock.json` 安装完整项目依赖，再构建网站、执行数据库迁移并重新生成 `AI WebChat.exe`。新增的界面依赖也会自动安装，无需另行运行安装命令。安装依赖失败时会停止并显示具体错误，修正后可重新运行同一条构建命令。保留原有的 `.env`、附件和数据库。更新后双击 EXE，点「启动服务 → 打开聊天」。
+3. 构建脚本先检查已安装的项目依赖。依赖完整且与 `package-lock.json` 一致时显示「skipping installation」，直接跳过安装；有缺失、版本变化或检查未通过时，才自动安装锁定版本的完整依赖。随后构建网站、执行数据库迁移并重新生成 `AI WebChat.exe`。安装依赖失败时会停止并显示具体错误，修正后可重新运行同一条构建命令。这个命令不会安装 Node.js 或 PostgreSQL。保留原有的 `.env`、附件和数据库。更新后双击 EXE，点「启动服务 → 打开聊天」。
 
 本机默认地址为 `http://127.0.0.1:3000`。登录自启沿用旧任务的配置。启动失败可以查看 `dist/windows/backend.log`。
 
