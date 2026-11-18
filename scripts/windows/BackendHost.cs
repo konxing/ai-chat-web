@@ -13,10 +13,9 @@ internal static class BackendHost
     private const uint Infinite = 0xFFFFFFFF;
     private const uint UseStdHandles = 0x00000100;
     private const uint ReadAccess = 0x80000000;
-    private const uint AppendAccess = 0x00000004;
+    private const uint WriteAccess = 0x40000000;
     private const uint ShareReadWriteDelete = 7;
     private const uint OpenExisting = 3;
-    private const uint OpenAlways = 4;
     private static readonly IntPtr InvalidHandle = new IntPtr(-1);
 
     internal static int Run(string nodePath)
@@ -45,8 +44,8 @@ internal static class BackendHost
                 Size = Marshal.SizeOf(typeof(SecurityAttributes)),
                 Inherit = 1
             };
-            output = CreateFile(PrepareLog(root), AppendAccess, ShareReadWriteDelete, ref handles, OpenAlways, 0, IntPtr.Zero);
-            if (output == InvalidHandle) ThrowLastError("Open backend log");
+            output = CreateFile("NUL", WriteAccess, ShareReadWriteDelete, ref handles, OpenExisting, 0, IntPtr.Zero);
+            if (output == InvalidHandle) ThrowLastError("Open backend output");
             input = CreateFile("NUL", ReadAccess, ShareReadWriteDelete, ref handles, OpenExisting, 0, IntPtr.Zero);
             if (input == InvalidHandle) ThrowLastError("Open backend input");
 
@@ -59,7 +58,6 @@ internal static class BackendHost
                 Error = output
             };
             var commandLine = new StringBuilder("\"" + nodePath + "\" \"" + server + "\"");
-            Environment.SetEnvironmentVariable("AI_WEBCHAT_CAPTURED_STDIO", "1");
             if (!CreateProcess(nodePath, commandLine, IntPtr.Zero, IntPtr.Zero, true, CreateSuspended | CreateNoWindow,
                     IntPtr.Zero, root, ref startup, out child))
                 ThrowLastError("Start Node.js");
@@ -76,12 +74,10 @@ internal static class BackendHost
 
             uint exitCode;
             if (!GetExitCodeProcess(child.Process, out exitCode)) ThrowLastError("Read Node.js exit status");
-            if (exitCode != 0) Log(root, "Node.js exited with status " + exitCode + ".");
             return unchecked((int)exitCode);
         }
-        catch (Exception error)
+        catch (Exception)
         {
-            Log(root, error.Message);
             return 1;
         }
         finally
@@ -104,24 +100,6 @@ internal static class BackendHost
             if (File.Exists(candidate)) return candidate;
         }
         return null;
-    }
-
-    private static string PrepareLog(string root)
-    {
-        var directory = Path.Combine(root, "dist", "windows");
-        Directory.CreateDirectory(directory);
-        return Path.Combine(directory, "backend.log");
-    }
-
-    private static void Log(string root, string message)
-    {
-        try {
-            using (var stream = new FileStream(PrepareLog(root), FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
-            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
-                writer.WriteLine(DateTime.UtcNow.ToString("o") + " [backend host] " + message);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
     }
 
     private static void ThrowLastError(string action)

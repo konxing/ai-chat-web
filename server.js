@@ -27,20 +27,13 @@ const APP_IS_HTTPS = String(process.env.APP_URL || '').startsWith('https://');
 
 const prisma = new PrismaClient();
 
-function writeLaunchLog(line) {
-  const filename = process.env.AI_WEBCHAT_LAUNCH_LOG;
-  if (filename) fs.appendFile(filename, line + '\n', () => {});
-}
-
 function log(event, fields = {}) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level: 'info', event, ...fields });
   console.log(line);
-  writeLaunchLog(line);
 }
 function logErr(event, fields = {}) {
   const line = JSON.stringify({ ts: new Date().toISOString(), level: 'error', event, ...fields });
   console.error(line);
-  writeLaunchLog(line);
 }
 
 let cache = {

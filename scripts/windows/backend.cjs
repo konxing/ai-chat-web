@@ -1,11 +1,8 @@
-const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '../..');
 process.chdir(root);
 require('dotenv').config();
-const logs = path.join(root, 'dist', 'windows');
-fs.mkdirSync(logs, { recursive: true });
 const address = 'http://127.0.0.1:3000';
 const useProxy = process.env.WINDOWS_USE_PROXY === 'true';
 Object.assign(process.env, {
@@ -17,8 +14,7 @@ Object.assign(process.env, {
   COOKIE_SECURE: useProxy ? 'true' : 'false',
   ALLOW_INSECURE_COOKIES: useProxy ? 'false' : 'true',
   TLS_KEY_FILE: '',
-  TLS_CERT_FILE: '',
-  AI_WEBCHAT_LAUNCH_LOG: process.env.AI_WEBCHAT_CAPTURED_STDIO === '1' ? '' : path.join(logs, 'backend.log')
+  TLS_CERT_FILE: ''
 });
 if (!useProxy) {
   process.env.APP_URL = address;

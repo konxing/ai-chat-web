@@ -14,7 +14,6 @@ internal static class Launcher
 {
     private const string Address = "http://127.0.0.1:3000";
     private static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
-    private static readonly string Log = Path.Combine(Root, "dist", "windows", "backend.log");
 
     private static readonly Color Surface = Color.FromArgb(14, 21, 31);
     private static readonly Color Card = Color.FromArgb(23, 33, 46);
@@ -136,16 +135,9 @@ internal static class Launcher
             startupCard.Controls.Add(startupActions, 1, 0);
             layout.Controls.Add(startupCard, 0, 2);
 
-            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
+            var footer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 1, Margin = Padding.Empty };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 124));
-            var logs = ActionButton("运行日志");
-            logs.AutoSize = false;
-            logs.Size = new Size(118, 36);
-            logs.Anchor = AnchorStyles.Right | AnchorStyles.Top;
-            logs.Click += (sender, args) => Open(Log);
             footer.Controls.Add(notice, 0, 0);
-            footer.Controls.Add(logs, 1, 0);
             layout.Controls.Add(footer, 0, 3);
 
             AddAction(serviceActions, "启动服务", async () => await Run("Start"), primary: true);
@@ -228,7 +220,7 @@ internal static class Launcher
             {
                 if (!IsDisposed)
                 {
-                    notice.Text = "操作未完成，请查看运行日志。";
+                    notice.Text = "操作未完成，请按错误提示修正后重试。";
                     MessageBox.Show(this, error.Message, "AI WebChat", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
@@ -268,7 +260,7 @@ internal static class Launcher
                 if (probe.State == ServiceState.PortConflict) break;
                 await Task.Delay(500);
             }
-            if (!IsDisposed) notice.Text = "服务未达到预期状态，请查看运行日志。";
+            if (!IsDisposed) notice.Text = "服务未达到预期状态，请检查 Node.js、数据库连接和端口占用后重试。";
             return false;
         }
 
@@ -290,11 +282,6 @@ internal static class Launcher
 
         private void Open(string target)
         {
-            if (target == Log && !File.Exists(Log))
-            {
-                MessageBox.Show(this, "首次启动后可查看日志。", "AI WebChat");
-                return;
-            }
             try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
             catch (Exception error) { MessageBox.Show(this, error.Message, "AI WebChat"); }
         }
