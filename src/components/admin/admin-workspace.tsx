@@ -101,7 +101,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
   return (
     <div className="relative min-h-[100dvh]">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(55%_45%_at_15%_0%,rgba(245,158,11,0.07),transparent_60%),radial-gradient(45%_40%_at_90%_10%,rgba(99,102,241,0.10),transparent_60%)]" />
-      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#07090f]/85 backdrop-blur-xl">
+      <header className="workspace-header sticky top-0 z-30 border-b border-white/[0.06] bg-[#07090f]/85 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 sm:px-6">
           <Link href="/chat?resume=1" className="btn-icon" aria-label="返回对话">
             <ArrowLeft className="h-4 w-4" />
@@ -147,7 +147,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
                         setNavOpen(false);
                       }}
                       className={cn(
-                        'flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] transition',
+                        'workspace-nav-item flex min-h-11 w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] transition',
                         tab === item.key
                           ? 'bg-white/[0.08] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
                           : 'text-white/50 hover:bg-white/[0.04] hover:text-white/80'
@@ -164,7 +164,7 @@ function AdminShell({ owner }: { owner: { username: string; displayName: string 
           ))}
         </nav>
 
-        <div className="min-w-0">
+        <div className="page-enter min-w-0">
           {tab === 'overview' ? <OverviewTab onNavigate={setTab} /> : null}
           {tab === 'users' ? <UsersTab /> : null}
           {tab === 'ip' ? <IpRulesTab /> : null}

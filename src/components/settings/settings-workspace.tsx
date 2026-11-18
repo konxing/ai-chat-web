@@ -315,7 +315,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
   return (
     <div className="relative min-h-[100dvh]">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(60%_50%_at_20%_0%,rgba(99,102,241,0.12),transparent_60%),radial-gradient(45%_40%_at_90%_10%,rgba(45,212,191,0.08),transparent_60%)]" />
-      <header className="sticky top-0 z-30 border-b border-white/[0.06] bg-[#07090f]/80 backdrop-blur-xl">
+      <header className="workspace-header sticky top-0 z-30 border-b border-white/[0.06] bg-[#07090f]/80 backdrop-blur-xl">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <Link href="/chat" className="btn-icon" aria-label="返回对话">
             <ArrowLeft className="h-4 w-4" />
@@ -352,7 +352,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
                 openTab(key);
               }}
               className={cn(
-                'flex min-h-11 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-[13px] leading-5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400',
+                'workspace-nav-item flex min-h-11 min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left text-[13px] leading-5 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-aurora-400',
                 activeTab === key
                   ? 'border-aurora-400/25 bg-aurora-400/10 text-aurora-300'
                   : 'border-transparent text-slate-300 hover:bg-white/[0.06] hover:text-white'
@@ -364,7 +364,7 @@ function SettingsInner({ initialUser }: { initialUser: AccountUser }) {
           ))}
         </nav>
 
-        <div id="settings-content" tabIndex={-1} className="min-w-0 space-y-5 focus:outline-none">
+        <div id="settings-content" tabIndex={-1} className="page-enter min-w-0 space-y-5 focus:outline-none">
           {cognitiveDetail ? (
             <nav aria-label="当前位置" className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
               <Link

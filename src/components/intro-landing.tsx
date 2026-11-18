@@ -4,7 +4,8 @@ import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, LockKeyhole } from 'lucide-react';
-import { BrandMark, BrandWordmark } from '@/components/brand';
+import { BrandWordmark } from '@/components/brand';
+import { OrbitScene } from '@/components/orbit-scene';
 
 export function IntroLanding({
   siteName,
@@ -46,7 +47,7 @@ export function IntroLanding({
         <BrandWordmark name={siteName} compact />
       </header>
 
-      <div className="mx-auto grid w-full max-w-5xl flex-1 content-center items-center gap-8 pb-12 pt-6 text-center md:grid-cols-[1fr_1fr] md:content-stretch md:gap-10 md:text-left">
+      <div className="mx-auto grid w-full max-w-5xl flex-1 content-center items-center gap-2 pb-12 pt-3 text-center md:grid-cols-[1fr_1fr] md:content-stretch md:gap-10 md:pt-6 md:text-left">
         <div className="entry-copy order-2 md:order-1">
           <h1 className="text-[clamp(2.1rem,8vw,3rem)] font-semibold leading-[1.15] tracking-tight text-white md:text-[clamp(2.55rem,5.15vw,4rem)]">
             从一句话开始。
@@ -69,12 +70,8 @@ export function IntroLanding({
           </p>
         </div>
 
-        <div className="order-1 flex items-center justify-center md:order-2">
-          <div className="entry-orbit" aria-hidden="true">
-            <span className="entry-orbit-inner" />
-            <span className="entry-orbit-trace" />
-            <BrandMark size={132} />
-          </div>
+        <div className="order-1 mx-auto flex w-[min(68vw,290px)] items-center justify-center md:order-2 md:w-full">
+          <OrbitScene />
         </div>
       </div>
     </main>

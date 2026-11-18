@@ -63,8 +63,10 @@ import { chatStickerImage, type ChatSticker } from '@/lib/chat-stickers';
 import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS } from '@/lib/reply-presentation';
 import dynamic from 'next/dynamic';
 import { BrandMark } from '@/components/brand';
+import { OrbitScene } from '@/components/orbit-scene';
 import { Modal, Spinner } from '@/components/ui';
 import { ThemedSelect } from '@/components/ui/themed-select';
+import './chat-design.css';
 import type {
   AttachmentDto,
   ChatDetailDto,
@@ -1060,7 +1062,7 @@ export function ChatWorkspace({
   const hasMessages = messages.length > 0 || Boolean(optimisticUser) || streamSegments.length > 0;
 
   return (
-    <div className="chat-surface flex h-dvh overflow-hidden">
+    <div className="chat-workspace chat-surface flex h-dvh overflow-hidden">
       {sidebarOpen ? (
         <button
           type="button"
@@ -1079,7 +1081,7 @@ export function ChatWorkspace({
         )}
       >
         <div className="flex items-center justify-between px-4 pb-2 pt-4">
-          <Link href="/chat" className="flex min-w-0 items-center gap-2.5" onClick={startNewChat}>
+          <Link href="/chat" className="chat-brand-link flex min-w-0 items-center gap-2.5" onClick={startNewChat}>
             <BrandMark size={30} />
             <span className="truncate text-[15px] font-semibold text-white/90">{settings.siteName}</span>
           </Link>
@@ -1089,18 +1091,18 @@ export function ChatWorkspace({
         </div>
 
         <div className="px-3 pt-2">
-          <button type="button" onClick={startNewChat} className="btn-ghost w-full justify-start gap-2.5 rounded-xl border-aurora-400/25 bg-aurora-400/[0.08] py-2.5 text-[13px] hover:border-aurora-400/40 hover:bg-aurora-400/10">
+          <button type="button" onClick={startNewChat} className="chat-new-button btn-ghost w-full justify-start gap-2.5 rounded-xl border-aurora-400/25 bg-aurora-400/[0.08] py-2.5 text-[13px] hover:border-aurora-400/40 hover:bg-aurora-400/10">
             <MessageSquarePlus className="h-4 w-4 text-aurora-300" />
             开启新对话
-            <span className="ml-auto hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/25 sm:inline">
+            <span className="chat-shortcut ml-auto hidden rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-white/25 sm:inline">
               Ctrl / ⌘ K
             </span>
           </button>
         </div>
 
         <div className="px-3 pt-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/25" />
+          <div className="chat-search relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/50" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -1128,7 +1130,7 @@ export function ChatWorkspace({
                       onClick={() => void selectChat(item.id)}
                       aria-current={active ? 'page' : undefined}
                       className={cn(
-                        'w-full rounded-lg py-2.5 pl-3 pr-20 text-left transition lg:pr-3 lg:group-hover:pr-16 lg:group-focus-within:pr-16',
+                        'chat-history-item w-full rounded-lg py-2.5 pl-3 pr-20 text-left transition lg:pr-3 lg:group-hover:pr-16 lg:group-focus-within:pr-16',
                         active ? 'bg-[#1b2831] shadow-[inset_2px_0_0_#4fe0b4]' : 'hover:bg-white/[0.05]'
                       )}
                     >
@@ -1138,7 +1140,7 @@ export function ChatWorkspace({
                       </div>
                       {item.preview ? <p className="mt-0.5 truncate text-[11px] text-white/45">{item.preview}</p> : null}
                     </button>
-                    <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-[#0b1019]/90 p-0.5 shadow-lg lg:hidden lg:group-hover:flex lg:group-focus-within:flex">
+                    <div className="chat-history-actions absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md bg-[#0b1019]/90 p-0.5 shadow-lg lg:hidden lg:group-hover:flex lg:group-focus-within:flex">
                       <button
                         type="button"
                         className="btn-icon h-8 w-8 lg:h-6 lg:w-6"
@@ -1170,7 +1172,9 @@ export function ChatWorkspace({
           <button
             type="button"
             onClick={() => setAccountOpen((open) => !open)}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-white/[0.04]"
+            className="chat-account-button flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-white/[0.04]"
+            aria-expanded={accountOpen}
+            aria-controls="chat-account-menu"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-aurora-400/25 to-violet-500/20 text-[12px] font-semibold text-white/85">
               {(user.displayName || user.username).slice(0, 1).toUpperCase()}
@@ -1189,7 +1193,7 @@ export function ChatWorkspace({
                 aria-label="关闭菜单"
                 onClick={() => setAccountOpen(false)}
               />
-              <div className="absolute bottom-[68px] left-3 right-3 z-50 overflow-hidden rounded-xl border border-white/10 bg-[#0c111b] p-1 shadow-2xl">
+              <div id="chat-account-menu" className="chat-account-menu absolute bottom-[68px] left-3 right-3 z-50 overflow-hidden rounded-xl border border-white/10 bg-[#0c111b] p-1 shadow-2xl">
                 <Link
                   href="/settings"
                   className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-[12.5px] text-white/70 hover:bg-white/[0.06] hover:text-white"
@@ -1238,7 +1242,7 @@ export function ChatWorkspace({
               {selectedProvider ? `${selectedProvider.name} · ${selectedProvider.modelId}` : '尚未选择模型'}
             </p>
           </div>
-          <div className="flex min-w-0 basis-full items-center gap-1.5 pb-0.5 pl-1 sm:shrink-0 sm:basis-auto sm:pb-0 sm:pl-0">
+          <div className="chat-toolbar flex min-w-0 basis-full items-center gap-1.5 pb-0.5 pl-1 sm:shrink-0 sm:basis-auto sm:pb-0 sm:pl-0">
             {reasoningOptions?.levels.length ? (
               <ThemedSelect
                 aria-label="思考程度"
@@ -1291,8 +1295,8 @@ export function ChatWorkspace({
           <div className={cn('mx-auto w-full max-w-3xl px-4 sm:px-6', hasMessages ? 'pb-8 pt-6' : 'flex min-h-full flex-col py-2')}>
             {!hasMessages ? (
               <div className="chat-welcome flex flex-1 flex-col items-center justify-center py-3 text-center sm:py-4">
-                <div className="chat-welcome-orbit mb-3 h-[64px] w-[64px] shrink-0 sm:mb-5 sm:h-[84px] sm:w-[84px]">
-                  <BrandMark size={60} />
+                <div className="chat-welcome-scene shrink-0">
+                  <OrbitScene compact />
                 </div>
                 <h2 className="max-w-full break-words text-[clamp(1.5rem,5vw,2.4rem)] font-semibold leading-tight tracking-tight text-white">
                   {greeting()}，{user.displayName || user.username}
@@ -1309,7 +1313,7 @@ export function ChatWorkspace({
                     添加，或联系管理员。
                   </div>
                 ) : null}
-                <div className="mt-4 grid w-full max-w-xl grid-cols-2 gap-2 sm:mt-7 sm:gap-3">
+                <div className="chat-suggestions mt-4 grid w-full max-w-xl grid-cols-2 gap-2 sm:mt-7 sm:gap-3">
                   {SUGGESTIONS.map(({ label, detail, prompt, icon: Icon }) => (
                     <button
                       key={label}
@@ -1404,7 +1408,7 @@ export function ChatWorkspace({
           </div>
         </div>
 
-        <div className="shrink-0 bg-gradient-to-t from-[#0b1118] via-[#0b1118] to-transparent px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pb-5">
+        <div className="chat-composer-dock shrink-0 bg-gradient-to-t from-[#0b1118] via-[#0b1118] to-transparent px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-2 sm:px-6 sm:pb-5">
           <div className="mx-auto w-full max-w-3xl">
             {pending.length > 0 ? (
               <div className="mb-2 flex flex-wrap gap-2">
@@ -1476,7 +1480,7 @@ export function ChatWorkspace({
                 className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 pt-3.5 text-base leading-relaxed text-white/95 caret-aurora-300 outline-none placeholder:text-slate-400"
                 readOnly={sending}
               />
-              <div className="flex items-center gap-1 px-2 pb-2 pt-1">
+              <div className="chat-composer-actions flex items-center gap-1 px-2 pb-2 pt-1">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1538,7 +1542,7 @@ export function ChatWorkspace({
                     type="button"
                     onClick={() => void send()}
                     disabled={(!draft.trim() && pending.length === 0) || uploading || Boolean(attachmentWarning)}
-                    className="btn-primary h-9 w-9 shrink-0 rounded-xl p-0 motion-safe:active:scale-95"
+                    className="chat-send-button btn-primary h-9 w-9 shrink-0 rounded-xl p-0 motion-safe:active:scale-95"
                     aria-label="发送"
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -1679,7 +1683,7 @@ const MessageBubble = memo(function MessageBubble({
               <button
                 type="button"
                 onClick={() => onEdit(message)}
-                className="rounded p-1 text-white/25 transition hover:bg-white/5 hover:text-white/60"
+                className="chat-message-action rounded p-1 text-white/50 transition hover:bg-white/5 hover:text-white/80"
                 aria-label="编辑并重发这条消息"
                 title="编辑并重发（会移除其后的问答）"
               >
@@ -1689,7 +1693,7 @@ const MessageBubble = memo(function MessageBubble({
             <button
               type="button"
               onClick={() => void copy()}
-              className="rounded p-1 text-white/25 transition hover:bg-white/5 hover:text-white/60"
+              className="chat-message-action rounded p-1 text-white/50 transition hover:bg-white/5 hover:text-white/80"
               aria-label="复制这条消息"
             >
               {copied ? <Check className="h-3 w-3 text-aurora-300" /> : <Copy className="h-3 w-3" />}

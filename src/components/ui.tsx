@@ -96,7 +96,7 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-6"
+      className="ui-overlay fixed inset-0 z-[80] flex items-end justify-center bg-black/65 p-0 backdrop-blur-sm sm:items-center sm:p-6"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget && modalStack.at(-1) === dialogRef.current) onClose();
       }}
@@ -108,7 +108,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
-        className="panel max-h-[92vh] w-full overflow-y-auto rounded-b-none rounded-t-2xl p-5 sm:rounded-2xl sm:p-6"
+        className="panel ui-modal max-h-[92vh] w-full overflow-y-auto rounded-b-none rounded-t-2xl p-5 sm:rounded-2xl sm:p-6"
         style={{ maxWidth: width }}
       >
         <div className="mb-4 flex items-start justify-between gap-4">
@@ -343,7 +343,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={item.id}
             className={cn(
-              'pointer-events-auto flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-[13px] shadow-2xl backdrop-blur-xl',
+              'ui-toast pointer-events-auto flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-[13px] shadow-2xl backdrop-blur-xl',
               item.tone === 'success' && 'border-emerald-400/25 bg-[#0b1a16]/95 text-emerald-100',
               item.tone === 'error' && 'border-red-400/25 bg-[#1c0f13]/95 text-red-100',
               item.tone === 'info' && 'border-white/10 bg-[#101520]/95 text-white/80'
@@ -403,7 +403,7 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="flex rounded-xl border border-white/10 bg-black/20 p-1">
+    <div className="ui-segmented flex rounded-xl border border-white/10 bg-black/20 p-1">
       {options.map((option) => (
         <button
           key={option.value}

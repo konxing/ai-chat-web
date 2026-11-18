@@ -1,0 +1,164 @@
+.orbit-scene {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  aspect-ratio: 1;
+  isolation: isolate;
+  pointer-events: none;
+  perspective: 900px;
+}
+
+.orbit-scene-compact {
+  max-width: 300px;
+}
+
+.orbit-aura {
+  position: absolute;
+  inset: 2%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgb(102 239 196 / 0.1), rgb(75 150 167 / 0.035) 43%, transparent 69%);
+}
+
+.orbit-floor {
+  position: absolute;
+  inset: 68% 15% 10%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgb(102 239 196 / 0.14), rgb(51 123 120 / 0.05) 40%, transparent 70%);
+  transform: rotateX(65deg);
+}
+
+.orbit-stage {
+  position: absolute;
+  inset: 7%;
+  transform: rotateX(5deg) rotateY(-8deg);
+  transform-style: preserve-3d;
+}
+
+.orbit-ring {
+  position: absolute;
+  inset: 4%;
+  border: 1px solid rgb(176 241 223 / 0.27);
+  border-top-color: rgb(216 255 244 / 0.7);
+  border-left-color: rgb(139 221 203 / 0.48);
+  border-radius: 50%;
+  box-shadow: inset 0 0 8px rgb(139 221 203 / 0.025), 0 0 8px rgb(139 221 203 / 0.025);
+  transform-style: preserve-3d;
+}
+
+.orbit-ring-outer {
+  transform: rotateX(67deg) rotateY(12deg) rotateZ(-23deg);
+}
+
+.orbit-ring-middle {
+  inset: 12%;
+  border-color: rgb(149 205 220 / 0.23);
+  border-right-color: rgb(198 237 248 / 0.56);
+  transform: rotateX(23deg) rotateY(-62deg) rotateZ(29deg);
+}
+
+.orbit-ring-inner {
+  inset: 20%;
+  border-color: rgb(142 219 195 / 0.18);
+  border-bottom-color: rgb(203 255 236 / 0.4);
+  transform: rotateX(-48deg) rotateY(29deg) rotateZ(16deg);
+}
+
+.orbit-satellite {
+  position: absolute;
+  left: 13%;
+  top: 13%;
+  width: 2.3%;
+  aspect-ratio: 1;
+  border: 1px solid rgb(229 255 246 / 0.7);
+  border-radius: 50%;
+  background: #96edcd;
+  box-shadow: 0 0 12px rgb(141 251 217 / 0.65);
+}
+
+.orbit-ring-middle .orbit-satellite {
+  top: 81%;
+  left: 80%;
+  background: #c5dce8;
+  box-shadow: 0 0 10px rgb(158 204 222 / 0.6);
+}
+
+.orbit-sphere {
+  position: absolute;
+  inset: 29%;
+  overflow: hidden;
+  border: 1px solid rgb(203 255 235 / 0.55);
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 34% 23%, #e7fff5 0%, #a6f6d7 14%, transparent 43%),
+    radial-gradient(ellipse at 76% 72%, #387d82, transparent 56%),
+    linear-gradient(142deg, #72e5b9 18%, #4bc7a6 47%, #164b50 83%, #0b242e);
+  box-shadow:
+    inset -9px -16px 24px rgb(4 31 35 / 0.48),
+    inset 2px 3px 8px rgb(229 255 245 / 0.65),
+    0 18px 48px -12px rgb(41 164 129 / 0.25);
+  transform: translateZ(16px);
+}
+
+.orbit-sphere-light {
+  position: absolute;
+  inset: 6% 21% 44% 11%;
+  border-radius: 50%;
+  background: linear-gradient(155deg, rgb(255 255 255 / 0.25), transparent 63%);
+  transform: rotate(-25deg);
+}
+
+.orbit-sphere-arc {
+  position: absolute;
+  inset: 39% -16% -12% 9%;
+  border: 1px solid rgb(197 255 230 / 0.17);
+  border-radius: 50%;
+  transform: rotate(-37deg);
+}
+
+.orbit-dust {
+  position: absolute;
+  width: 3px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: #a4d9cc;
+}
+
+.orbit-dust-first {
+  left: 16%;
+  top: 32%;
+  transform: translateZ(38px);
+}
+
+.orbit-dust-second {
+  right: 19%;
+  bottom: 29%;
+  width: 2px;
+  opacity: 0.5;
+  transform: translateZ(-25px);
+}
+
+@keyframes orbit-enter {
+  from { opacity: 0; transform: translateY(18px) rotateX(20deg) rotateY(-25deg) scale(0.9); }
+  to { opacity: 1; transform: rotateX(5deg) rotateY(-8deg); }
+}
+
+@keyframes orbit-outer-settle {
+  from { transform: rotateX(80deg) rotateY(-8deg) rotateZ(-58deg); }
+  to { transform: rotateX(67deg) rotateY(12deg) rotateZ(-23deg); }
+}
+
+@keyframes orbit-middle-settle {
+  from { transform: rotateX(6deg) rotateY(-79deg) rotateZ(2deg); }
+  to { transform: rotateX(23deg) rotateY(-62deg) rotateZ(29deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .orbit-stage { animation: orbit-enter 780ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .orbit-ring-outer { animation: orbit-outer-settle 1300ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .orbit-ring-middle { animation: orbit-middle-settle 1650ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orbit-stage,
+  .orbit-ring { animation: none; }
+}
