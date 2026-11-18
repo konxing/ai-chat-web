@@ -189,6 +189,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         }
       };
       const reply = new DialogueReplyText(expressive, send);
+      const stickerOffsets: number[] = [];
 
       try {
         for await (const event of streamChatCompletion({
@@ -198,7 +199,10 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           messages
         })) {
           if (event.type === 'delta' && event.text) {
-            reply.push(stickerReply.push(event.text));
+            for (const part of stickerReply.pushEvents(event.text)) {
+              if (part.type === 'text') reply.push(part.text);
+              else stickerOffsets.push(reply.checkpoint());
+            }
           } else if (event.type === 'citations' && event.citations) {
             webCitations = [...new Set([...webCitations, ...event.citations])].slice(0, 8);
           } else if (event.type === 'usage') {
@@ -224,6 +228,9 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           status: 'COMPLETE',
           sticker,
           stickers,
+          stickerOffsets: expressive && stickers?.length
+            ? reply.content.trim() ? stickerOffsets : stickerOffsets.map(() => 0)
+            : undefined,
           segmentOffsets: reply.segmentOffsets,
           inputTokens,
           outputTokens

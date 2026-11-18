@@ -26,7 +26,7 @@ import { buildConversationIntelligence } from './cognitive/conversation/core/con
 import { conversationLayerEnabled, conversationEngineVersionFor, splitDialogueRepliesEnabled } from './cognitive/cognitive-flags';
 import { getCognitivePreferences } from './cognitive/preferences';
 import { isTimeRelevant, timeContextLine } from './time-context';
-import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS } from './reply-presentation';
+import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS, orderedReplyParts, type ReplyPart } from './reply-presentation';
 
 export interface ChatSummary {
   id: string;
@@ -50,6 +50,7 @@ export interface ChatMessageDto {
   sticker?: ChatSticker;
   stickers?: ChatSticker[];
   segments?: string[];
+  replyParts?: ReplyPart[];
   attachments: PublicAttachment[];
   createdAt: string;
 }
@@ -95,6 +96,7 @@ export function publicMessage(
   const segments = offsets.length
     ? [0, ...offsets].map((offset, index) => content.slice(offset, offsets[index]).trim()).filter(Boolean)
     : [];
+  const replyParts = orderedReplyParts(content, offsets, presentation.stickers ?? [], presentation.stickerOffsets);
   return {
     id: message.id,
     role: message.role,
@@ -106,20 +108,26 @@ export function publicMessage(
     ...(message.role === 'ASSISTANT' && isChatSticker(message.sticker) ? { sticker: message.sticker } : {}),
     ...(presentation.stickers?.length ? { stickers: presentation.stickers } : {}),
     ...(segments.length > 1 ? { segments } : {}),
+    ...(replyParts?.length ? { replyParts } : {}),
     attachments: (message.attachments || []).map(publicAttachment),
     createdAt: message.createdAt.toISOString()
   };
 }
 
-function readReplyPresentation(value: unknown): { segmentOffsets?: number[]; stickers?: ChatSticker[] } {
+function readReplyPresentation(value: unknown): { segmentOffsets?: number[]; stickers?: ChatSticker[]; stickerOffsets?: number[] } {
   if (!value || typeof value !== 'object') return {};
-  const { segmentOffsets, stickers } = value as { segmentOffsets?: unknown; stickers?: unknown };
-  const validStickers = Array.isArray(stickers) ? [...new Set(stickers.filter(isChatSticker))].slice(0, MAX_REPLY_STICKERS) : [];
+  const { segmentOffsets, stickers, stickerOffsets } = value as { segmentOffsets?: unknown; stickers?: unknown; stickerOffsets?: unknown };
+  const validStickers = Array.isArray(stickers) ? stickers.slice(0, MAX_REPLY_STICKERS).filter(isChatSticker) : [];
+  const validPositions = validStickers.length > 0 && Array.isArray(stickers) && stickers.length === validStickers.length &&
+    Array.isArray(stickerOffsets) && stickerOffsets.length === validStickers.length &&
+    stickerOffsets.every((offset, index) => Number.isSafeInteger(offset) && offset >= 0 &&
+      (index === 0 || offset >= stickerOffsets[index - 1]));
   return {
     segmentOffsets: Array.isArray(segmentOffsets) ? [...new Set(segmentOffsets
       .filter((offset): offset is number => typeof offset === 'number' && Number.isSafeInteger(offset) && offset > 0)
       .slice(0, MAX_REPLY_SEGMENTS - 1))].sort((first, second) => first - second) : undefined,
-    stickers: validStickers.length ? validStickers : undefined
+    stickers: validStickers.length ? validStickers : undefined,
+    stickerOffsets: validPositions ? stickerOffsets as number[] : undefined
   };
 }
 
@@ -391,6 +399,7 @@ export async function saveAssistantMessage(input: {
   sticker?: ChatSticker;
   stickers?: ChatSticker[];
   segmentOffsets?: number[];
+  stickerOffsets?: number[];
 }): Promise<Message> {
   const id = randomUUID();
   return prisma.message.create({
@@ -408,6 +417,7 @@ export async function saveAssistantMessage(input: {
       ...(input.stickers?.length || input.segmentOffsets?.length ? {
         replyPresentation: {
           ...(input.stickers?.length ? { stickers: input.stickers } : {}),
+          ...(input.stickers?.length && input.stickerOffsets?.length ? { stickerOffsets: input.stickerOffsets } : {}),
           ...(input.segmentOffsets?.length ? { segmentOffsets: input.segmentOffsets } : {})
         }
       } : {}),
@@ -486,7 +496,8 @@ export async function buildConversation(input: {
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
         '不要声称自己看到了未提供的图片或文件。' +
         '用户纠正你时，用新信息继续回答。追问直接承接前文，只讲这次的新内容。闲聊时从确实说过的细节接话，别补写没说过的经过；只是分享时，一两句话接住也可以。' +
-        '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices, input.currentContent, expressive)
+        '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices,
+          [...trimmed.slice(-4).map((message) => decryptMessage(message).slice(-1000)), input.currentContent].join('\n'), expressive)
     }
   ];
 

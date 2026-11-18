@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiMessage } from '@/lib/ai';
 import { toOutboundTexts } from './outbound-message';
 import { createTable, type MockTable } from './prisma-mock';
+import { resetRateLimitForTests } from '@/lib/rate-limit';
 
 /**
  * 这一轮对话在**对话之外**留下的全部痕迹，真调 route（不是直接调服务函数）。
@@ -340,6 +341,7 @@ it('caps unread stream data while completing and saving the answer', async () =>
 
 /** 每个用例都从干净的一轮开始（模块作用域：下面两个 describe 共用这一份重置）。 */
 beforeEach(() => {
+  resetRateLimitForTests();
   ctx.behavior = 'success';
   ctx.rows = [];
   ctx.audit = [];
@@ -567,6 +569,60 @@ it('keeps reply bubbles and sticker bursts disabled independently of model outpu
   expect(assistantRows()[0]?.replyPresentation).toBeUndefined();
   const { decryptMessage } = await import('@/lib/chats');
   expect(decryptMessage(assistantRows()[0] as never).trim()).toBe('前一段。\n\n后一段。');
+});
+
+it('keeps each image beside its text when the model sends stickers one at a time', async () => {
+  ctx.expressive = true;
+  const output = '懂了，一张一张来。🍵\n[[STICKER:requested:wave9]]\n[[MESSAGE_BREAK]]\n再来个猫猫探头。\n[[STICKER:requested:wave12]]';
+  // Exercise every possible marker split, including UTF-16 surrogate boundaries.
+  ctx.replyChunks = output.split('');
+  const { text } = await post(undefined, '不是，我的意思是一次发一张，多发几次');
+  const events = text.split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)));
+  const completed = events.find((event) => event.type === 'done')?.message;
+  expect(completed?.replyParts).toEqual([
+    { type: 'text', text: '懂了，一张一张来。🍵' },
+    { type: 'sticker', sticker: 'wave9' },
+    { type: 'text', text: '再来个猫猫探头。' },
+    { type: 'sticker', sticker: 'wave12' }
+  ]);
+  expect(text).not.toMatch(/STICKER:|MESSAGE_BREAK/);
+  const saved = assistantRows()[0];
+  expect(saved?.replyPresentation.stickers).toEqual(['wave9', 'wave12']);
+  expect(saved?.replyPresentation.stickerOffsets).toHaveLength(2);
+  const { publicMessage } = await import('@/lib/chats');
+  expect(publicMessage({ ...saved, createdAt: new Date() } as never).replyParts).toEqual(completed.replyParts);
+  expect(ctx.modelCalls).toBe(1);
+
+  ctx.historical = [{ ...saved, createdAt: new Date() }];
+  ctx.replyChunks = ['不客气。'];
+  await post(undefined, '这两张好玩，继续');
+  expect(ctx.outbound[1]?.find((message) => message.role === 'assistant')?.content)
+    .toContain('（历史配图：给你递茶、猫猫探头）');
+});
+
+it('supports image-only messages without empty bubbles or placeholder text', async () => {
+  ctx.expressive = true;
+  ctx.replyChunks = ['[[STICKER:requested:hug]]\n[[MESSAGE_BREAK]]\n[[STICKER:requested:thanks5]]'];
+  const { text } = await post(undefined, '只发两张图，一张一条');
+  const events = text.split('\n').filter((line) => line.startsWith('data: ')).map((line) => JSON.parse(line.slice(6)));
+  expect(events.find((event) => event.type === 'done')?.message).toMatchObject({
+    content: '', replyParts: [{ type: 'sticker', sticker: 'hug' }, { type: 'sticker', sticker: 'thanks5' }]
+  });
+  expect(text).not.toContain('模型没有返回文本');
+});
+
+it('falls back to the saved images if stored image positions are invalid', async () => {
+  ctx.expressive = true;
+  ctx.replyChunks = ['好。\n[[STICKER:requested:hug,wave]]'];
+  await post();
+  const { publicMessage } = await import('@/lib/chats');
+  const saved = assistantRows()[0];
+  for (const offsets of [[-1, 2], [1.5, 2], [2, 1], [0], [0, 9999], ['0', 2]]) {
+    const result = publicMessage({ ...saved, createdAt: new Date(), replyPresentation: { stickers: ['hug', 'wave'], stickerOffsets: offsets } } as never);
+    expect(result.replyParts).toBeUndefined();
+    expect(result.stickers).toEqual(['hug', 'wave']);
+    expect(result.content).toBe('好。\n');
+  }
 });
 
 /**

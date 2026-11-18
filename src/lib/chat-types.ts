@@ -19,6 +19,10 @@ export interface AttachmentDto {
   createdAt: string;
 }
 
+export type ChatReplyPart =
+  | { type: 'text'; text: string }
+  | { type: 'sticker'; sticker: import('./chat-stickers').ChatSticker };
+
 export interface ChatMessageDto {
   id: string;
   role: 'USER' | 'ASSISTANT' | 'SYSTEM';
@@ -30,6 +34,7 @@ export interface ChatMessageDto {
   sticker?: import('./chat-stickers').ChatSticker;
   stickers?: import('./chat-stickers').ChatSticker[];
   segments?: string[];
+  replyParts?: ChatReplyPart[];
   attachments: AttachmentDto[];
   createdAt: string;
 }

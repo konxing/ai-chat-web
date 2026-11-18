@@ -36,10 +36,16 @@ export class DialogueReplyText {
   }
 
   finish() {
+    this.checkpoint();
+    this.splitPending = false;
+  }
+
+  /** Flush text before an image, keeping a pending bubble boundary for later text. */
+  checkpoint(): number {
     // A line containing only a trailing boundary does not make an empty bubble.
     if (!this.pending.startsWith('\n[[MESSAGE_')) this.append(this.pending);
     this.pending = '';
-    this.splitPending = false;
+    return this.content.length;
   }
 
   append(text: string) {

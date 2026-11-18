@@ -71,6 +71,7 @@ import type {
   AttachmentDto,
   ChatDetailDto,
   ChatMessageDto,
+  ChatReplyPart,
   ChatSettings,
   ChatSummaryDto,
   ChatUser,
@@ -737,7 +738,8 @@ export function ChatWorkspace({
               if (savedAssistant && savedUser) {
                 // 服务端已经把落库后的两条消息发过来，直接接上，省掉结尾那两次刷新。
                 applied = true;
-                if ((savedAssistant.stickers?.length ?? 0) > 1) setNewStickerReply(savedAssistant.id);
+                if (savedAssistant.replyParts?.some((part) => part.type === 'sticker') ||
+                    (savedAssistant.stickers?.length ?? 0) > 1) setNewStickerReply(savedAssistant.id);
                 const providerId = event.providerId;
                 const providerName = event.providerName;
                 const modelId = event.modelId;
@@ -1724,8 +1726,14 @@ const MessageBubble = memo(function MessageBubble({
             {copied ? <Check className="h-3 w-3 text-aurora-300" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
-        <ReplyText segments={message.segments ?? [message.content]} />
-        <ReplyStickers stickers={message.stickers ?? (message.sticker ? [message.sticker] : [])} animate={animateStickers} />
+        {message.replyParts?.length ? (
+          <ReplyParts parts={message.replyParts} animate={animateStickers} />
+        ) : (
+          <>
+            <ReplyText segments={message.segments ?? [message.content]} />
+            <ReplyStickers stickers={message.stickers ?? (message.sticker ? [message.sticker] : [])} animate={animateStickers} />
+          </>
+        )}
         {citationIds?.length ? <CitationNote ids={citationIds} getSource={getCitationSource} /> : null}
         {(message.inputTokens || message.outputTokens) && (
           <div className="mt-2 text-[10px] text-white/15">
@@ -1736,6 +1744,31 @@ const MessageBubble = memo(function MessageBubble({
     </div>
   );
 });
+
+function ReplyParts({ parts, animate }: { parts: readonly ChatReplyPart[]; animate?: boolean }) {
+  return (
+    <ol aria-label="按顺序发送的回复" className="flex min-w-0 flex-col items-start gap-2">
+      {parts.map((part, index) => (
+        part.type === 'text' ? (
+          <li
+            key={index}
+            className="max-w-full rounded-2xl rounded-tl-md border border-white/10 bg-[#17212d] px-3.5 py-2.5 sm:px-4"
+          >
+            <Markdown>{part.text}</Markdown>
+          </li>
+        ) : (
+          <li
+            key={index}
+            className={animate ? 'chat-turn-enter' : undefined}
+            style={animate ? { animationDelay: `${index * 120}ms` } : undefined}
+          >
+            <MessageSticker id={part.sticker} />
+          </li>
+        )
+      ))}
+    </ol>
+  );
+}
 
 function ReplyText({ segments }: { segments: readonly string[] }) {
   if (segments.length < 2) return segments[0] ? <Markdown>{segments[0]}</Markdown> : null;
