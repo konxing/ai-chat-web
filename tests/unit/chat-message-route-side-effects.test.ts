@@ -46,6 +46,7 @@ const ctx = vi.hoisted(() => ({
   releaseTask: null as null | (() => void),
   modelCalls: 0,
   replyChunks: ['正常回答'],
+  reviewChunks: null as string[] | null,
   expressive: false,
   historical: [] as Array<Record<string, any>>,
   abortRequest: null as null | (() => void),
@@ -267,7 +268,11 @@ vi.mock('@/lib/prisma', async () => {
 vi.mock('@/lib/ai', async () => {
   const { ApiError } = await import('@/lib/http');
 
-  async function* events(signal?: AbortSignal) {
+  async function* events(signal?: AbortSignal, review = false) {
+    if (review && ctx.reviewChunks) {
+      for (const text of ctx.reviewChunks) yield { type: 'delta', text };
+      return;
+    }
     if (ctx.behavior === 'throw') {
       throw new ApiError(502, 'AI_PROVIDER_ERROR', '模型服务暂时不可用');
     }
@@ -299,7 +304,8 @@ vi.mock('@/lib/ai', async () => {
       // 就被留在这里。证明的是「出站上下文数组」，不是「HTTP 请求体的字节」——
       // 后者要真库 + 真模型服务，tests/mock-ai.mjs 也不落盘请求体。
       ctx.outbound.push(input.messages);
-      return events(input.signal);
+      const review = input.messages.some((message) => typeof message.content === 'string' && message.content.includes('表情包发送核对器'));
+      return events(input.signal, review);
     },
     transcribeAudio: () => Promise.resolve({ text: '' })
   };
@@ -351,6 +357,7 @@ beforeEach(() => {
   ctx.releaseTask = null;
   ctx.modelCalls = 0;
   ctx.replyChunks = ['正常回答'];
+  ctx.reviewChunks = null;
   ctx.expressive = false;
   ctx.historical = [];
   ctx.abortRequest = null;
@@ -569,6 +576,44 @@ it('keeps reply bubbles and sticker bursts disabled independently of model outpu
   expect(assistantRows()[0]?.replyPresentation).toBeUndefined();
   const { decryptMessage } = await import('@/lib/chats');
   expect(decryptMessage(assistantRows()[0] as never).trim()).toBe('前一段。\n\n后一段。');
+});
+
+it('recovers a real inventory image instead of saving the screenshot’s unfulfilled image claims', async () => {
+  ctx.replyChunks = ['哭笑的来了，管够。\n笑出眼泪那张，经典款。\n再来一个，乐到不行。'];
+  ctx.reviewChunks = ['{"action":"send","stickers":["notoTearsOfJoy"],"reply":"这张笑到停不下来。"}'];
+  const { text } = await post(undefined, '发些别的，比如笑哭');
+  expect(text).toContain('"sticker":"notoTearsOfJoy"');
+  expect(ctx.modelCalls).toBe(2);
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never)).toBe('这张笑到停不下来。');
+  expect(ctx.outbound[1]?.some((message) => typeof message.content === 'string' && message.content.includes('notoTearsOfJoy'))).toBe(true);
+});
+
+it('explains a missing requested image instead of silently substituting or inventing it', async () => {
+  ctx.replyChunks = ['给你一张不存在的紫色飞龙。\n[[STICKER:requested:inventedDragon]]'];
+  ctx.reviewChunks = ['{"action":"unavailable","stickers":[],"reply":"没有这张。"}'];
+  const { text } = await post(undefined, '发一张紫色飞龙骑车的表情包');
+  expect(text).not.toContain('"sticker":');
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never)).toContain('暂时发不了');
+});
+
+it('rejects a recovery model’s invented choice and records the delivery failure honestly', async () => {
+  ctx.replyChunks = ['笑哭的来了。'];
+  ctx.reviewChunks = ['{"action":"send","stickers":["invented"],"reply":"给你。"}'];
+  const { text } = await post(undefined, '发个笑哭表情包');
+  expect(text).not.toContain('"sticker":');
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never)).toContain('暂时发不了');
+});
+
+it('keeps discussions about sticker code as text when the model says no image was requested', async () => {
+  ctx.replyChunks = ['可以通过标签和图片编号建立映射。'];
+  ctx.reviewChunks = ['{"action":"none","stickers":[],"reply":""}'];
+  const { text } = await post(undefined, '表情包功能怎么写代码？不要给我发图');
+  expect(text).not.toContain('"sticker":');
+  const { decryptMessage } = await import('@/lib/chats');
+  expect(decryptMessage(assistantRows()[0] as never)).toBe('可以通过标签和图片编号建立映射。');
 });
 
 it('keeps each image beside its text when the model sends stickers one at a time', async () => {

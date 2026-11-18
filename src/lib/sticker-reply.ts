@@ -29,6 +29,14 @@ function stickerCatalog(context: string) {
 
 type PersonalChoice = Pick<PersonalStickerDto, 'id' | 'label'>;
 
+/** Only opaque aliases and labels are exposed, never private image URLs or IDs. */
+export function availableStickerChoices(personalChoices: readonly PersonalChoice[] = []) {
+  return new Map<string, { id: ChatSticker; label: string }>([
+    ...BUILT_INS.map(([id, sticker]) => [id, { id: id as ChatSticker, label: sticker.alt }] as const),
+    ...personalChoices.map(({ id, label }, index) => [personalAlias(index), { id, label }] as const)
+  ]);
+}
+
 function personalAlias(index: number) {
   return `personal${index + 1}`;
 }
@@ -43,6 +51,7 @@ export function stickerReplyPrompt(
     '【表情包】AI Chat 可以随回复发送本地表情包。由你根据当前对话、角色和你刚写完的回复决定要不要发，以及选哪张。',
     '默认只回文字。偶尔在确实值得庆祝、自然接梗等时刻，选一张能接住语气的图。严肃话题和对方不想要时只回文字。',
     '用户用日常说法请你发图时也可以选一张合适的；点名了就尽量匹配。直接接话，不必解释图片发送能力，不用颜文字或链接代替贴纸。',
+    '只能选择本轮候选里真实存在的图片编号。没有用户要的图片时，简短说明“图库里还没有这张，暂时发不了”；可以询问是否换成现有表情，但不擅自用别的图、文字描述或颜文字冒充。不要虚构图片、标签或编号。',
     '历史回复里附带的配图记录只用于理解上下文。当前正文不复述记录、不宣布已经发送；选中的图片由网站显示。',
     inCooldown ? '最近已经发过一张。除非用户确实在请求表情包（也包括明确承接正在进行的表情包请求），否则这轮省略标记。' : '',
     '图片必须用实际选择标记发出：另起一行写 [[STICKER:auto:编号]]；回应用户的请求（包括承接前文的“继续”“一张一张来”）用 [[STICKER:requested:编号]]。例如发抱抱写 [[STICKER:requested:hug]]。只说“这张给你”不会发送图片；不发就省略标记。',
@@ -64,6 +73,7 @@ export class StickerReply {
   private pending = '';
   private stickers: ChatSticker[] = [];
   private markerCount = 0;
+  selectionAttempted = false;
   private events?: StickerReplyEvent[];
 
   private readonly personalIds: Map<string, ChatSticker>;
@@ -115,6 +125,7 @@ export class StickerReply {
       visible += this.emit(this.pending.slice(0, start));
       this.pending = this.pending.slice(start);
       const isSelection = prefix === PREFIX;
+      if (isSelection || prefix === LEGACY_PREFIX) this.selectionAttempted = true;
       const suffix = isSelection ? SUFFIX : LEGACY_SUFFIX;
       const end = this.pending.indexOf(suffix, prefix.length);
       const newline = this.pending.indexOf('\n', prefix.length);

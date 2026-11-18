@@ -25,6 +25,7 @@ import { streamChatCompletion } from '@/lib/ai';
 import { supportsDeepSeekWeb } from '@/lib/deepseek-web';
 import { getReasoningOptions } from '@/lib/provider-reasoning';
 import { StickerReply } from '@/lib/sticker-reply';
+import { recoverStickerSelection } from '@/lib/sticker-selection';
 import { DialogueReplyText } from '@/lib/dialogue-reply';
 import { log } from '@/lib/logger';
 import { writeAudit } from '@/lib/audit';
@@ -214,24 +215,31 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
           }
         }
 
-        const { text, sticker, stickers } = stickerReply.finish();
+        const { text, sticker: originalSticker, stickers: originalStickers } = stickerReply.finish();
         reply.push(text);
         reply.finish();
-        if (reply.content.trim() && webCitations.length) {
+        const recovered = !originalSticker ? await recoverStickerSelection({
+          provider, messages, current: body.content, reply: reply.content,
+          personalChoices: personalStickerChoices, expressive, attempted: stickerReply.selectionAttempted
+        }) : null;
+        const sticker = recovered?.stickers[0] ?? originalSticker;
+        const stickers = recovered ? expressive && recovered.stickers.length ? recovered.stickers : undefined : originalStickers;
+        if (!recovered && reply.content.trim() && webCitations.length) {
           reply.append(`\n\n**来源**\n${webCitations.map((url) => `- <${url}>`).join('\n')}`);
         }
+        const finalContent = recovered ? recovered.reply : reply.content;
         const saved = await saveAssistantMessage({
           chatId,
-          content: reply.content.trim() ? reply.content : sticker ? '' : '（模型没有返回文本）',
+          content: finalContent.trim() ? finalContent : sticker ? '' : '（模型没有返回文本）',
           providerId: provider.id,
           modelId: provider.modelId,
           status: 'COMPLETE',
           sticker,
           stickers,
           stickerOffsets: expressive && stickers?.length
-            ? reply.content.trim() ? stickerOffsets : stickerOffsets.map(() => 0)
+            ? recovered ? stickers.map(() => finalContent.length) : reply.content.trim() ? stickerOffsets : stickerOffsets.map(() => 0)
             : undefined,
-          segmentOffsets: reply.segmentOffsets,
+          segmentOffsets: recovered ? [] : reply.segmentOffsets,
           inputTokens,
           outputTokens
         });
@@ -273,7 +281,7 @@ async function handleChatPost(req: Request, ctx: { params: Promise<{ id: string 
         // 对话智能层 Phase 6：从用户这轮的明确表达反馈学习长期风格（仅 GLOBAL 持久化）。
         // 异步、不阻塞、失败静默；开关关着时一次都不跑。
         if (await conversationLayerEnabled().catch(() => false)) {
-          void learnConversationPreference(user.id, reply.content).catch(() => undefined);
+          void learnConversationPreference(user.id, finalContent).catch(() => undefined);
         }
       } catch (err) {
         reply.push(stickerReply.finish().text);
