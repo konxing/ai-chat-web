@@ -136,7 +136,7 @@
 
 - `core/conversation-policy.ts`：全局交流原则 + 14 条语言规则（降低模板化，不禁止句式）。
 - `mode/`：八模式定义 + 规则式检测器（当前会话明确要求优先；零 LLM 调用；允许多模式共存）。
-- `planning/`：Response Planner 轻量策略（九策略组合），产出内部 plan，不展示、不额外调用模型。
+- `planning/`：规则策略选择，以及可选的 AI 回应规划。AI 使用当前模型核对默认动作，可基于近期对话原文补充一条本轮提示。
 - `style/`：用户表达偏好（按用户隔离存 SystemConfig）+ 示例对话库（每轮只注入当前模式 ≤2 条）。
 - `knowledge/`：跨领域/因果/多视角/整合 + 证据约束（不编造引用），只在该深入的模式注入。
 - `learning/`：只学明确表达反馈（GLOBAL 持久化、TEMPORARY 不写库），不凭点赞/次数推断。
@@ -144,7 +144,7 @@
 - `prompts/`：Prompt Builder（优先级组合+字符预算）+ 版本化（候选须评测才激活、可回滚）。
 
 提示词优先级：系统安全/事实 > 全局原则 > 用户风格 > 模式 > 知识 > 规划 > 示例 > 个人记忆 > 历史。
-成本控制：默认单次生成；模式/规划/质量全为程序规则；对话块字符预算 1600，示例超预算先裁剪。
+成本控制：默认单次生成。AI 回应规划只在有近期文字对话时运行，最多等待 2 秒。基础对话块预算 1600 字符，规划提示预算 200 字符。
 评测：`scripts/conversation-eval/`（100 单轮+20 多轮固定集、匿名成对盲测、LLM-as-judge、token 统计）。
 实测对强模型（deepseek）该层无显著增益，故默认关；价值在模板化重的弱模型。详见 docs/CONVERSATION_LAYER.md 与 CONVERSATION_EVAL_REPORT.md。
 | `src/lib/cognitive/memory-consolidator.ts` | 后台巩固（Phase 3，默认关）：同 type+context 高相似度冗余记忆聚簇，最新为主、其余可逆归档 + PART_OF 证据边 |

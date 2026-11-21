@@ -379,38 +379,88 @@ beforeEach(() => {
   resetCognitiveTables();
 });
 
+async function setPriorReply() {
+  const { encryptMessage } = await import('@/lib/chats');
+  ctx.historical = [{
+    id: 'previous-assistant', role: 'ASSISTANT', status: 'COMPLETE', createdAt: new Date('2026-01-01T00:00:30.000Z'),
+    contentCiphertext: encryptMessage('我们可以从背景说起。', 'previous-assistant')
+  }];
+}
+
 it('applies AI planning only when both switches are on and streams only the final answer', async () => {
   const current = '刚开完会，这次只想听结论。';
+  await setPriorReply();
   ctx.planningEnabled = true;
   await post(undefined, current);
   expect(ctx.modelCalls).toBe(1);
 
   ctx.layerEnabled = true;
-  ctx.planningReply = JSON.stringify({ focus: '会议结论', approach: '先给简短结论', missing: '', preferences: ['structure'] });
+  ctx.planningReply = JSON.stringify({ action: 'adjust', evidence: '这次只想听结论', hint: '先给简短结论' });
   const { text } = await post(undefined, current);
   expect(ctx.modelCalls).toBe(3);
   const planning = toOutboundTexts(ctx.outbound[1]).map((message) => message.text).join('\n');
   expect(planning).toContain(current);
   expect(planning).toContain('"structure":"minimal"');
+  expect(planning).toContain('"defaultAction":');
   expect(planning).not.toContain('历史配图');
   const answer = toOutboundTexts(ctx.outbound[2]).map((message) => message.text).join('\n');
   expect(answer).toContain('先给简短结论');
   expect(answer).toContain('尽量用连贯段落交流');
-  expect(answer).not.toContain('可以充分展开');
+  expect(answer).toContain('可以充分展开');
   expect(answer).toContain(current);
   expect(text).toContain('正常回答');
   expect(text).not.toContain('先给简短结论');
 });
 
-it('reuses the existing rules when the planning model returns an unknown preference', async () => {
+it.each([
+  { action: 'keep' },
+  { action: 'keep', hint: '额外字段拒绝' },
+  { action: 'adjust', evidence: '前文没有这句', hint: '无依据的建议' }
+])('sends the original rules and history when no validated hint is provided (%j)', async (reply) => {
   const prompt = '请详细解释数据库事务。';
+  await setPriorReply();
   ctx.layerEnabled = true;
   await post(undefined, prompt);
   ctx.planningEnabled = true;
-  ctx.planningReply = '{"focus":"","approach":"DO NOT SEND","missing":"","preferences":["another-user"]}';
+  ctx.planningReply = JSON.stringify(reply);
   await post(undefined, prompt);
   expect(ctx.modelCalls).toBe(3);
   expect(ctx.outbound[2]).toEqual(ctx.outbound[0]);
+});
+
+it('keeps all baseline system guidance when adding an AI hint', async () => {
+  const prompt = '请详细解释数据库事务。';
+  await setPriorReply();
+  ctx.layerEnabled = true;
+  await post(undefined, prompt);
+  ctx.planningEnabled = true;
+  ctx.planningReply = JSON.stringify({ action: 'adjust', evidence: '数据库事务', hint: '分清隔离与原子性。' });
+  await post(undefined, prompt);
+  expect(ctx.modelCalls).toBe(3);
+  const before = toOutboundTexts(ctx.outbound[0]);
+  const after = toOutboundTexts(ctx.outbound[2]);
+  expect(after.map(({ text }) => text.split('\n\n【本轮语境提示】')[0])).toEqual(before.map(({ text }) => text));
+  expect(after.some(({ text }) => text.includes('分清隔离与原子性。'))).toBe(true);
+});
+
+it('adds the output boundary when the user explicitly asks for a single deliverable', async () => {
+  await setPriorReply();
+  ctx.layerEnabled = true;
+  ctx.planningEnabled = true;
+  ctx.planningReply = JSON.stringify({ action: 'adjust', evidence: '提醒同事周四不在', hint: '只需要一条告知', outputOnlyQuote: '只给我一句话' });
+  await post(undefined, '提醒同事周四不在，只给我一句话。');
+  const after = toOutboundTexts(ctx.outbound[1]).map(({ text }) => text).join('\n');
+  expect(after).toContain('直接给成品即可');
+});
+
+it('sends only the ordinary chat request for the first message in a conversation', async () => {
+  const current = '把“这个日期还没确定”翻成英文。';
+  ctx.layerEnabled = true;
+  await post(undefined, current);
+  ctx.planningEnabled = true;
+  await post(undefined, current);
+  expect(ctx.modelCalls).toBe(2);
+  expect(ctx.outbound[1]).toEqual(ctx.outbound[0]);
 });
 
 describe('本轮失败时的落库与审计', () => {

@@ -10,8 +10,10 @@ import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
 import { buildConversationState, renderStateBrief, type ConversationState } from '../state/conversation-state';
 import { selectResponseAct, ACT_TEXT, type ActSelection } from '../planning/response-act';
-import { DEFAULT_CONVERSATION_STYLE, renderGlobalPolicy, renderOptionalStyle, type ConversationStyle } from './conversation-policy';
+import { DEFAULT_CONVERSATION_STYLE, type ConversationStyle } from './conversation-policy';
 import { getAiReplyPlan, type ReplyPlanningResult } from '../planning/ai-reply-plan';
+
+const PLANNING_HINT_BUDGET = 200;
 
 /**
  * 对话智能层入口。组合全局原则 + 用户风格 + 生效版本 + 模式(辅助) + 话语行为/交流状态/回应动作。
@@ -28,7 +30,7 @@ export interface ConversationIntelligence {
   act: ActSelection;
   /** A.3：v2 示例引用诊断（是否选中/原因/字符数/是否裁剪）；legacy 为 null。 */
   exampleDiagnostics: ExampleDiagnostics | null;
-  aiPlanning?: Omit<ReplyPlanningResult, 'plan'>;
+  aiPlanning?: Omit<ReplyPlanningResult, 'hint' | 'outputOnly'>;
 }
 
 export async function buildConversationIntelligence(input: {
@@ -94,30 +96,31 @@ export async function buildConversationIntelligence(input: {
   });
   const result = { block: rulesBlock, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act, exampleDiagnostics };
   if (!input.planningProvider) return result;
+  if (!rulesBlock.parts.some((part) => part.name === 'plan')) return { ...result, aiPlanning: { status: 'skipped' } };
   const planning = await getAiReplyPlan({
     provider: input.planningProvider,
     currentContent: content,
     recent: input.recent ?? [],
     style: effectiveStyle,
-    constraints: state.activeConstraints.map((constraint) => constraint.content)
+    defaultAction: actText
   });
   const aiPlanning = { status: planning.status, inputTokens: planning.inputTokens, outputTokens: planning.outputTokens };
   if (planning.status !== 'applied') return { ...result, aiPlanning };
-  const { focus, approach, missing, preferences } = planning.plan;
-  // The answer sees the original conversation, and can disregard a bad interpretation.
-  const selectedStyle = version?.content?.trim() ? renderOptionalStyle(effectiveStyle, preferences).join('\n') : '';
-  const plannedBlock = buildConversationPrompt({
-    style: effectiveStyle,
-    versionContent: version?.content?.trim() || renderGlobalPolicy(effectiveStyle, preferences),
-    planText: [
-      '【本轮回应建议】下面是对话规划，仅供参考。以用户原话和确切上下文为准。只有确实缺少关键条件才问。',
-      JSON.stringify({ focus, approach, missing }),
-      selectedStyle
-    ].filter(Boolean).join('\n')
-  });
-  // A long administrator-authored policy can consume the full prompt budget.
-  if (!plannedBlock.parts.some((part) => part.name === 'plan')) {
+  // Give the hint its own budget so it cannot displace existing guidance or examples.
+  const hint = '【本轮语境提示】据原话核对本轮范围，契合时据此调整回应动作。\n' +
+    JSON.stringify(planning.hint) +
+    (planning.outputOnly ? '\n若用户确实只要成品，直接给成品即可，省去说明和额外版本。' : '');
+  const text = `${rulesBlock.text}\n\n${hint}`;
+  const budget = rulesBlock.budget + PLANNING_HINT_BUDGET;
+  if (hint.length + 2 > PLANNING_HINT_BUDGET || text.length > budget) {
     return { ...result, aiPlanning: { ...aiPlanning, status: 'invalid' } };
   }
-  return { ...result, block: plannedBlock, aiPlanning };
+  const block = {
+    ...rulesBlock,
+    text,
+    budget,
+    usedChars: text.length,
+    parts: [...rulesBlock.parts, { name: 'reply-planning', chars: hint.length }]
+  };
+  return { ...result, block, aiPlanning };
 }

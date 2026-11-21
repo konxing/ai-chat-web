@@ -217,7 +217,7 @@ export function ConversationTab() {
           <div>
             <div className="text-[13px] font-medium text-white/85">AI 回应规划</div>
             <div id="admin-ai-reply-planning-hint" className="mt-0.5 text-xs leading-relaxed text-white/60">
-              对话智能层开启时生效。当前模型先判断怎样接话、采用哪些偏好，每轮多一次短请求，最多等待 2 秒。超时后沿用原有策略。
+              对话智能层开启时生效。模型可用前文补足回应重点，例如接住追问里的指代或纠正。没有前文的消息直接回答。规划最多等待 2 秒，缺少依据或超时时照常回答。
               {!enabled && aiReplyPlanning ? ' 已开启规划，等待对话智能层启用。' : ''}
             </div>
           </div>
