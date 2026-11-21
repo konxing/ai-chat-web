@@ -1,3 +1,4 @@
+import type { AiProvider } from '@prisma/client';
 import { getConversationStyle } from '../style/style-profile';
 import { getActivePromptVersion } from '../prompts/prompt-version';
 import { buildConversationPrompt, type BuiltConversationPrompt } from '../prompts/prompt-builder';
@@ -9,11 +10,12 @@ import { renderKnowledgePolicy } from '../knowledge/knowledge-synthesis';
 import { understandDialogue, type DialogueUnderstanding } from '../understanding/dialogue-act';
 import { buildConversationState, renderStateBrief, type ConversationState } from '../state/conversation-state';
 import { selectResponseAct, ACT_TEXT, type ActSelection } from '../planning/response-act';
-import type { ConversationStyle } from './conversation-policy';
+import { DEFAULT_CONVERSATION_STYLE, renderGlobalPolicy, renderOptionalStyle, type ConversationStyle } from './conversation-policy';
+import { getAiReplyPlan, type ReplyPlanningResult } from '../planning/ai-reply-plan';
 
 /**
  * 对话智能层入口。组合全局原则 + 用户风格 + 生效版本 + 模式(辅助) + 话语行为/交流状态/回应动作。
- * 全规则、零额外模型调用。读失败回落默认，绝不阻断对话。
+ * 规则流程提供默认与回退策略；只在启用 AI 规划时发出额外请求。
  */
 export interface ConversationIntelligence {
   block: BuiltConversationPrompt;
@@ -26,6 +28,7 @@ export interface ConversationIntelligence {
   act: ActSelection;
   /** A.3：v2 示例引用诊断（是否选中/原因/字符数/是否裁剪）；legacy 为 null。 */
   exampleDiagnostics: ExampleDiagnostics | null;
+  aiPlanning?: Omit<ReplyPlanningResult, 'plan'>;
 }
 
 export async function buildConversationIntelligence(input: {
@@ -38,6 +41,7 @@ export async function buildConversationIntelligence(input: {
   providerName?: string;
   /** P4：两臂灰度。legacy=旧规则累加；dialogue-v2=话语行为/状态/回应动作。默认 legacy。 */
   engineVersion?: 'legacy' | 'dialogue-v2';
+  planningProvider?: AiProvider;
 }): Promise<ConversationIntelligence> {
   const content = input.currentContent ?? '';
   const mode = detectConversationMode({ content, recentDeep: input.recentDeep });
@@ -46,7 +50,7 @@ export async function buildConversationIntelligence(input: {
     input.style ?? getConversationStyle(input.userId).catch(() => null),
     getActivePromptVersion({ mode: mode.mode, provider: input.providerName }).catch(() => null)
   ]);
-  const effectiveStyle = style ?? (await import('../core/conversation-policy')).DEFAULT_CONVERSATION_STYLE;
+  const effectiveStyle = style ?? DEFAULT_CONVERSATION_STYLE;
   const state = buildConversationState(input.recent ?? [], content, understanding);
   // A.5：naturalness 传入回应动作选择（低自然度=偏直接），不再只是装饰文本。
   const act = selectResponseAct(understanding, state, content, effectiveStyle.naturalness);
@@ -79,7 +83,7 @@ export async function buildConversationIntelligence(input: {
     : renderExamples(selectExamples(mode.mode, mode.secondary));
   // v1.3：极简对话状态，改善"重复追问/换话题被拉回"；仅 v2 注入。
   const stateText = v2 ? renderStateBrief(state) : null;
-  const block = buildConversationPrompt({
+  const rulesBlock = buildConversationPrompt({
     style: effectiveStyle,
     versionContent: version?.content ?? null,
     modeText: switchingTopic ? null : modeText,
@@ -88,5 +92,32 @@ export async function buildConversationIntelligence(input: {
     stateText,
     examplesText
   });
-  return { block, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act, exampleDiagnostics };
+  const result = { block: rulesBlock, style: effectiveStyle, promptVersion: version?.version ?? null, mode, plan, understanding, state, act, exampleDiagnostics };
+  if (!input.planningProvider) return result;
+  const planning = await getAiReplyPlan({
+    provider: input.planningProvider,
+    currentContent: content,
+    recent: input.recent ?? [],
+    style: effectiveStyle,
+    constraints: state.activeConstraints.map((constraint) => constraint.content)
+  });
+  const aiPlanning = { status: planning.status, inputTokens: planning.inputTokens, outputTokens: planning.outputTokens };
+  if (planning.status !== 'applied') return { ...result, aiPlanning };
+  const { focus, approach, missing, preferences } = planning.plan;
+  // The answer sees the original conversation, and can disregard a bad interpretation.
+  const selectedStyle = version?.content?.trim() ? renderOptionalStyle(effectiveStyle, preferences).join('\n') : '';
+  const plannedBlock = buildConversationPrompt({
+    style: effectiveStyle,
+    versionContent: version?.content?.trim() || renderGlobalPolicy(effectiveStyle, preferences),
+    planText: [
+      '【本轮回应建议】下面是对话规划，仅供参考。以用户原话和确切上下文为准。只有确实缺少关键条件才问。',
+      JSON.stringify({ focus, approach, missing }),
+      selectedStyle
+    ].filter(Boolean).join('\n')
+  });
+  // A long administrator-authored policy can consume the full prompt budget.
+  if (!plannedBlock.parts.some((part) => part.name === 'plan')) {
+    return { ...result, aiPlanning: { ...aiPlanning, status: 'invalid' } };
+  }
+  return { ...result, block: plannedBlock, aiPlanning };
 }

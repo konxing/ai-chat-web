@@ -23,7 +23,7 @@ import type { AiMessage, ChatContentPart } from './ai';
 import { runCognitiveReads, type CognitiveModuleKey } from './cognitive/manager';
 import { ensureCognitiveModules } from './cognitive/memory-module';
 import { buildConversationIntelligence } from './cognitive/conversation/core/conversation-engine';
-import { conversationLayerEnabled, conversationEngineVersionFor, splitDialogueRepliesEnabled } from './cognitive/cognitive-flags';
+import { aiReplyPlanningEnabled, conversationLayerEnabled, conversationEngineVersionFor, splitDialogueRepliesEnabled } from './cognitive/cognitive-flags';
 import { getCognitivePreferences } from './cognitive/preferences';
 import { isTimeRelevant, timeContextLine } from './time-context';
 import { MAX_REPLY_SEGMENTS, MAX_REPLY_STICKERS, orderedReplyParts, type ReplyPart } from './reply-presentation';
@@ -520,14 +520,19 @@ export async function buildConversation(input: {
   // 模块内部有截止时间和错误隔离，认知读不出来就等于这段没加上，对话照旧。
   try {
     if (layerEnabled) {
+      const [engineVersion, planningEnabled] = await Promise.all([
+        conversationEngineVersionFor(input.userId),
+        aiReplyPlanningEnabled()
+      ]);
       const intelligence = await buildConversationIntelligence({
         userId: input.userId,
         style,
         currentContent: input.currentContent,
         providerName: input.provider.name,
-        engineVersion: await conversationEngineVersionFor(input.userId),
+        engineVersion,
+        planningProvider: planningEnabled ? input.provider : undefined,
         // P1：只读最近 ≤6 轮真实消息构建短生命周期状态，不读其他用户历史。
-        recent: trimmed.slice(-6).map((m) => ({
+        recent: trimmed.filter((m) => m.role !== 'SYSTEM').slice(-6).map((m) => ({
           role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),
           content: decryptMessage(m)
         }))

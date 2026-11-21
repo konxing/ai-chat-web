@@ -74,14 +74,27 @@ const LENGTH_TEXT: Record<ConversationStyle['length'], string> = {
 };
 
 /** 渲染全局交流原则文本。只输出与默认不同的维度说明 + 语言规则，控制 token。 */
-export function renderGlobalPolicy(style: ConversationStyle = DEFAULT_CONVERSATION_STYLE): string {
+export const OPTIONAL_STYLE_DIMENSIONS = ['knowledgeDepth', 'structure', 'length'] as const;
+export type OptionalStyleDimension = (typeof OPTIONAL_STYLE_DIMENSIONS)[number];
+
+export function renderOptionalStyle(style: ConversationStyle, selected: readonly OptionalStyleDimension[]): string[] {
+  const text = {
+    knowledgeDepth: DEPTH_TEXT[style.knowledgeDepth],
+    structure: STRUCTURE_TEXT[style.structure],
+    length: LENGTH_TEXT[style.length]
+  };
+  return OPTIONAL_STYLE_DIMENSIONS.filter((key) => selected.includes(key)).map((key) => text[key]);
+}
+
+export function renderGlobalPolicy(
+  style: ConversationStyle = DEFAULT_CONVERSATION_STYLE,
+  selected: readonly OptionalStyleDimension[] = OPTIONAL_STYLE_DIMENSIONS
+): string {
   const lines = [
     '【交流原则】以下是对话风格要求，优先级低于系统安全与事实正确性规则：',
     `默认人格：${DEFAULT_CONVERSATION_PERSONA.name}。${DEFAULT_CONVERSATION_PERSONA.description} 按用户当轮要求和个人风格调整表达。`,
     NATURALNESS_TEXT[style.naturalness],
-    DEPTH_TEXT[style.knowledgeDepth],
-    STRUCTURE_TEXT[style.structure],
-    LENGTH_TEXT[style.length],
+    ...renderOptionalStyle(style, selected),
     style.proactivity === 'high'
       ? '主动识别问题中的隐含假设，适当提出反例、不同观点和进一步解释。'
       : '以回应用户问题为主，不主动扩展过多观点。',

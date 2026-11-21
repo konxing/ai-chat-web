@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 function conversationSettings(settings: SystemSettings) {
   return {
     enabled: settings.conversationLayerEnabled,
+    aiReplyPlanning: settings.aiReplyPlanning,
     engineVersion: settings.conversationEngineVersion,
     autoLearnStyle: settings.autoLearnStyle,
     splitDialogueReplies: settings.splitDialogueReplies
@@ -39,6 +40,7 @@ export async function GET(req: Request) {
 
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
+  aiReplyPlanning: z.boolean().optional(),
   engineVersion: z.enum(['legacy', 'dialogue-v2']).optional(),
   autoLearnStyle: z.boolean().optional(),
   splitDialogueReplies: z.boolean().optional(),
@@ -52,6 +54,7 @@ export async function PATCH(req: Request) {
     await requireOwnerPassword(user.id, body.confirmPassword);
     const patch: Partial<SystemSettings> = {};
     if (body.enabled !== undefined) patch.conversationLayerEnabled = body.enabled;
+    if (body.aiReplyPlanning !== undefined) patch.aiReplyPlanning = body.aiReplyPlanning;
     if (body.engineVersion !== undefined) patch.conversationEngineVersion = body.engineVersion;
     if (body.autoLearnStyle !== undefined) patch.autoLearnStyle = body.autoLearnStyle;
     if (body.splitDialogueReplies !== undefined) patch.splitDialogueReplies = body.splitDialogueReplies;

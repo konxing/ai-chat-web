@@ -148,6 +148,7 @@ export async function* streamChatCompletion(input: {
   timeoutMs?: number;
   reasoningEffort?: string;
   webTool?: DeepSeekWebMode;
+  purpose?: 'reply-planning';
 }): AsyncGenerator<StreamEvent> {
   const { provider } = input;
   if (!capabilitiesOf(provider).includes('text')) {
@@ -155,6 +156,7 @@ export async function* streamChatCompletion(input: {
   }
   const apiKey = decryptProviderKey(provider);
   const target = await resolveProviderTarget(provider.baseUrl);
+  input.signal?.throwIfAborted();
   const url = joinApiPath(provider.baseUrl, '/chat/completions');
   const webTool = input.webTool && supportsDeepSeekWeb(provider) ? input.webTool : undefined;
   const toolGuidance: AiMessage = {
@@ -194,7 +196,7 @@ export async function* streamChatCompletion(input: {
     }
     await safe.close();
     const sanitized = detail.split(apiKey).join('[redacted]');
-    log.warn('ai.provider_error', {
+    if (input.purpose !== 'reply-planning') log.warn('ai.provider_error', {
       providerId: provider.id,
       status: response.status,
       detail: sanitized.slice(0, 300)

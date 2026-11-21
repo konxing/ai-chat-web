@@ -57,6 +57,10 @@ export function splitDialogueRepliesEnabled(): Promise<boolean> {
   return getSystemSetting('splitDialogueReplies').catch(() => false);
 }
 
+export function aiReplyPlanningEnabled(): Promise<boolean> {
+  return getSystemSetting('aiReplyPlanning').catch(() => false);
+}
+
 /**
  * v1.3 C2：自动学习表达偏好单一授权开关。默认关。
  * 开启后，明确长期（GLOBAL）风格要求才自动持久化，且支持自然语言撤销；

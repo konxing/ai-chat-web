@@ -47,6 +47,9 @@ const ctx = vi.hoisted(() => ({
   modelCalls: 0,
   replyChunks: ['正常回答'],
   reviewChunks: null as string[] | null,
+  layerEnabled: false,
+  planningEnabled: false,
+  planningReply: '',
   expressive: false,
   historical: [] as Array<Record<string, any>>,
   abortRequest: null as null | (() => void),
@@ -207,9 +210,13 @@ vi.mock('@/lib/prisma', async () => {
   return {
     prisma: {
       systemConfig: {
-        findUnique: ({ where }: { where: { key: string } }) => Promise.resolve(
-          where.key === 'splitDialogueReplies' ? { value: ctx.expressive } : null
-        )
+        findUnique: ({ where }: { where: { key: string } }) => {
+          if (where.key === 'splitDialogueReplies') return Promise.resolve({ value: ctx.expressive });
+          if (where.key === 'conversationLayerEnabled') return Promise.resolve({ value: ctx.layerEnabled });
+          if (where.key === 'aiReplyPlanning') return Promise.resolve({ value: ctx.planningEnabled });
+          if (where.key === 'conversationStyle:user-1') return Promise.resolve({ value: { length: 'long', structure: 'minimal' } });
+          return Promise.resolve(null);
+        }
       },
       message: messageDelegate,
       chat: chatDelegate,
@@ -298,12 +305,16 @@ vi.mock('@/lib/ai', async () => {
   }
 
   return {
-    streamChatCompletion: (input: { messages: AiMessage[]; signal?: AbortSignal }) => {
+    streamChatCompletion: (input: { messages: AiMessage[]; signal?: AbortSignal; purpose?: string }) => {
       ctx.modelCalls += 1;
       // 这一份 messages 就是路由交给模型的完整上下文：它在 src/lib/ai.ts:126 被塞进请求体之前
       // 就被留在这里。证明的是「出站上下文数组」，不是「HTTP 请求体的字节」——
       // 后者要真库 + 真模型服务，tests/mock-ai.mjs 也不落盘请求体。
       ctx.outbound.push(input.messages);
+      if (input.purpose === 'reply-planning') return (async function* () {
+        yield { type: 'delta', text: ctx.planningReply };
+        yield { type: 'done' };
+      })();
       const review = input.messages.some((message) => typeof message.content === 'string' && message.content.includes('表情包发送核对器'));
       return events(input.signal, review);
     },
@@ -358,11 +369,48 @@ beforeEach(() => {
   ctx.modelCalls = 0;
   ctx.replyChunks = ['正常回答'];
   ctx.reviewChunks = null;
+  ctx.layerEnabled = false;
+  ctx.planningEnabled = false;
+  ctx.planningReply = '';
   ctx.expressive = false;
   ctx.historical = [];
   ctx.abortRequest = null;
   ctx.sawAbortedSignal = null;
   resetCognitiveTables();
+});
+
+it('applies AI planning only when both switches are on and streams only the final answer', async () => {
+  const current = '刚开完会，这次只想听结论。';
+  ctx.planningEnabled = true;
+  await post(undefined, current);
+  expect(ctx.modelCalls).toBe(1);
+
+  ctx.layerEnabled = true;
+  ctx.planningReply = JSON.stringify({ focus: '会议结论', approach: '先给简短结论', missing: '', preferences: ['structure'] });
+  const { text } = await post(undefined, current);
+  expect(ctx.modelCalls).toBe(3);
+  const planning = toOutboundTexts(ctx.outbound[1]).map((message) => message.text).join('\n');
+  expect(planning).toContain(current);
+  expect(planning).toContain('"structure":"minimal"');
+  expect(planning).not.toContain('历史配图');
+  const answer = toOutboundTexts(ctx.outbound[2]).map((message) => message.text).join('\n');
+  expect(answer).toContain('先给简短结论');
+  expect(answer).toContain('尽量用连贯段落交流');
+  expect(answer).not.toContain('可以充分展开');
+  expect(answer).toContain(current);
+  expect(text).toContain('正常回答');
+  expect(text).not.toContain('先给简短结论');
+});
+
+it('reuses the existing rules when the planning model returns an unknown preference', async () => {
+  const prompt = '请详细解释数据库事务。';
+  ctx.layerEnabled = true;
+  await post(undefined, prompt);
+  ctx.planningEnabled = true;
+  ctx.planningReply = '{"focus":"","approach":"DO NOT SEND","missing":"","preferences":["another-user"]}';
+  await post(undefined, prompt);
+  expect(ctx.modelCalls).toBe(3);
+  expect(ctx.outbound[2]).toEqual(ctx.outbound[0]);
 });
 
 describe('本轮失败时的落库与审计', () => {

@@ -27,6 +27,7 @@ export function ConversationTab() {
   const { requestPassword } = useReauth();
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(false);
+  const [aiReplyPlanning, setAiReplyPlanning] = useState(false);
   const [versions, setVersions] = useState<PromptVersion[]>([]);
   const [activeVersion, setActiveVersion] = useState<number | null>(null);
   const [candidate, setCandidate] = useState('');
@@ -39,6 +40,7 @@ export function ConversationTab() {
     try {
       const data = await apiFetch<{
         enabled: boolean;
+        aiReplyPlanning: boolean;
         engineVersion: 'legacy' | 'dialogue-v2';
         autoLearnStyle: boolean;
         splitDialogueReplies: boolean;
@@ -46,6 +48,7 @@ export function ConversationTab() {
         activeVersion: number | null;
       }>('/api/admin/conversation');
       setEnabled(data.enabled);
+      setAiReplyPlanning(data.aiReplyPlanning);
       setEngineVersion(data.engineVersion ?? 'legacy');
       setAutoLearnStyle(data.autoLearnStyle ?? false);
       setSplitDialogueReplies(data.splitDialogueReplies ?? false);
@@ -89,6 +92,24 @@ export function ConversationTab() {
       });
       setEnabled(data.enabled);
       push(data.enabled ? '对话智能层已开启' : '对话智能层已关闭');
+    } catch (err) {
+      push(errorMessage(err), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAiReplyPlanning() {
+    const password = await requestPassword('修改 AI 回应规划需要验证管理员身份。');
+    if (!password) return;
+    setBusy(true);
+    try {
+      const data = await apiFetch<{ aiReplyPlanning: boolean }>('/api/admin/conversation', {
+        method: 'PATCH',
+        json: { aiReplyPlanning: !aiReplyPlanning, confirmPassword: password }
+      });
+      setAiReplyPlanning(data.aiReplyPlanning);
+      push(data.aiReplyPlanning ? '已开启 AI 回应规划' : '已关闭 AI 回应规划');
     } catch (err) {
       push(errorMessage(err), 'error');
     } finally {
@@ -177,7 +198,7 @@ export function ConversationTab() {
         <h2 className="text-[15px] font-semibold text-white">对话智能层</h2>
         <p className="mt-1 text-[12.5px] text-white/40">
           动态交流模式 + 回答策略 + 自然表达 + 知识融合 + 表达偏好学习。默认关；对本身已自然的强模型增益有限，
-          对模板化重的模型更有价值。开启不增加默认模型调用。
+          对模板化重的模型更有价值。
         </p>
         <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
           <div>
@@ -190,6 +211,25 @@ export function ConversationTab() {
             checked={enabled}
             disabled={busy}
             onChange={() => void toggle()}
+          />
+        </label>
+        <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">
+          <div>
+            <div className="text-[13px] font-medium text-white/85">AI 回应规划</div>
+            <div id="admin-ai-reply-planning-hint" className="mt-0.5 text-xs leading-relaxed text-white/60">
+              对话智能层开启时生效。当前模型先判断怎样接话、采用哪些偏好，每轮多一次短请求，最多等待 2 秒。超时后沿用原有策略。
+              {!enabled && aiReplyPlanning ? ' 已开启规划，等待对话智能层启用。' : ''}
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="AI 回应规划"
+            aria-describedby="admin-ai-reply-planning-hint"
+            className="relative mt-1 h-5 w-9 shrink-0 cursor-pointer appearance-none rounded-full bg-white/10 transition before:absolute before:left-0.5 before:top-0.5 before:h-4 before:w-4 before:rounded-full before:bg-white before:transition checked:bg-emerald-400/80 checked:before:translate-x-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-aurora-400 disabled:opacity-50"
+            checked={aiReplyPlanning}
+            disabled={busy}
+            onChange={() => void toggleAiReplyPlanning()}
           />
         </label>
         <label className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3.5">

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/http';
 import { GET, PATCH } from '@/app/api/admin/conversation/route';
-import { splitDialogueRepliesEnabled } from '@/lib/cognitive/cognitive-flags';
+import { aiReplyPlanningEnabled, splitDialogueRepliesEnabled } from '@/lib/cognitive/cognitive-flags';
 
 const settings = vi.hoisted(() => new Map<string, { key: string; value: unknown; updatedById: string | null }>());
 const auth = vi.hoisted(() => ({
@@ -30,11 +30,11 @@ vi.mock('@/lib/cognitive/conversation/prompts/prompt-version', () => ({
 
 const URL = 'http://127.0.0.1:3000/api/admin/conversation';
 
-function changeSwitch(value: unknown) {
+function changeSwitch(value: unknown, key = 'splitDialogueReplies') {
   return PATCH(new Request(URL, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ splitDialogueReplies: value, confirmPassword: 'owner-password' })
+    body: JSON.stringify({ [key]: value, confirmPassword: 'owner-password' })
   }));
 }
 
@@ -75,5 +75,20 @@ describe('conversation reply presentation switch', () => {
   it('falls back to off when the setting is unreadable', async () => {
     findUnique.mockRejectedValueOnce(new Error('configuration unavailable'));
     expect(await splitDialogueRepliesEnabled()).toBe(false);
+  });
+
+  it('defaults AI planning off and allows only an authenticated owner to toggle it independently', async () => {
+    expect(await aiReplyPlanningEnabled()).toBe(false);
+    auth.requireOwner.mockRejectedValueOnce(new ApiError(403, 'FORBIDDEN', '仅超级管理员可执行此操作'));
+    expect((await changeSwitch(true, 'aiReplyPlanning')).status).toBe(403);
+    auth.requireOwnerPassword.mockRejectedValueOnce(new ApiError(403, 'PASSWORD_INVALID', '密码错误'));
+    expect((await changeSwitch(true, 'aiReplyPlanning')).status).toBe(403);
+    expect((await changeSwitch('true', 'aiReplyPlanning')).status).toBe(400);
+    expect(await aiReplyPlanningEnabled()).toBe(false);
+    expect((await changeSwitch(true, 'aiReplyPlanning')).status).toBe(200);
+    expect(await aiReplyPlanningEnabled()).toBe(true);
+    expect(await (await GET(new Request(URL))).json()).toMatchObject({ data: { enabled: false, aiReplyPlanning: true } });
+    expect((await changeSwitch(false, 'aiReplyPlanning')).status).toBe(200);
+    expect(await aiReplyPlanningEnabled()).toBe(false);
   });
 });

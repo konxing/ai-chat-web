@@ -21,6 +21,7 @@ export interface SystemSettings {
   cognitiveContextEnhanced: boolean;
   /** 对话智能层总开关：默认关，打开后才在 system 里注入交流原则/模式/风格块。 */
   conversationLayerEnabled: boolean;
+  aiReplyPlanning: boolean;
   /** 允许模型将回复自然分条，并在合适的场合连发表情包。 */
   splitDialogueReplies: boolean;
   /** P4：对话引擎版本两臂。legacy=旧规则累加；dialogue-v2=话语行为/状态/回应动作。默认 legacy，可灰度。 */
@@ -43,6 +44,7 @@ const DEFAULTS: SystemSettings = {
   cognitiveRetrievalEnhanced: false,
   cognitiveContextEnhanced: true,
   conversationLayerEnabled: false,
+  aiReplyPlanning: false,
   splitDialogueReplies: false,
   conversationEngineVersion: 'legacy',
   autoLearnStyle: false
@@ -61,6 +63,7 @@ const ALLOWED_KEYS = new Set<keyof SystemSettings>([
   'cognitiveRetrievalEnhanced',
   'cognitiveContextEnhanced',
   'conversationLayerEnabled',
+  'aiReplyPlanning',
   'splitDialogueReplies',
   'conversationEngineVersion',
   'autoLearnStyle'
@@ -71,7 +74,7 @@ function coerce<K extends keyof SystemSettings>(key: K, value: unknown): SystemS
   if (key === 'siteName' && (value === '澄境 · Family AI' || value === 'Family AI Chat' || value === 'Interstellar AI')) {
     return DEFAULTS[key];
   }
-  if (key === 'splitDialogueReplies') {
+  if (key === 'splitDialogueReplies' || key === 'aiReplyPlanning') {
     return (value === true) as SystemSettings[K];
   }
   if (
