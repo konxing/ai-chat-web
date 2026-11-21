@@ -10,7 +10,7 @@
   → `streamChatCompletion()`（`src/lib/ai.ts:133`）。流式 SSE 保持不变。
 - System Prompt 现状：`chats.ts:402-411` 一段硬编码字符串（可靠温和助手 + 语言 + Markdown/LaTeX + 文档优先 + 不声称看到未提供文件）。
 - 认知块：`chats.ts:415-424` `runCognitiveReads()` 产出若干 `system` 块，排在历史之前；`citedMemoryIds` 只记真进提示词的记忆 id。
-- 历史窗口：`chats.ts:396-436` 最近 `CONTEXT_MESSAGE_LIMIT` 条、字符预算 40_000，ERROR 行排除、PARTIAL 保留。
+- 历史窗口：`buildConversation()` 为本轮回答组装最近 128 条有效历史消息，再加入本轮消息。历史文本预算为 96,000 字符，超过预算时保留超长消息的首尾并标记省略。如果历史有省略，模型会收到可见范围提示。ERROR 行排除，PARTIAL 保留。
 - Token 统计：`ai.ts:120-127` `parseUsage()` 读 `prompt_tokens/completion_tokens`，messages 路由落库 `inputTokens/outputTokens`。
 - Provider 适配：`capabilitiesOf()` + `providerParams()`（`ai.ts:146-151`），BYOK/平台统一 API 不变。
 - 错误隔离：认知模块有截止时间与失败隔离（`cognitiveFailed`），读不出等于没加，对话照旧。

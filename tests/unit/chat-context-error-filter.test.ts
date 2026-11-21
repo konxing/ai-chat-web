@@ -22,8 +22,8 @@ vi.mock('@/lib/prisma', () => ({
     message: {
       findMany: (args: Record<string, any>) => {
         ctx.queries.push(args);
-        const excluded = args.where?.status?.not;
-        const rows = excluded ? ctx.rows.filter((r) => r.status !== excluded) : ctx.rows;
+        const rows = ctx.rows.filter((row) => row.status !== args.where?.status?.not &&
+          row.role !== args.where?.role?.not && row.id !== args.where?.id?.not);
         const desc = Array.isArray(args.orderBy) ? args.orderBy[0]?.createdAt === 'desc' : args.orderBy?.createdAt === 'desc';
         const ordered = [...rows].sort((a, b) =>
           desc
@@ -134,11 +134,12 @@ describe('失败记录不进模型上下文', () => {
   it('长历史优先保留最近的回复，本轮消息按 ID 仅发送一次', async () => {
     await seed();
     const { encryptMessage } = await import('@/lib/chats');
-    const old = '早期内容'.repeat(11_000);
+    const old = '早期内容'.repeat(29_000);
     ctx.rows[0].contentCiphertext = encryptMessage(old, 'm-1');
     ctx.rows[4].contentCiphertext = encryptMessage('本轮新问题', 'm-5');
     expect(await build('m-5')).toEqual([
-      expect.stringContaining('AI Chat 的对话助手'),
+      expect.stringContaining('本轮历史范围'),
+      expect.stringContaining('中间内容已省略'),
       '第一个回答',
       PARTIAL_TEXT,
       '本轮新问题'

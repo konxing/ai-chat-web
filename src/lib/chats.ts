@@ -218,8 +218,20 @@ export async function getChatOwned(chatId: string, userId: string): Promise<Chat
 /** 打开会话时加载的最近消息条数；更早的消息按需翻页，避免长会话一次性解密整段历史。 */
 const MESSAGE_PAGE_SIZE = 60;
 
-/** 送给模型的历史窗口条数，本轮刚写库的用户消息也在这一窗里。 */
-const CONTEXT_MESSAGE_LIMIT = 40;
+/** 本轮用户消息单独加入，历史窗口留给之前的有效对话。 */
+const CONTEXT_MESSAGE_LIMIT = 128;
+const CONTEXT_CHAR_BUDGET = 96_000;
+const HISTORY_MESSAGE_RESERVE = 256;
+const HISTORY_EXCERPT_MARKER = '\n〔该条消息中间内容已省略〕\n';
+
+function excerptHistoryText(text: string, limit: number): string {
+  const available = limit - HISTORY_EXCERPT_MARKER.length;
+  const head = Math.floor(available / 2);
+  const tail = available - head;
+  // Preserve whole characters when cutting between UTF-16 surrogate pairs.
+  return text.slice(0, head).replace(/[\uD800-\uDBFF]$/, '') + HISTORY_EXCERPT_MARKER +
+    text.slice(-tail).replace(/^[\uDC00-\uDFFF]/, '');
+}
 
 export async function getChatDetail(chatId: string, userId: string): Promise<ChatDetailDto> {
   const chat = await prisma.chat.findFirst({
@@ -457,10 +469,6 @@ export async function buildConversation(input: {
     select: { id: true }
   });
   if (!chat) throw new ApiError(404, 'CHAT_NOT_FOUND', '会话不存在');
-  // 从最近一端取一窗再翻正：以前是 asc take 60 后 slice(-40)，长会话捞到的是最早 60 条，
-  // 送给模型的上下文停在会话开头，还要多搬 20 条密文。
-  // ERROR 行在库里就排除：那是失败时留下的文案，既不该占窗口名额，也不该被
-  // 当成上一轮回答喂回模型。PARTIAL 是真实生成过的内容，保留。
   ensureCognitiveModules();
   const capabilities = capabilitiesOf(input.provider);
   const images = input.attachments.filter((a) => a.kind === 'IMAGE');
@@ -471,11 +479,18 @@ export async function buildConversation(input: {
   if (files.length && !capabilities.includes('files')) {
     throw new ApiError(400, 'MODEL_NO_FILES', '当前模型未启用文件理解能力，请切换模型或移除文件');
   }
-  const [historical, personalStickerChoices, layerEnabled, style, cognitive, expressive, urls] = await Promise.all([
+  const [rows, personalStickerChoices, layerEnabled, style, cognitive, expressive, urls] = await Promise.all([
     prisma.message.findMany({
-      where: { chatId: chat.id, status: { not: 'ERROR' } },
+      where: {
+        chatId: chat.id,
+        role: { not: 'SYSTEM' },
+        status: { not: 'ERROR' },
+        ...(input.currentMessageId ? { id: { not: input.currentMessageId } } : {})
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: CONTEXT_MESSAGE_LIMIT
+      // The lookahead detects omitted history. Calls without an ID may also have a stored copy of the current turn.
+      take: CONTEXT_MESSAGE_LIMIT + (input.currentMessageId ? 1 : 2),
+      select: { id: true, role: true, status: true, contentCiphertext: true, sticker: true, replyPresentation: true }
     }),
     listPersonalStickers(input.userId, true).catch(() => []),
     conversationLayerEnabled().catch(() => false),
@@ -484,9 +499,34 @@ export async function buildConversation(input: {
     splitDialogueRepliesEnabled().catch(() => false),
     images.length ? imageDataUrls(images) : []
   ]);
+  const storedCurrent = !input.currentMessageId && rows[0]?.role === 'USER' &&
+    decryptMessage(rows[0]) === input.currentContent;
+  const start = storedCurrent ? 1 : 0;
+  const historical = rows.slice(start, start + CONTEXT_MESSAGE_LIMIT);
+  let historyIncomplete = rows.length > start + CONTEXT_MESSAGE_LIMIT;
   const stickerInCooldown = historical.filter((message) => message.role === 'ASSISTANT')
     .slice(0, 12).some((message) => isChatSticker(message.sticker));
-  const trimmed = historical.filter((message) => message.id !== input.currentMessageId).reverse();
+  const personalLabels = new Map(personalStickerChoices.map(({ id, label }) => [id, label]));
+  let charBudget = CONTEXT_CHAR_BUDGET;
+  const history = historical.map((message, index) => {
+    const text = decryptMessage(message);
+    const ids = message.role === 'ASSISTANT' && message.status === 'COMPLETE'
+      ? readReplyPresentation(message.replyPresentation).stickers ?? [message.sticker].filter(isChatSticker)
+      : [];
+    const label = ids.map((id) => isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情').join('、');
+    const sticker = label ? `${text ? '\n\n' : ''}（历史配图：${label}）` : '';
+    // Favor verbatim recent messages while leaving room for every older message in the window.
+    const reserved = (historical.length - index - 1) * HISTORY_MESSAGE_RESERVE;
+    const textBudget = charBudget - reserved - sticker.length;
+    const visibleText = text.length > textBudget ? excerptHistoryText(text, textBudget) : text;
+    if (visibleText !== text) historyIncomplete = true;
+    const content = visibleText + sticker;
+    charBudget -= content.length;
+    return { role: message.role === 'USER' ? 'user' as const : 'assistant' as const, content, text: visibleText };
+  }).reverse();
+  const historyScope = historyIncomplete
+    ? '\n\n【本轮历史范围】你当前只能看到部分聊天记录，较早消息或长消息的部分内容未提供。可见记录里有依据就直接回答；找不到旧细节时，说明「我在目前能看到的记录里找不到，暂时无法确认」。不要因此断言用户从未说过，也不要声称已回看整场聊天。'
+    : '';
   const messages: AiMessage[] = [
     {
       role: 'system',
@@ -496,18 +536,19 @@ export async function buildConversation(input: {
         '如果提供了文档摘录，请优先依据文档内容回答，并明确说明不确定之处。' +
         '不要声称自己看到了未提供的图片或文件。' +
         '用户纠正你时，用新信息继续回答。追问直接承接前文，只讲这次的新内容。闲聊时从确实说过的细节接话，别补写没说过的经过；只是分享时，一两句话接住也可以。' +
+        historyScope +
         '\n\n' + stickerReplyPrompt(stickerInCooldown, personalStickerChoices,
-          [...trimmed.slice(-4).map((message) => decryptMessage(message).slice(-1000)), input.currentContent].join('\n'), expressive)
+          [...history.slice(-4).map(({ text }) => text.slice(-1000)), input.currentContent].join('\n'), expressive)
     }
   ];
 
   // 选择性时间上下文：只有当前/最近用户话语涉及时钟/日历才注入当前本地时间；
   // 与时间无关不传，避免占上下文与模型主动报时。读偏好失败回落 UTC+0，不阻断对话。
   try {
-    const recentUserTexts = trimmed
-      .filter((m) => m.role === 'USER')
+    const recentUserTexts = history
+      .filter((m) => m.role === 'user')
       .slice(-2)
-      .map((m) => decryptMessage(m));
+      .map(({ text }) => text);
     if (isTimeRelevant([input.currentContent, ...recentUserTexts])) {
       const prefs = await getCognitivePreferences(input.userId).catch(() => null);
       messages.push({ role: 'system', content: timeContextLine(prefs?.timezoneOffsetMinutes ?? null) });
@@ -531,11 +572,8 @@ export async function buildConversation(input: {
         providerName: input.provider.name,
         engineVersion,
         planningProvider: planningEnabled ? input.provider : undefined,
-        // P1：只读最近 ≤6 轮真实消息构建短生命周期状态，不读其他用户历史。
-        recent: trimmed.filter((m) => m.role !== 'SYSTEM').slice(-6).map((m) => ({
-          role: m.role === 'USER' ? ('user' as const) : ('assistant' as const),
-          content: decryptMessage(m)
-        }))
+        // The planner uses a few recent messages. The answer receives the entire selected window.
+        recent: history.slice(-6).map(({ role, text }) => ({ role, content: text }))
       });
       if (intelligence.block.text) messages.push({ role: 'system', content: intelligence.block.text });
     }
@@ -554,33 +592,7 @@ export async function buildConversation(input: {
   // 去重保序——同一个 id 只会来自一个块，但模块将来不止一个，这里不该靠这个假设。
   const citedMemoryIds = [...new Set(cognitive.blocks.flatMap((block) => block.memoryIds ?? []))];
 
-  let charBudget = 40_000;
-  const personalLabels = new Map(personalStickerChoices.map(({ id, label }) => [id, label]));
-  const history: AiMessage[] = [];
-  for (const message of historical) {
-    if (message.role === 'SYSTEM' || message.id === input.currentMessageId) continue;
-    const text = decryptMessage(message);
-    const ids = message.role === 'ASSISTANT' && message.status === 'COMPLETE'
-      ? readReplyPresentation(message.replyPresentation).stickers ?? [message.sticker].filter(isChatSticker)
-      : [];
-    const label = ids.map((id) => isBuiltInSticker(id) ? CHAT_STICKERS[id].alt : personalLabels.get(id) ?? '自定义表情').join('、');
-    const sticker = label ? `（历史配图：${label}）` : '';
-    const content = sticker && text ? `${text}\n\n${sticker}` : sticker || text;
-    if (content.length > charBudget) {
-      if (!history.length) history.push({
-        role: message.role === 'USER' ? 'user' : 'assistant',
-        content: content.slice(-charBudget)
-      });
-      break;
-    }
-    charBudget -= content.length;
-    history.push({
-      role: message.role === 'USER' ? 'user' : 'assistant',
-      content
-    });
-  }
-  messages.push(...history.reverse());
-
+  messages.push(...history.map(({ role, content }) => ({ role, content })));
 
   let attachmentBlock = '';
   if (files.length) {
@@ -593,12 +605,7 @@ export async function buildConversation(input: {
   const parts: ChatContentPart[] = [{ type: 'text', text: currentText || '（用户上传了附件）' }];
   for (const url of urls) parts.push({ type: 'image_url', image_url: { url } });
 
-  const last = messages[messages.length - 1];
-  if (!input.currentMessageId && last && last.role === 'user' && last.content === input.currentContent) {
-    messages[messages.length - 1] = { role: 'user', content: parts };
-  } else {
-    messages.push({ role: 'user', content: parts });
-  }
+  messages.push({ role: 'user', content: parts });
   // failed 一起交回：对话照旧跑完是这一片的既定行为，但「你关了开关」和「开着却挂了」
   // 得留下能追问的区别，所以这个数组不能在这里被扔掉（任务书 8.1 唯一的真洞）。
   return { messages, citedMemoryIds, cognitiveFailed: cognitive.failed, stickerInCooldown, personalStickerChoices, expressive };
